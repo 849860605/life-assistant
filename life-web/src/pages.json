@@ -1,0 +1,48 @@
+{
+	"pages": [
+		{
+			"path": "pages/chat/chat",
+			"style": { "navigationBarTitleText": "生活助手" }
+		},
+		{
+			"path": "pages/login/login",
+			"style": { "navigationStyle": "custom" }
+		},
+		{
+			"path": "pages/trips/trips",
+			"style": { "navigationBarTitleText": "行程" }
+		},
+		{
+			"path": "pages/trips/detail",
+			"style": { "navigationBarTitleText": "行程详情" }
+		},
+		{
+			"path": "pages/schedule/schedule",
+			"style": { "navigationBarTitleText": "日程" }
+		},
+		{
+			"path": "pages/me/me",
+			"style": { "navigationBarTitleText": "我的" }
+		}
+	],
+	"tabBar": {
+		"color": "#66746F",
+		"selectedColor": "#2E6A57",
+		"backgroundColor": "#FFFFFF",
+		"borderStyle": "white",
+		"fontSize": "14px",
+		"height": "52px",
+		"list": [
+			{ "pagePath": "pages/chat/chat", "text": "对话" },
+			{ "pagePath": "pages/trips/trips", "text": "行程" },
+			{ "pagePath": "pages/schedule/schedule", "text": "日程" },
+			{ "pagePath": "pages/me/me", "text": "我的" }
+		]
+	},
+	"globalStyle": {
+		"navigationBarTextStyle": "black",
+		"navigationBarTitleText": "生活助手",
+		"navigationBarBackgroundColor": "#FFFFFF",
+		"backgroundColor": "#F4F6F5"
+	}
+}

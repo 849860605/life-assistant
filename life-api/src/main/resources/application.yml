@@ -1,0 +1,127 @@
+# 密钥类配置都来自环境变量（.env），不要写进这个文件
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: life-assistant
+  threads:
+    virtual:
+      enabled: true
+  mvc:
+    async:
+      # 带工具调用的回答可能超过默认的 30 秒
+      request-timeout: 180s
+  datasource:
+    # stringtype=unspecified：让字符串能直接写进 jsonb 字段
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:life}?stringtype=unspecified
+    username: ${DB_USER:life}
+    password: ${DB_PASSWORD:life}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+  flyway:
+    # 每个模块一个迁移目录，版本号区间见 life-core 的 V1_0_0__core_schema.sql
+    locations: classpath:db/migration/core,classpath:db/migration/travel
+  ai:
+    mcp:
+      client:
+        # 高德官方 MCP：填好 AMAP_KEY 后把 AMAP_MCP_ENABLED 设为 true
+        enabled: ${AMAP_MCP_ENABLED:false}
+        name: life-assistant
+        type: SYNC
+        request-timeout: 30s
+        toolcallback:
+          enabled: true
+        sse:
+          connections:
+            amap:
+              url: https://mcp.amap.com
+              sse-endpoint: /sse?key=${AMAP_KEY:}
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
+
+sa-token:
+  token-name: Authorization
+  token-prefix: Bearer
+  # 30 天绝对过期，7 天不活跃自动过期
+  timeout: 2592000
+  active-timeout: 604800
+  is-concurrent: true
+  is-share: false
+  token-style: uuid
+  is-log: false
+  is-print: false
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+life:
+  crypto:
+    key: ${LIFE_CRYPTO_KEY:}
+  bootstrap:
+    username: ${LIFE_USERNAME:}
+    password: ${LIFE_PASSWORD:}
+    admin-username: ${LIFE_ADMIN_USERNAME:}
+    admin-password: ${LIFE_ADMIN_PASSWORD:}
+  # 模型提供方：dashscope 走百炼原生接口，openai 走 OpenAI 兼容接口。没填 Key 的提供方不会被创建，用到时才报错
+  llm:
+    default-provider: ${LIFE_LLM_DEFAULT_PROVIDER:dashscope}
+    providers:
+      dashscope:
+        type: dashscope
+        api-key: ${DASHSCOPE_API_KEY:}
+      deepseek:
+        type: openai
+        base-url: https://api.deepseek.com
+        api-key: ${DEEPSEEK_API_KEY:}
+      moonshot:
+        type: openai
+        base-url: https://api.moonshot.cn
+        api-key: ${MOONSHOT_API_KEY:}
+      zhipu:
+        type: openai
+        base-url: https://open.bigmodel.cn/api/paas
+        completions-path: /v4/chat/completions
+        api-key: ${ZHIPU_API_KEY:}
+      doubao:
+        type: openai
+        base-url: https://ark.cn-beijing.volces.com/api
+        completions-path: /v3/chat/completions
+        api-key: ${ARK_API_KEY:}
+      openai:
+        type: openai
+        base-url: ${OPENAI_BASE_URL:https://api.openai.com}
+        api-key: ${OPENAI_API_KEY:}
+  # 每个用途用哪个模型，写法"提供方:型号"，不写前缀用 default-provider
+  models:
+    router: ${LIFE_MODEL_ROUTER:qwen-turbo}
+    skill: ${LIFE_MODEL_SKILL:qwen-plus}
+    planner: ${LIFE_MODEL_PLANNER:qwen-max}
+    vision: ${LIFE_MODEL_VISION:qwen-vl-plus}
+  bark:
+    server: ${BARK_SERVER:https://api.day.app}
+  qweather:
+    api-host: ${QWEATHER_API_HOST:}
+    api-key: ${QWEATHER_API_KEY:}
+  graph:
+    checkpoint: postgres
+  eval:
+    cases-dir: ${LIFE_EVAL_DIR:eval/cases}
+  storage:
+    local-dir: ${LIFE_STORAGE_DIR:data/files}
+  web:
+    allowed-origins: ${LIFE_WEB_ORIGINS:http://localhost:5173}

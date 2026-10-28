@@ -1,0 +1,42 @@
+# 路由评测：这句话应该交给哪个技能。改 Prompt 或换路由模型后跑一遍：
+#   管理端 POST /admin/api/v1/eval/routing
+cases:
+  - id: travel-hiking-taishan
+    input: 周六想去爬泰山看日出，从济南出发
+    expectSkill: travel
+  - id: travel-city-family
+    input: 下周末带爸妈去杭州玩两天，预算三千
+    expectSkill: travel
+  - id: travel-hotel
+    input: 西湖附近有什么好住的酒店
+    expectSkill: travel
+  - id: travel-follow-up
+    input: 那换成周日呢
+    lastSkill: travel
+    expectSkill: travel
+  - id: schedule-remind
+    input: 明天下午三点提醒我去取快递
+    expectSkill: schedule
+  - id: schedule-query
+    input: 这周六我有什么安排
+    expectSkill: schedule
+  - id: schedule-delete
+    input: 把周五的聚餐删掉
+    expectSkill: schedule
+  - id: general-memory
+    input: 我不吃辣，海鲜过敏，记一下
+    expectSkill: general
+  - id: general-greeting
+    input: 你好呀
+    expectSkill: general
+  - id: general-forget
+    input: 你记得我哪些信息
+    expectSkill: general
+  - id: travel-confirm-record
+    input: 记录一下
+    lastSkill: travel
+    expectSkill: travel
+  - id: travel-confirm-save-all
+    input: 可以，都存
+    lastSkill: travel
+    expectSkill: travel
