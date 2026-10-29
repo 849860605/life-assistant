@@ -1,9 +1,12 @@
 package com.lifeassistant.skill.travel;
 
+import com.lifeassistant.core.mcp.McpServerRegistry;
 import com.lifeassistant.core.schedule.ScheduleTools;
+import com.lifeassistant.core.search.WebSearchTools;
 import com.lifeassistant.core.skill.LifeSkill;
 import com.lifeassistant.core.weather.WeatherTools;
 import com.lifeassistant.skill.travel.hiking.HikingTools;
+import com.lifeassistant.skill.travel.hotel.HotelLinkTools;
 import com.lifeassistant.skill.travel.trip.TripTools;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.ToolCallbackProvider;
@@ -12,6 +15,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Stream;
 
 /**
  * 出游技能：城市游、爬山徒步的规划和已保存行程的修改。地图能力来自高德官方 MCP（配置了 AMAP_KEY 才启用）。
@@ -23,15 +27,22 @@ public class TravelSkill implements LifeSkill {
     private final HikingTools hikingTools;
     private final TripTools tripTools;
     private final ScheduleTools scheduleTools;
+    private final HotelLinkTools hotelLinkTools;
+    private final WebSearchTools webSearchTools;
     private final ObjectProvider<ToolCallbackProvider> mcpToolProviders;
+    private final McpServerRegistry mcpServers;
 
     public TravelSkill(WeatherTools weatherTools, HikingTools hikingTools, TripTools tripTools,
-                       ScheduleTools scheduleTools, ObjectProvider<ToolCallbackProvider> mcpToolProviders) {
+                       ScheduleTools scheduleTools, HotelLinkTools hotelLinkTools, WebSearchTools webSearchTools,
+                       ObjectProvider<ToolCallbackProvider> mcpToolProviders, McpServerRegistry mcpServers) {
         this.weatherTools = weatherTools;
         this.hikingTools = hikingTools;
         this.tripTools = tripTools;
         this.scheduleTools = scheduleTools;
+        this.hotelLinkTools = hotelLinkTools;
+        this.webSearchTools = webSearchTools;
         this.mcpToolProviders = mcpToolProviders;
+        this.mcpServers = mcpServers;
     }
 
     /** 技能 id，路由结果用它定位技能。 */
@@ -66,9 +77,15 @@ public class TravelSkill implements LifeSkill {
                 1. 先确认关键信息：出发地、目的地、日期、几个人（有没有老人小孩）、预算、想要的强度。缺的一次问清楚，不要一条条追问。
                 2. 查天气（dailyWeather，爬山当天再看 hourlyWeather）。
                 3. 用地图工具查景点位置、路线和交通耗时；地图工具不可用时，说明是凭经验估计。
+                   想了解玩法、路线怎么排、避坑、美食时，用 searchGuides 搜攻略（会优先返回小红书笔记），
+                   综合多篇的共识来安排，引用到的攻略附原链接；攻略里的门票和开放时间可能过时，要提醒用户核实。
                 4. 爬山：用 estimateHikingTime 算用时，用 latestStartTime 算最晚出发时间，用 summitTemperature 估山顶温度，
                    最后必须调用 assessHikingRisk，风险结论以它为准。HIGH 时明确建议改期或换路线。
-                5. 酒店：用地图工具按位置搜索并给出评分和区位，价格提醒用户到携程、美团等平台查，不要编造价格。
+                5. 酒店：有 searchHotels 工具时（RollingGo 酒店数据），用它按地点和入住日期搜酒店，拿实时价格；
+                   用户关心某家时再用 getHotelDetail 看房型、价格和取消政策。列表格给出：酒店、价格（元/晚）、评分、
+                   档次、到目的地的距离，注明"价格来自 RollingGo，携程、美团的价格可能不同"，每家再用 hotelLinks
+                   附上"高德 / 携程 / 美团"链接方便对比。没有 searchHotels 时，用地图工具找酒店加 hotelLinks 链接。
+                   价格只能来自工具结果，不要编造。
                 6. 输出逐日行程：时间、地点、交通方式和耗时、注意事项；爬山附装备清单。
                 7. 问用户是否保存。用户回复"可以""好""记录一下""保存""都存"这类认可时：
                    - 调用 saveTripPlan 保存你上一版给出的完整行程，content 用完整的 Markdown 正文，不要缩写成摘要；
@@ -79,17 +96,17 @@ public class TravelSkill implements LifeSkill {
                 修改已保存的行程时，先 getTrip 读出当前内容，只改需要改的部分，再用 saveTripPlan 带上 tripId 保存。""";
     }
 
-    /** 本地 @Tool 工具对象：天气、爬山计算、行程存取、日程。 */
+    /** 本地 @Tool 工具对象：天气、爬山计算、行程存取、日程、酒店查价链接、搜攻略。 */
     @Override
     public List<Object> tools() {
-        return List.of(weatherTools, hikingTools, tripTools, scheduleTools);
+        return List.of(weatherTools, hikingTools, tripTools, scheduleTools, hotelLinkTools, webSearchTools);
     }
 
-    /** 汇总所有 MCP 工具提供者（目前是高德地图）的工具回调；未配置 MCP 时返回空列表。 */
+    /** MCP 工具：高德地图（Spring AI 自动配置的连接）加 RollingGo 酒店（按需连接）；没配置的返回空。 */
     @Override
     public List<ToolCallback> toolCallbacks() {
-        return mcpToolProviders.orderedStream()
-                .flatMap(provider -> Arrays.stream(provider.getToolCallbacks()))
-                .toList();
+        return Stream.concat(
+                mcpToolProviders.orderedStream().flatMap(provider -> Arrays.stream(provider.getToolCallbacks())),
+                mcpServers.tools("rollinggo").stream()).toList();
     }
 }

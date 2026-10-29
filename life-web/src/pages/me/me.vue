@@ -151,8 +151,9 @@ async function createFeed() {
   }
 }
 
+/** 吊销日历订阅地址。 */
 function revoke(t: TokenView) {
-  confirm("吊销订阅地址", `吊销后用这个地址订阅的日历会停止同步。`, async () => {
+  confirm("吊销订阅地址", "吊销后用这个地址订阅的日历会停止同步。", async () => {
     await api.revokeToken(t.id);
     tokens.value = tokens.value.filter((x) => x.id !== t.id);
   });

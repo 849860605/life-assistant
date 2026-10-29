@@ -25,6 +25,8 @@ spring:
   flyway:
     # 每个模块一个迁移目录，版本号区间见 life-core 的 V1_0_0__core_schema.sql
     locations: classpath:db/migration/core,classpath:db/migration/travel
+    # 每个模块一个版本号区间，core 新加的 V1_x 会比已执行的 V2_x 小，必须允许乱序执行
+    out-of-order: true
   ai:
     mcp:
       client:
@@ -120,6 +122,15 @@ life:
   # 没配和风时天气用高德兜底（没有逐小时和预警，日出日落按经纬度计算）
   amap:
     key: ${AMAP_KEY:}
+  # 远程 MCP 服务，没填 Key 的不会去连。RollingGo：道旅官方酒店数据，实时房型和价格，个人免费
+  mcp:
+    rollinggo:
+      url: https://mcp.rollinggo.cn
+      endpoint: /mcp
+      api-key: ${ROLLINGGO_API_KEY:}
+  # 联网搜攻略（博查），没填 Key 时搜索工具会告诉模型"没配置"
+  search:
+    bocha-api-key: ${BOCHA_API_KEY:}
   graph:
     checkpoint: postgres
   eval:

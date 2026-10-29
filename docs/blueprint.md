@@ -303,6 +303,7 @@ life:
 |---|---|---|---|
 | 编排方式 | Graph 多 Agent（顶层路由 + 技能子图） | 单 Agent 挂全部工具 | 工具一多容易选错；流程有确定的步骤；需要中断确认和断点续跑 |
 | 模型接入 | 自建 `ChatModelRegistry`，按"提供方:型号"选模型；百炼原生 + OpenAI 兼容两种接口 | 只用 DashScope starter；每家一个 starter | 换模型只改配置，可以按用途混用多家；starter 的自动配置启动时就要求填 DashScope Key |
+| 酒店价格 | RollingGo 酒店 MCP（道旅官方数据源，个人免费）给实时房型和价格，另附携程、美团、高德查价链接 | 爬取或逆向携程、美团；浏览器插件 | 走 MCP 所有用户都能用、不用装东西；携程、美团没有对个人开放的价格接口 |
 | 技能的代码组织 | 每个技能一个 Maven 模块 | 一个 `life-skills` 模块按包分 | 由编译器保证技能之间互不依赖，加技能不改核心。代价和可选方案见 §9 |
 | 鉴权 | Sa-Token | Spring Security；独立认证中心 | 加权评估 86 / 68 / 74：C 端能力开箱即用、上手快。对外开放时再加认证中心 |
 | Web 栈 | Spring MVC | WebFlux | 能用 Sa-Token 标准 starter；MVC 也能返回流式结果 |

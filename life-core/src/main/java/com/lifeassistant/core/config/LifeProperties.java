@@ -19,6 +19,9 @@ public class LifeProperties {
     private Bark bark = new Bark();
     private QWeather qweather = new QWeather();
     private Amap amap = new Amap();
+    private Search search = new Search();
+    /** 远程 MCP 服务：名字 → 连接配置 */
+    private Map<String, McpServer> mcp = new LinkedHashMap<>();
     private Graph graph = new Graph();
     private Eval eval = new Eval();
     private Storage storage = new Storage();
@@ -55,6 +58,26 @@ public class LifeProperties {
     @Data
     public static class Amap {
         private String key;
+    }
+
+    /** 一个远程 MCP 服务（Streamable HTTP）。apiKey 为空表示没开通，不会去连。 */
+    @Data
+    public static class McpServer {
+        /** 服务地址，例如 https://mcp.rollinggo.cn */
+        private String url;
+        /** MCP 接口路径，例如 /mcp */
+        private String endpoint = "/mcp";
+        private String apiKey;
+        /** 放 Key 的请求头和前缀，默认 Authorization: Bearer <key> */
+        private String authHeader = "Authorization";
+        private String authPrefix = "Bearer ";
+    }
+
+    /** 联网搜索配置，目前用博查。 */
+    @Data
+    public static class Search {
+        private String bochaApiKey;
+        private String bochaBaseUrl = "https://api.bochaai.com";
     }
 
     /** 按用途选模型，值是"提供方:型号"，例如 deepseek:deepseek-chat；不写前缀用 llm.default-provider。 */

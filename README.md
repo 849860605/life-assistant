@@ -84,6 +84,7 @@ life-core            平台核心：账号、会话、记忆、日程与提醒�
 life-skill-travel    出游技能：行程规划、爬山计算与风险规则、行程版本
 life-skill-schedule  日程技能（对话入口）
 life-api             启动模块：接口、Sa-Token、配置
+life-web             前端：uni-app（Vue 3 + TS），H5
 eval/                评测用例
 deploy/              docker compose、Dockerfile
 docs/                设计文档
