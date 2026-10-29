@@ -133,6 +133,8 @@ life:
 
 ## 5. 能力状态总表
 
+第三方 App 的官方 API 和 MCP 开放情况，以及接入优先级，见 [open-capabilities.md](open-capabilities.md)。
+
 预留项都写明了要留的接口或配置位，以及什么情况下启用。
 
 ### 平台

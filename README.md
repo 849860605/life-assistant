@@ -1,7 +1,7 @@
 # 生活助手
 
 基于 Spring AI Alibaba 的个人生活助手。先给自己用，接口按产品标准设计，以后逐步做成产品。
-总体设计见 [docs/blueprint.md](docs/blueprint.md)。
+总体设计见 [docs/blueprint.md](docs/blueprint.md)，可接入的第三方能力见 [docs/open-capabilities.md](docs/open-capabilities.md)。
 
 当前阶段：**S0 骨架**。后端已打通登录、会话、记忆、编排图（路由 → 技能，流式输出，断点存库）、
 出游技能、日程与提醒推送、日历订阅、管理接口。前端页面是下一步。
