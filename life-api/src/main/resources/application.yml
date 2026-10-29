@@ -122,6 +122,15 @@ life:
   # 没配和风时天气用高德兜底（没有逐小时和预警，日出日落按经纬度计算）
   amap:
     key: ${AMAP_KEY:}
+  # 酒店多平台比价：携程问道（不配 Key 也能低频用）、美团 ht-ai、飞猪 FlyAI（调用官方命令行工具）
+  hotel:
+    ctrip:
+      token: ${TRIPAI_API_KEY:}
+    meituan:
+      token: ${MEITUAN_HT_TOKEN:}
+    fliggy:
+      api-key: ${FLYAI_API_KEY:}
+      command: ${FLYAI_COMMAND:flyai}
   # 远程 MCP 服务，没填 Key 的不会去连。RollingGo：道旅官方酒店数据，实时房型和价格，个人免费
   mcp:
     rollinggo:

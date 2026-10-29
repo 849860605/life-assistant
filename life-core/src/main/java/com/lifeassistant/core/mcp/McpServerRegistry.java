@@ -16,6 +16,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -71,6 +72,11 @@ public class McpServerRegistry {
             }
         }
         return connection.tools();
+    }
+
+    /** 按名字取某个服务的一个工具，供代码直接调用（不经过模型）；取不到返回空。 */
+    public Optional<ToolCallback> tool(String server, String toolName) {
+        return tools(server).stream().filter(t -> toolName.equals(t.getToolDefinition().name())).findFirst();
     }
 
     /** 建 Streamable HTTP 连接并初始化，列出工具；失败返回 null 并记下失败时间。 */

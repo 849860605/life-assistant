@@ -3,7 +3,12 @@ package com.lifeassistant.core.config;
 import com.baomidou.mybatisplus.annotation.DbType;
 import com.baomidou.mybatisplus.extension.plugins.MybatisPlusInterceptor;
 import com.baomidou.mybatisplus.extension.plugins.inner.PaginationInnerInterceptor;
+import com.lifeassistant.core.llm.ParallelToolCallingManager;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
+import org.springframework.ai.model.tool.ToolCallingManager;
+import org.springframework.ai.tool.resolution.DelegatingToolCallbackResolver;
+import org.springframework.ai.tool.resolution.ToolCallbackResolver;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -12,8 +17,10 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.client.RestClient;
 
+import java.util.List;
+
 /**
- * life-core 的基础 Bean：MyBatis-Plus 分页、密码编码器、外部 HTTP 客户端，并启用 LifeProperties。
+ * life-core 的基础 Bean：MyBatis-Plus 分页、密码编码器、并行工具调用、外部 HTTP 客户端，并启用 LifeProperties。
  */
 @Configuration
 @EnableConfigurationProperties(LifeProperties.class)
@@ -31,6 +38,15 @@ public class CoreConfig {
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
+    }
+
+    /**
+     * 模型一次要求多个工具调用时并行执行（Spring AI 默认是逐个执行），替换自动配置里的 ToolCallingManager。
+     */
+    @Bean
+    public ToolCallingManager toolCallingManager(ObjectProvider<ToolCallbackResolver> toolCallbackResolver) {
+        return new ParallelToolCallingManager(
+                toolCallbackResolver.getIfAvailable(() -> new DelegatingToolCallbackResolver(List.of())));
     }
 
     /**

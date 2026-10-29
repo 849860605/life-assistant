@@ -1,6 +1,8 @@
 # 路由评测：这句话应该交给哪个技能。改 Prompt 或换路由模型后跑一遍：
 #   管理端 POST /admin/api/v1/eval/routing
+# lastSkill 是上一轮用的技能，用来测追问、确认和中途换话题。
 cases:
+  # ---------- 出游：规划、酒店、机票、路线、已存行程 ----------
   - id: travel-hiking-taishan
     input: 周六想去爬泰山看日出，从济南出发
     expectSkill: travel
@@ -10,10 +12,74 @@ cases:
   - id: travel-hotel
     input: 西湖附近有什么好住的酒店
     expectSkill: travel
+  - id: travel-hotel-budget
+    input: 后海地铁站附近找个500以内的酒店
+    expectSkill: travel
+  - id: travel-hotel-compare
+    input: 帮我比一下深圳湾万象城逸扉酒店在携程和美团上的价格
+    expectSkill: travel
+  - id: travel-flight-price
+    input: 11月5号深圳飞北京的机票多少钱，帮我比一下
+    expectSkill: travel
+  - id: travel-flight-round
+    input: 下周三去上海出差，帮我看看往返机票
+    expectSkill: travel
+  - id: travel-where-to-go
+    input: 国庆想出去玩，有什么推荐的地方
+    expectSkill: travel
+  - id: travel-guide
+    input: 西安两日游怎么安排比较好
+    expectSkill: travel
+  - id: travel-route
+    input: 从深圳北站到香港西九龙怎么走，要多久
+    expectSkill: travel
+  - id: travel-hiking-difficulty
+    input: 周末去梧桐山徒步，难度大吗
+    expectSkill: travel
+  - id: travel-kids
+    input: 带5岁孩子去三亚玩哪里好
+    expectSkill: travel
+  - id: travel-saved-trip
+    input: 帮我看下我之前存的泰山行程
+    expectSkill: travel
+  - id: travel-edit-trip
+    input: 泰山那个行程改成坐缆车下山
+    expectSkill: travel
+  - id: travel-flight-then-remind
+    input: 帮我订好机票之后提醒我提前两小时出门
+    expectSkill: travel
+
+  # ---------- 出游：追问和确认（上一轮在出游） ----------
   - id: travel-follow-up
     input: 那换成周日呢
     lastSkill: travel
     expectSkill: travel
+  - id: travel-confirm-record
+    input: 记录一下
+    lastSkill: travel
+    expectSkill: travel
+  - id: travel-confirm-save-all
+    input: 可以，都存
+    lastSkill: travel
+    expectSkill: travel
+  - id: travel-cheaper
+    input: 换个便宜点的
+    lastSkill: travel
+    expectSkill: travel
+  - id: travel-room-detail
+    input: 第二家有含早的吗
+    lastSkill: travel
+    expectSkill: travel
+  - id: travel-return
+    input: 回程呢
+    lastSkill: travel
+    expectSkill: travel
+  - id: travel-food-nearby
+    input: 这个酒店附近有什么好吃的
+    lastSkill: travel
+    expectSkill: travel
+
+  # ---------- 日程 ----------
   - id: schedule-remind
     input: 明天下午三点提醒我去取快递
     expectSkill: schedule
@@ -23,20 +89,82 @@ cases:
   - id: schedule-delete
     input: 把周五的聚餐删掉
     expectSkill: schedule
-  - id: general-memory
-    input: 我不吃辣，海鲜过敏，记一下
-    expectSkill: general
+  - id: schedule-meeting
+    input: 下周二上午十点和王总开会
+    expectSkill: schedule
+  - id: schedule-my-meetings
+    input: 我明天几点有会
+    expectSkill: schedule
+  - id: schedule-cancel-reminder
+    input: 帮我取消明天的提醒
+    expectSkill: schedule
+  - id: schedule-pills
+    input: 晚上九点提醒我吃药
+    expectSkill: schedule
+  - id: schedule-change-time
+    input: 改成四点
+    lastSkill: schedule
+    expectSkill: schedule
+  - id: schedule-confirm
+    input: 好的
+    lastSkill: schedule
+    expectSkill: schedule
+
+  # ---------- 通用：闲聊、记忆、其他问题 ----------
   - id: general-greeting
     input: 你好呀
     expectSkill: general
-  - id: general-forget
+  - id: general-memory
+    input: 我不吃辣，海鲜过敏，记一下
+    expectSkill: general
+  - id: general-recall
     input: 你记得我哪些信息
     expectSkill: general
-  - id: travel-confirm-record
-    input: 记录一下
+  - id: general-injury
+    input: 我左膝有旧伤，记住
+    expectSkill: general
+  - id: general-forget
+    input: 把我不吃辣那条忘掉
+    expectSkill: general
+  - id: general-weather
+    input: 明天深圳会下雨吗
+    expectSkill: general
+  - id: general-joke
+    input: 讲个笑话
+    expectSkill: general
+  - id: general-ability
+    input: 你能做什么
+    expectSkill: general
+  - id: general-exchange
+    input: 1美元等于多少人民币
+    expectSkill: general
+
+  # ---------- 中途换话题：上一轮的技能不适用了 ----------
+  - id: switch-travel-to-schedule
+    input: 明天早上8点提醒我交电费
     lastSkill: travel
+    expectSkill: schedule
+  - id: switch-schedule-to-travel
+    input: 周末想去杭州玩两天，帮我规划一下
+    lastSkill: schedule
     expectSkill: travel
-  - id: travel-confirm-save-all
-    input: 可以，都存
+  - id: switch-travel-to-general
+    input: 我不吃香菜，记一下
     lastSkill: travel
+    expectSkill: general
+  - id: switch-general-to-travel
+    input: 帮我查下后天广州飞成都的机票
+    lastSkill: general
     expectSkill: travel
+
+  # ---------- 天气的边界 ----------
+  - id: weather-for-hiking
+    input: 周六泰山天气怎么样，适合爬山吗
+    expectSkill: travel
+  - id: weather-plain
+    input: 下周北京冷不冷
+    expectSkill: general
+  - id: weather-follow-up-general
+    input: 那后天呢
+    lastSkill: general
+    expectSkill: general

@@ -1,0 +1,8 @@
+{
+  "name": "life-assistant-tools",
+  "private": true,
+  "description": "后端调用的官方命令行工具。飞猪 FlyAI 只提供命令行工具（签名在工具内），后端通过 FLYAI_COMMAND 调用这里的 flyai。",
+  "dependencies": {
+    "@fly-ai/flyai-cli": "1.0.16"
+  }
+}

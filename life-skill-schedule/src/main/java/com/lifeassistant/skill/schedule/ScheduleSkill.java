@@ -31,13 +31,14 @@ public class ScheduleSkill implements LifeSkill {
     /** 给路由 Agent 看的职责说明。 */
     @Override
     public String description() {
-        return "日程和提醒：新建、查询、删除日程，设置到点推送提醒，问某天有什么安排";
+        return "日程和提醒：新建、查询、修改、删除日程，设置到点推送提醒，问某天有什么安排或几点有会。"
+                + "只要用户要的是\"某个时间提醒我做某事\"，即使事情和出行有关，也归这里";
     }
 
     /** 示例问法，提高路由准确率，也是评测集的种子。 */
     @Override
     public List<String> routingExamples() {
-        return List.of("明天下午三点提醒我去取快递", "这周六我有什么安排", "把周五的聚餐删掉");
+        return List.of("明天下午三点提醒我去取快递", "这周六我有什么安排", "把周五的聚餐删掉", "下周二上午十点和王总开会");
     }
 
     /** 日程提示词：相对日期换算、默认提醒提前量、删除前先确认、创建后复述。 */
