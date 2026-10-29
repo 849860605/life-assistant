@@ -15,6 +15,8 @@ public final class HikingCalculator {
     /** 休息、拍照、吃东西额外加 15% */
     private static final double REST_FACTOR = 1.15;
     private static final Pattern NUMBER = Pattern.compile("\\d+");
+    /** 天气描述里出现这些词按高风险处理 */
+    private static final Pattern SEVERE_WEATHER = Pattern.compile("暴雨|大雨|冰雹|台风|暴雪|大雪|沙尘暴|冻雨");
 
     private HikingCalculator() {
     }
@@ -83,8 +85,8 @@ public final class HikingCalculator {
 
     /**
      * 按固定规则评估当天风险，有任一 HIGH 条件即为 HIGH，否则有 MEDIUM 条件为 MEDIUM，都没有为 LOW。
-     * HIGH：雷暴或气象预警（含天气描述带“雷”）、风力 ≥ 6 级、降水 ≥ 10 mm、预计下山晚于日落。
-     * MEDIUM：风力 5 级、降水 ≥ 2 mm、下山距日落不到 1 小时、山顶气温 ≤ 0℃。
+     * HIGH：雷暴或气象预警（含天气描述带“雷”）、风力 ≥ 6 级、降水 ≥ 10 mm 或天气描述为大雨/暴雨/大雪等、预计下山晚于日落。
+     * MEDIUM：风力 5 级、降水 ≥ 2 mm 或天气描述带“雨”、雪或结冰、下山距日落不到 1 小时、山顶气温 ≤ 0℃。
      */
     public static RiskAssessment assess(RiskInput input) {
         List<String> high = new ArrayList<>();
@@ -104,6 +106,14 @@ public final class HikingCalculator {
             high.add("降水 " + input.precipMm() + " 毫米，路面湿滑，有山洪和落石风险");
         } else if (input.precipMm() >= 2) {
             medium.add("有降水，台阶湿滑，带好雨具和防滑鞋");
+        } else if (SEVERE_WEATHER.matcher(text).find()) {
+            // 有的数据源（高德）没有降水量，只能看天气描述
+            high.add("天气为" + text + "，路面湿滑或能见度差，有山洪、落石和失温风险");
+        } else if (text.contains("雨")) {
+            medium.add("天气为" + text + "，台阶湿滑，带好雨具和防滑鞋");
+        }
+        if (!SEVERE_WEATHER.matcher(text).find() && (text.contains("雪") || text.contains("冻") || text.contains("冰"))) {
+            medium.add("天气为" + text + "，路面可能结冰，需要冰爪或防滑鞋套");
         }
         if (input.expectedFinish() != null && input.sunset() != null) {
             if (input.expectedFinish().isAfter(input.sunset())) {

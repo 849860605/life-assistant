@@ -12,6 +12,7 @@ import org.springframework.web.client.RestClientException;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.function.Function;
 
 /**
@@ -36,12 +37,22 @@ public class QWeatherProvider implements WeatherProvider {
                 .build();
     }
 
+    @Override
+    public String name() {
+        return "和风天气";
+    }
+
+    @Override
+    public boolean available() {
+        return configured;
+    }
+
     /** "经度,纬度" 直接构造位置（保留两位小数作为 id），否则调城市搜索取第一条结果。 */
     @Override
     public WeatherLocation resolve(String query) {
         if (query.matches("\\s*-?\\d+(\\.\\d+)?\\s*,\\s*-?\\d+(\\.\\d+)?\\s*")) {
             String[] parts = query.split(",");
-            String coord = "%.2f,%.2f".formatted(Double.parseDouble(parts[0].trim()), Double.parseDouble(parts[1].trim()));
+            String coord = String.format(Locale.ROOT, "%.2f,%.2f", Double.parseDouble(parts[0].trim()), Double.parseDouble(parts[1].trim()));
             return new WeatherLocation(coord, coord, "", Double.parseDouble(parts[0].trim()), Double.parseDouble(parts[1].trim()));
         }
         JsonNode body = get("/geo/v2/city/lookup", "location", query);

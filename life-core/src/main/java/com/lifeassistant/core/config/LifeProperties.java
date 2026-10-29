@@ -18,6 +18,7 @@ public class LifeProperties {
     private Models models = new Models();
     private Bark bark = new Bark();
     private QWeather qweather = new QWeather();
+    private Amap amap = new Amap();
     private Graph graph = new Graph();
     private Eval eval = new Eval();
     private Storage storage = new Storage();
@@ -48,6 +49,12 @@ public class LifeProperties {
         /** 对话接口路径，为空用客户端默认值（openai 是 /v1/chat/completions）；智谱、豆包这类路径不同的要填 */
         private String completionsPath;
         private String apiKey;
+    }
+
+    /** 高德 Web 服务配置；地图能力走高德 MCP，这里的 Key 用于天气兜底。 */
+    @Data
+    public static class Amap {
+        private String key;
     }
 
     /** 按用途选模型，值是"提供方:型号"，例如 deepseek:deepseek-chat；不写前缀用 llm.default-provider。 */

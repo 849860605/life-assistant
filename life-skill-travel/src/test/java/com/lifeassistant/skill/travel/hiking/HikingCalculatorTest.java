@@ -86,4 +86,18 @@ class HikingCalculatorTest {
         assertThat(HikingCalculator.maxNumber("3-4")).isEqualTo(4);
         assertThat(HikingCalculator.maxNumber(null)).isZero();
     }
+
+    @Test
+    void weatherTextIsUsedWhenPrecipitationIsUnknown() {
+        // 高德没有降水量（填 0），只能看天气描述
+        assertThat(riskFor("大雨").level()).isEqualTo(HikingCalculator.RiskLevel.HIGH);
+        assertThat(riskFor("小雨转中雨").level()).isEqualTo(HikingCalculator.RiskLevel.MEDIUM);
+        assertThat(riskFor("小雪").level()).isEqualTo(HikingCalculator.RiskLevel.MEDIUM);
+        assertThat(riskFor("多云").level()).isEqualTo(HikingCalculator.RiskLevel.LOW);
+    }
+
+    private static HikingCalculator.RiskAssessment riskFor(String weatherText) {
+        return HikingCalculator.assess(new HikingCalculator.RiskInput(false, weatherText, "1-3", 0,
+                LocalTime.of(15, 0), LocalTime.of(17, 30), 12.0));
+    }
 }

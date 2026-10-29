@@ -22,8 +22,20 @@
       </view>
     </view>
 
+    <view v-if="events.length" class="card reminders">
+      <view class="reminders-title">关联的提醒</view>
+      <view v-for="e in events" :key="e.id" class="reminder">
+        <text class="reminder-time">{{ eventTime(e.startAt) }}</text>
+        <text>{{ e.title }}</text>
+      </view>
+    </view>
+
     <view v-if="detail" class="card body">
       <MarkdownView :text="detail.version.content || ''" />
+    </view>
+
+    <view v-if="detail" class="actions">
+      <button class="btn danger small" @click="removeTrip">删除行程</button>
     </view>
   </view>
 </template>
@@ -33,17 +45,52 @@ import { ref } from "vue";
 import { onLoad } from "@dcloudio/uni-app";
 import { api } from "../../api";
 import { showError } from "../../api/http";
-import type { TripDetail, TripVersion } from "../../api/types";
+import type { ScheduleEvent, TripDetail, TripVersion } from "../../api/types";
 import MarkdownView from "../../components/MarkdownView.vue";
+import { hm } from "../../utils/format";
 
 const tripId = ref(0);
 const detail = ref<TripDetail | null>(null);
 const versions = ref<TripVersion[]>([]);
+const events = ref<ScheduleEvent[]>([]);
 
 onLoad(async (query) => {
   tripId.value = Number(query?.id);
-  await Promise.all([load(), loadVersions()]);
+  await Promise.all([load(), loadVersions(), loadEvents()]);
 });
+
+async function loadEvents() {
+  try {
+    events.value = await api.tripEvents(tripId.value);
+  } catch (e) {
+    showError(e);
+  }
+}
+
+/** 提醒时间显示成"10月31日 14:00"。 */
+function eventTime(iso: string) {
+  const d = new Date(iso);
+  return `${d.getMonth() + 1}月${d.getDate()}日 ${hm(d)}`;
+}
+
+/** 确认后删除行程，关联的提醒一起删，然后回到列表。 */
+function removeTrip() {
+  uni.showModal({
+    title: "删除行程",
+    content: events.value.length ? `行程和 ${events.value.length} 条关联提醒都会删掉。` : "删除这个行程？",
+    confirmText: "删除",
+    confirmColor: "#B4442F",
+    success: async (res) => {
+      if (!res.confirm) return;
+      try {
+        await api.deleteTrip(tripId.value);
+        uni.navigateBack();
+      } catch (e) {
+        showError(e);
+      }
+    },
+  });
+}
 
 /** 读某个版本，不传就是当前版本。 */
 async function load(version?: number) {
@@ -89,4 +136,10 @@ async function loadVersions() {
   white-space: nowrap;
 }
 .body { padding: 16px 18px; }
+.reminders { margin-bottom: 12px; }
+.reminders-title { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+.reminder { display: flex; gap: 12px; padding: 4px 0; font-size: 14px; }
+.reminder-time { color: var(--accent); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.actions { margin: 16px 0 8px; display: flex; justify-content: flex-end; }
+.actions .btn { margin: 0; }
 </style>

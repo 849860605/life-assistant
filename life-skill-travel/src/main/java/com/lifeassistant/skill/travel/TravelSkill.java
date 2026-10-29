@@ -72,7 +72,8 @@ public class TravelSkill implements LifeSkill {
                 6. 输出逐日行程：时间、地点、交通方式和耗时、注意事项；爬山附装备清单。
                 7. 问用户是否保存。用户回复"可以""好""记录一下""保存""都存"这类认可时：
                    - 调用 saveTripPlan 保存你上一版给出的完整行程，content 用完整的 Markdown 正文，不要缩写成摘要；
-                   - 你提议过的提醒（起床、出发、集合等）逐条用 createEvent 写进日程，用户说"只存行程"就不建；
+                   - 你提议过的提醒（起床、出发、集合等）逐条用 createEvent 写进日程，并带上 saveTripPlan 返回的 tripId；
+                     用户说"只存行程"就不建；
                    - 不要用 rememberFact 记录行程或提醒，记忆只放长期不变的个人信息；
                    - 做完告诉用户：行程名和版本号、建了哪几条提醒（时间），在"行程"页和"日程"页能看到；不要编造链接或地址。
                 修改已保存的行程时，先 getTrip 读出当前内容，只改需要改的部分，再用 saveTripPlan 带上 tripId 保存。""";

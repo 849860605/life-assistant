@@ -3,9 +3,15 @@ package com.lifeassistant.core.weather;
 import java.util.List;
 
 /**
- * 天气数据源。和风天气为主；以后可以加高德天气兜底。
+ * 天气数据源。和风天气为主，没配和风时用高德兜底，选择逻辑在 {@link WeatherService}。
  */
 public interface WeatherProvider {
+
+    /** 数据源名称和局限，返回给模型，让它知道哪些数据没有 */
+    String name();
+
+    /** 是否已配置好、可以调用 */
+    boolean available();
 
     /** 把地名（如"泰山""杭州西湖"）或 "经度,纬度" 解析成位置 */
     WeatherLocation resolve(String query);

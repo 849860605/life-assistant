@@ -80,6 +80,24 @@ public class ScheduleService {
                 .orderByAsc(ScheduleEvent::getStartAt));
     }
 
+    /** 某个来源对象（如 TRAVEL + 行程 id）关联的日程，按开始时间升序。 */
+    public List<ScheduleEvent> listBySource(UserCtx ctx, String source, String sourceRef) {
+        return eventMapper.selectList(new LambdaQueryWrapper<ScheduleEvent>()
+                .eq(ScheduleEvent::getUserId, ctx.userId())
+                .eq(ScheduleEvent::getSource, source)
+                .eq(ScheduleEvent::getSourceRef, sourceRef)
+                .orderByAsc(ScheduleEvent::getStartAt));
+    }
+
+    /** 删掉某个来源对象关联的全部日程，提醒随外键级联删除；返回删除条数。 */
+    @Transactional
+    public int deleteBySource(UserCtx ctx, String source, String sourceRef) {
+        return eventMapper.delete(new LambdaQueryWrapper<ScheduleEvent>()
+                .eq(ScheduleEvent::getUserId, ctx.userId())
+                .eq(ScheduleEvent::getSource, source)
+                .eq(ScheduleEvent::getSourceRef, sourceRef));
+    }
+
     /** 只能删自己的日程，不存在或不属于当前用户都报 404。 */
     @Transactional
     public void delete(UserCtx ctx, long eventId) {

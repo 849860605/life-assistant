@@ -7,6 +7,7 @@ import com.lifeassistant.core.conversation.ConversationService;
 import com.lifeassistant.core.orchestrator.ChatEvent;
 import com.lifeassistant.core.orchestrator.ChatOrchestrator;
 import com.lifeassistant.core.orchestrator.RouterService;
+import com.lifeassistant.core.schedule.ScheduleService;
 import com.lifeassistant.core.orchestrator.SkillRunner;
 import com.lifeassistant.core.user.User;
 import com.lifeassistant.core.user.UserService;
@@ -39,6 +40,7 @@ import org.testcontainers.utility.DockerImageName;
 import reactor.core.publisher.Flux;
 
 import java.time.Duration;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -102,6 +104,8 @@ class LifeApiIntegrationTest {
     ChatOrchestrator chatOrchestrator;
     @Autowired
     ConversationService conversationService;
+    @Autowired
+    ScheduleService scheduleService;
     @Autowired
     ObjectMapper objectMapper;
 
@@ -245,6 +249,27 @@ class LifeApiIntegrationTest {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(jdbc.queryForObject(countSql, Integer.class, eventId)).isZero();
+    }
+
+    @Test
+    void deletingTripAlsoDeletesItsEvents() throws Exception {
+        User alice = userService.findByUsername("alice").orElseThrow();
+        UserCtx ctx = UserCtx.of(alice.getId());
+        long tripId = tripService.saveVersion(ctx, null, new TripService.TripDraft(
+                "千佛山半日", "HIKING", "济南", null, null, "正文", null), "AI").trip().getId();
+        scheduleService.createEvent(ctx, new ScheduleService.NewEvent("出发去千佛山",
+                OffsetDateTime.parse("2026-11-01T14:00:00+08:00"), null, null, null, "TRAVEL", String.valueOf(tripId), 15));
+
+        assertThat(get("/api/v1/trips/" + tripId + "/events").path("data")).hasSize(1);
+        assertThat(get("/api/v1/trips/" + tripId).path("data").path("trip").path("status").asText()).isEqualTo("CONFIRMED");
+
+        ResponseEntity<String> response = rest.exchange("/api/v1/trips/" + tripId, HttpMethod.DELETE,
+                new HttpEntity<>(headers(token)), String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM t_schedule_event WHERE source = 'TRAVEL' AND source_ref = ?",
+                Integer.class, String.valueOf(tripId))).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM t_reminder WHERE title = '出发去千佛山'", Integer.class)).isZero();
     }
 
     @Test

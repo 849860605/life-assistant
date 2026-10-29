@@ -20,6 +20,8 @@ export const api = {
   trip: (id: number, version?: number) =>
     request<TripDetail>("GET", `/api/v1/trips/${id}` + (version ? `?version=${version}` : "")),
   tripVersions: (id: number) => request<TripVersion[]>("GET", `/api/v1/trips/${id}/versions`),
+  tripEvents: (id: number) => request<ScheduleEvent[]>("GET", `/api/v1/trips/${id}/events`),
+  deleteTrip: (id: number) => request<void>("DELETE", `/api/v1/trips/${id}`),
 
   events: (from: string, to: string) => request<ScheduleEvent[]>("GET", `/api/v1/events?from=${from}&to=${to}`),
   createEvent: (body: { title: string; startAt: string; location?: string; remindMinutesBefore?: number | null }) =>

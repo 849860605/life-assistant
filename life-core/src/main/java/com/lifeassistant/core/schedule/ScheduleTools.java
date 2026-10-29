@@ -27,20 +27,22 @@ public class ScheduleTools {
     private final ScheduleService scheduleService;
     private final UserService userService;
 
-    /** 时间按用户时区解析；end 为空或空白视为未知。 */
-    @Tool(description = "新建一条日程，可以顺便设置提前多少分钟推送提醒到用户手机。")
+    /** 时间按用户时区解析；end 为空或空白视为未知。带 tripId 的记为出游日程并关联行程，删行程时一起删。 */
+    @Tool(description = "新建一条日程，可以顺便设置提前多少分钟推送提醒到用户手机。行程相关的提醒要带上 tripId。")
     public Map<String, Object> createEvent(
             @ToolParam(description = "标题，例如：爬泰山、和老王吃饭") String title,
             @ToolParam(description = "开始时间，格式 yyyy-MM-dd HH:mm，用户所在时区") String start,
             @ToolParam(description = "结束时间，格式 yyyy-MM-dd HH:mm，不知道就不填", required = false) String end,
             @ToolParam(description = "地点", required = false) String location,
             @ToolParam(description = "提前多少分钟提醒；不需要提醒就不填", required = false) Integer remindMinutesBefore,
+            @ToolParam(description = "关联的行程 id（saveTripPlan 返回的 tripId）；和行程无关就不填", required = false) Long tripId,
             ToolContext toolContext) {
         UserCtx ctx = ToolContexts.user(toolContext);
         ZoneId zone = userService.zoneOf(ctx.userId());
         ScheduleEvent event = scheduleService.createEvent(ctx, new ScheduleService.NewEvent(
                 title, parse(start, zone), end == null || end.isBlank() ? null : parse(end, zone),
-                location, null, "USER", null, remindMinutesBefore));
+                location, null, tripId == null ? "AI" : "TRAVEL", tripId == null ? null : tripId.toString(),
+                remindMinutesBefore));
         return Map.of("eventId", event.getId(), "title", event.getTitle(), "start", start,
                 "remind", remindMinutesBefore == null ? "不提醒" : "提前 " + remindMinutesBefore + " 分钟");
     }

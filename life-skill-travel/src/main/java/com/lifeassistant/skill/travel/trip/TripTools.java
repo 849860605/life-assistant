@@ -21,7 +21,7 @@ public class TripTools {
     private final TripService tripService;
 
     /**
-     * 以 AI 身份保存一个行程版本，返回 tripId、版本号和详情页路径。
+     * 以 AI 身份保存一个行程版本，返回 tripId 和版本号。
      * changeNote 缺省时，新建记为“首次生成”，修改记为“修改”。
      */
     @Tool(description = """
@@ -42,7 +42,7 @@ public class TripTools {
                         changeNote == null ? (tripId == null ? "首次生成" : "修改") : changeNote),
                 "AI");
         return Map.of("tripId", detail.trip().getId(), "version", detail.version().getVersion(),
-                "page", "/trip/" + detail.trip().getId());
+                "hint", "相关提醒用 createEvent 建，并带上这个 tripId");
     }
 
     /** 列出当前用户的行程摘要（不含正文），空字段转成空串。 */

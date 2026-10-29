@@ -117,6 +117,9 @@ life:
   qweather:
     api-host: ${QWEATHER_API_HOST:}
     api-key: ${QWEATHER_API_KEY:}
+  # 没配和风时天气用高德兜底（没有逐小时和预警，日出日落按经纬度计算）
+  amap:
+    key: ${AMAP_KEY:}
   graph:
     checkpoint: postgres
   eval:
