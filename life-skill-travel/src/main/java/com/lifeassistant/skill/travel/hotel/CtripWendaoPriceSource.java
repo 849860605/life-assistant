@@ -1,6 +1,6 @@
 package com.lifeassistant.skill.travel.hotel;
 
-import com.lifeassistant.skill.travel.platform.CtripWendaoClient;
+import com.lifeassistant.core.platform.CtripWendaoClient;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 

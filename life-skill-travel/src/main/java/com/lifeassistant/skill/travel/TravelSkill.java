@@ -1,5 +1,6 @@
 package com.lifeassistant.skill.travel;
 
+import com.lifeassistant.core.food.FoodTools;
 import com.lifeassistant.core.mcp.McpServerRegistry;
 import com.lifeassistant.core.schedule.ScheduleTools;
 import com.lifeassistant.core.search.WebSearchTools;
@@ -33,12 +34,13 @@ public class TravelSkill implements LifeSkill {
     private final WebSearchTools webSearchTools;
     private final HotelPriceTools hotelPriceTools;
     private final FlightTools flightTools;
+    private final FoodTools foodTools;
     private final ObjectProvider<ToolCallbackProvider> mcpToolProviders;
     private final McpServerRegistry mcpServers;
 
     public TravelSkill(WeatherTools weatherTools, HikingTools hikingTools, TripTools tripTools,
                        ScheduleTools scheduleTools, HotelLinkTools hotelLinkTools, WebSearchTools webSearchTools,
-                       HotelPriceTools hotelPriceTools, FlightTools flightTools,
+                       HotelPriceTools hotelPriceTools, FlightTools flightTools, FoodTools foodTools,
                        ObjectProvider<ToolCallbackProvider> mcpToolProviders, McpServerRegistry mcpServers) {
         this.weatherTools = weatherTools;
         this.hikingTools = hikingTools;
@@ -48,6 +50,7 @@ public class TravelSkill implements LifeSkill {
         this.webSearchTools = webSearchTools;
         this.hotelPriceTools = hotelPriceTools;
         this.flightTools = flightTools;
+        this.foodTools = foodTools;
         this.mcpToolProviders = mcpToolProviders;
         this.mcpServers = mcpServers;
     }
@@ -89,8 +92,11 @@ public class TravelSkill implements LifeSkill {
                 1. 先确认关键信息：出发地、目的地、日期、几个人（有没有老人小孩）、预算、想要的强度。缺的一次问清楚，不要一条条追问。
                 2. 查天气（dailyWeather，爬山当天再看 hourlyWeather）。
                 3. 用地图工具查景点位置、路线和交通耗时；地图工具不可用时，说明是凭经验估计。
-                   想了解玩法、路线怎么排、避坑、美食时，用 searchGuides 搜攻略（会优先返回小红书笔记），
+                   想了解玩法、路线怎么排、避坑时，用 searchGuides 搜攻略，
                    综合多篇的共识来安排，引用到的攻略附原链接；攻略里的门票和开放时间可能过时，要提醒用户核实。
+                   吃饭：用户问附近吃的，或逐日行程里要安排正餐时，用 findRestaurants 按景点或酒店位置查
+                   （同时查大众点评和携程），每顿推荐 1～2 家，写评分、人均和招牌菜，店名原样用 display 字段（已带点评链接）；
+                   用户有忌口时带上；不要凭印象编店名。整个行程只在用户要求或主要用餐点各查一次，别每顿都查。
                 4. 爬山：用 estimateHikingTime 算用时，用 latestStartTime 算最晚出发时间，用 summitTemperature 估山顶温度，
                    最后必须调用 assessHikingRisk，风险结论以它为准。HIGH 时明确建议改期或换路线。
                 5. 酒店：
@@ -118,11 +124,11 @@ public class TravelSkill implements LifeSkill {
                 修改已保存的行程时，先 getTrip 读出当前内容，只改需要改的部分，再用 saveTripPlan 带上 tripId 保存。""";
     }
 
-    /** 本地 @Tool 工具对象：天气、爬山计算、行程存取、日程、酒店和机票多平台比价、搜攻略。 */
+    /** 本地 @Tool 工具对象：天气、爬山计算、行程存取、日程、酒店和机票多平台比价、找餐厅、搜攻略。 */
     @Override
     public List<Object> tools() {
         return List.of(weatherTools, hikingTools, tripTools, scheduleTools, hotelLinkTools, hotelPriceTools,
-                flightTools, webSearchTools);
+                flightTools, foodTools, webSearchTools);
     }
 
     /** MCP 工具：高德地图（Spring AI 自动配置的连接）加 RollingGo 酒店（按需连接）；没配置的返回空。 */

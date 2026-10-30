@@ -139,6 +139,41 @@ cases:
     input: 1美元等于多少人民币
     expectSkill: general
 
+  # ---------- 美食 ----------
+  - id: food-hotpot
+    input: 今晚南山吃什么火锅
+    expectSkill: food
+  - id: food-nearby
+    input: 钟楼附近有什么好吃的陕菜
+    expectSkill: food
+  - id: food-kids
+    input: 周末带娃去哪吃饭，人均一百以内
+    expectSkill: food
+  - id: food-date
+    input: 推荐个适合约会的西餐厅
+    expectSkill: food
+  - id: food-shop
+    input: 海底捞人均多少
+    expectSkill: food
+  - id: food-what-to-eat
+    input: 中午不知道吃啥
+    expectSkill: food
+  - id: food-follow-up
+    input: 换个不辣的
+    lastSkill: food
+    expectSkill: food
+  - id: food-hours
+    input: 第二家几点开门
+    lastSkill: food
+    expectSkill: food
+  - id: food-confirm
+    input: 就这家，周六晚上7点去，记一下
+    lastSkill: food
+    expectSkill: food
+  - id: travel-plan-with-meals
+    input: 帮我规划西安两日游，每天中午晚上吃什么也安排上
+    expectSkill: travel
+
   # ---------- 中途换话题：上一轮的技能不适用了 ----------
   - id: switch-travel-to-schedule
     input: 明天早上8点提醒我交电费
@@ -152,6 +187,14 @@ cases:
     input: 我不吃香菜，记一下
     lastSkill: travel
     expectSkill: general
+  - id: switch-food-to-schedule
+    input: 明天中午12点提醒我订位
+    lastSkill: food
+    expectSkill: schedule
+  - id: switch-travel-to-food
+    input: 回深圳后周末想吃顿好的潮汕牛肉火锅
+    lastSkill: travel
+    expectSkill: food
   - id: switch-general-to-travel
     input: 帮我查下后天广州飞成都的机票
     lastSkill: general

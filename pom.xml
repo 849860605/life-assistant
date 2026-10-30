@@ -24,6 +24,7 @@
         <module>life-core</module>
         <module>life-skill-travel</module>
         <module>life-skill-schedule</module>
+        <module>life-skill-food</module>
         <module>life-api</module>
     </modules>
 
@@ -59,6 +60,11 @@
             <dependency>
                 <groupId>com.lifeassistant</groupId>
                 <artifactId>life-skill-schedule</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.lifeassistant</groupId>
+                <artifactId>life-skill-food</artifactId>
                 <version>${project.version}</version>
             </dependency>
 

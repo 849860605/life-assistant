@@ -1,4 +1,4 @@
-package com.lifeassistant.skill.travel.platform;
+package com.lifeassistant.core.platform;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import org.springframework.beans.factory.annotation.Value;
@@ -13,7 +13,7 @@ import java.util.Map;
 /**
  * 美团酒旅 ht-ai（美团官方给 AI 助手的查询接口，Token 在 developer.meituan.com 申请）。
  * 请求格式取自官方命令行工具 @meituan-travel/ht-ai：Authorization 头直接放 Token，返回 {result, data(Markdown)}。
- * 酒店、机票、火车票都能查。
+ * 酒店、机票、火车票、美食（大众点评的店铺和评分）都能查。
  */
 @Component
 public class MeituanHtClient {

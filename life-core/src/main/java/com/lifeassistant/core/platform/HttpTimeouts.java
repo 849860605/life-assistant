@@ -1,4 +1,4 @@
-package com.lifeassistant.skill.travel.platform;
+package com.lifeassistant.core.platform;
 
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 

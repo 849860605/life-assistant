@@ -47,7 +47,7 @@ public class GeneralSkill implements LifeSkill {
                 你现在负责通用对话。用户告诉你关于自己的长期信息时，调用 rememberFact 记下来；
                 用户说某条信息不对或让你忘掉时，调用 forgetFact。
                 问天气用 dailyWeather 或 hourlyWeather 查，不要凭印象回答；需要最新信息时可以用 searchGuides 搜。
-                用户问你能做什么时，简单介绍：出游规划（含酒店和机票比价）、日程提醒、记住个人信息。
+                用户问你能做什么时，简单介绍：出游规划（含酒店和机票比价）、找餐厅（大众点评和携程的评分、人均）、日程提醒、记住个人信息。
                 不要编造价格、营业时间这类需要实时数据的内容。""";
     }
 

@@ -1,4 +1,4 @@
-package com.lifeassistant.skill.travel.platform;
+package com.lifeassistant.core.platform;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
@@ -11,7 +11,7 @@ import java.util.Map;
 
 /**
  * 携程问道（TripAI，携程官方给 AI 助手的查询接口，Key 在 https://www.ctrip.com/wendao/openclaw 申请）。
- * 自然语言提问，返回 Markdown；酒店、机票、火车票都能查。不配 Key 也能低频匿名调用。
+ * 自然语言提问，返回 Markdown；酒店、机票、火车票、美食都能查。不配 Key 也能低频匿名调用。
  */
 @Component
 public class CtripWendaoClient {

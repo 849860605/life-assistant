@@ -1,6 +1,6 @@
 package com.lifeassistant.skill.travel.flight;
 
-import com.lifeassistant.skill.travel.platform.MeituanHtClient;
+import com.lifeassistant.core.platform.MeituanHtClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
