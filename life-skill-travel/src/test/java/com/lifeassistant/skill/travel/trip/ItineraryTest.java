@@ -43,6 +43,30 @@ class ItineraryTest {
                 "2026-03-15 C：结束时间早于开始时间");
     }
 
+    @Test
+    void staysCountNightsAndPickTheRightHotelOnSwitchDay() {
+        Itinerary.Stay a = stay("s1", "钟楼酒店", "2026-03-10", "2026-03-12");
+        Itinerary.Stay b = stay("s2", "华清宫酒店", "2026-03-12", "2026-03-13");
+
+        assertThat(a.nights()).isEqualTo(2);
+        assertThat(a.covers("2026-03-12")).isTrue();
+        assertThat(a.covers("2026-03-13")).isFalse();
+        // 换酒店那天：上午还在前一家，下午算新的一家
+        assertThat(TripGeo.stayFor(List.of(a, b), "2026-03-12", "09:00")).isSameAs(a);
+        assertThat(TripGeo.stayFor(List.of(a, b), "2026-03-12", "21:00")).isSameAs(b);
+        assertThat(TripGeo.stayFor(List.of(a, b), "2026-03-14", "21:00")).isNull();
+
+        Itinerary it = TripTools.toItinerary(List.of(new TripTools.PlanDay("2026-03-10", null,
+                List.of(item("09:00", "10:00", "SPOT", "A")))), null).withStays(List.of(a));
+        assertThat(it.toMarkdown()).contains("## 住宿").contains("（2 晚）[**钟楼酒店**](https://x)")
+                .contains("约 ¥300/晚（携程，以预订页为准）");
+    }
+
+    private static Itinerary.Stay stay(String id, String name, String in, String out) {
+        return new Itinerary.Stay(id, name, in, out, null, 300, "携程", "https://x", null, null, null, null, null,
+                null, null, null);
+    }
+
     private static TripTools.PlanItem item(String start, String end, String type, String name) {
         return new TripTools.PlanItem(start, end, type, name, null, null, null, null);
     }

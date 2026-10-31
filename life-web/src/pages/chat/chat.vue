@@ -77,7 +77,7 @@
               </view>
               <template v-for="seg in segments(m)" :key="seg.key">
                 <view v-if="seg.card" class="answer-card">
-                  <ChatCard :card="seg.card" :active="m === messages[messages.length - 1] && !sending" @submit="send" />
+                  <ChatCard :card="seg.card" :active="m === messages[messages.length - 1] && !sending" :conversation-id="currentId" @submit="send" />
                 </view>
                 <view v-else class="answer-text"><MarkdownView :text="seg.text || ''" /></view>
               </template>
@@ -116,13 +116,13 @@
       </view>
     </view>
 
-    <PlanPanel v-if="wide" class="side-panel" :trip="latestTrip" />
+    <PlanPanel v-if="wide" class="side-panel" :trip="latestTrip" :plans="latestPlans" @send="send" />
   </view>
   </Shell>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { onLoad, onShow } from "@dcloudio/uni-app";
 import { api } from "../../api";
 import { getToken, showError } from "../../api/http";
@@ -134,6 +134,8 @@ import Icon from "../../components/Icon.vue";
 import PlanPanel from "../../components/PlanPanel.vue";
 import Shell from "../../components/Shell.vue";
 import { useWide } from "../../utils/screen";
+import { savePlans } from "../../utils/plans";
+import { currentCity } from "../../utils/place";
 import { relativeTime, SKILL_NAMES } from "../../utils/format";
 
 /** 页面上的一条消息；assistant 消息的 status 跟着流式事件变化。 */
@@ -149,12 +151,14 @@ interface UiMessage {
   error?: string;
 }
 
+/** 示例问题，城市用顶栏选的当前城市 */
+const city = currentCity();
 const suggestions = [
-  "帮我规划西安 4 天 3 晚行程",
-  "带父母去西安，有哪些适合的景点？",
-  "西安有哪些必吃的美食？",
-  "西安这周天气怎么样？",
-  "帮我找从深圳到西安的机票",
+  `帮我规划${city} 4 天 3 晚行程`,
+  `带父母去${city}，有哪些适合的景点？`,
+  `${city}有哪些必吃的美食？`,
+  `${city}这周天气怎么样？`,
+  `帮我找去${city}的机票`,
 ];
 
 const wide = useWide();
@@ -165,6 +169,15 @@ api.me().then((u) => (myInitial.value = (u.nickname || u.username).slice(0, 1).t
 const latestTrip = computed(() => {
   for (let i = messages.value.length - 1; i >= 0; i--) {
     const card = [...messages.value[i].cards].reverse().find((c) => c.kind === "trip");
+    if (card) return card.data;
+  }
+  return null;
+});
+
+/** 当前会话里最后一张方案卡（三套方案），右侧面板在还没有行程时显示它 */
+const latestPlans = computed(() => {
+  for (let i = messages.value.length - 1; i >= 0; i--) {
+    const card = [...messages.value[i].cards].reverse().find((c) => c.kind === "plan_options");
     if (card) return card.data;
   }
   return null;
@@ -181,6 +194,7 @@ function steps(m: UiMessage): { title: string; detail?: string; state: "done" | 
     else if (c.kind === "hotels") out.push({ title: "查询酒店信息", detail: `比价 ${d.results?.length ?? 0} 家酒店`, state: "done" });
     else if (c.kind === "restaurants") out.push({ title: "查询美食", detail: `找到 ${d.restaurants?.length ?? 0} 家餐厅`, state: "done" });
     else if (c.kind === "trip") out.push({ title: "生成行程方案", detail: `${d.title}（${d.days?.length ?? 0} 天）`, state: "done" });
+    else if (c.kind === "plan_options") out.push({ title: "生成三套方案", detail: (d.options || []).map((o: any) => o.title).join("、"), state: "done" });
     else if (c.kind === "requirement") out.push({ title: "整理需求", detail: "请在卡片上确认", state: "done" });
   }
   if (m.status === "waiting" || m.status === "streaming") {
@@ -198,6 +212,11 @@ function notYet(what: string) {
 const conversations = ref<Conversation[]>([]);
 const currentId = ref<string | null>(null);
 const messages = ref<UiMessage[]>([]);
+
+// 记下最近的方案，方案对比页从本地读
+watch(latestPlans, (plans) => {
+  if (plans) savePlans(plans, currentId.value);
+});
 const input = ref("");
 const sending = ref(false);
 const showList = ref(false);
@@ -213,11 +232,12 @@ const currentTitle = computed(() => {
 onShow(loadConversations);
 
 /** 从首页等处跳过来：q 是要直接发的问题，id 是要打开的会话。 */
-onLoad((query) => {
+onLoad(async (query) => {
+  if (query?.id) {
+    await open({ id: query.id } as Conversation);
+  }
   if (query?.q) {
     send(decodeURIComponent(query.q));
-  } else if (query?.id) {
-    open({ id: query.id } as Conversation);
   }
 });
 

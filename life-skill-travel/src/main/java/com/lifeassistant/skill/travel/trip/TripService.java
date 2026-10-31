@@ -1,6 +1,7 @@
 package com.lifeassistant.skill.travel.trip;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.lifeassistant.common.auth.UserCtx;
 import com.lifeassistant.common.error.BizException;
 import com.lifeassistant.core.schedule.ScheduleEvent;
@@ -125,6 +126,31 @@ public class TripService {
             throw BizException.notFound("行程版本");
         }
         return new TripDetail(trip, tripVersion);
+    }
+
+    /**
+     * 原地改某个版本的结构化行程，只用于补坐标、锁定这类不改内容的变化；内容有变要用 saveVersion 存新版本。
+     */
+    public void updateItinerary(long tripId, int version, String itinerary) {
+        updateItinerary(tripId, version, itinerary, null);
+    }
+
+    /** 同上，content 不为空时正文一起更新（比如重新比价后价格变了）。 */
+    public void updateItinerary(long tripId, int version, String itinerary, String content) {
+        versionMapper.update(null, new LambdaUpdateWrapper<TripVersion>()
+                .set(TripVersion::getItinerary, itinerary)
+                .set(content != null, TripVersion::getContent, content)
+                .eq(TripVersion::getTripId, tripId)
+                .eq(TripVersion::getVersion, version));
+    }
+
+    /** 不校验用户，取行程和指定版本；只给后台任务（比如保存后补坐标）用。 */
+    public TripDetail getInternal(long tripId, int version) {
+        Trip trip = tripMapper.selectById(tripId);
+        TripVersion tripVersion = trip == null ? null : versionMapper.selectOne(new LambdaQueryWrapper<TripVersion>()
+                .eq(TripVersion::getTripId, tripId)
+                .eq(TripVersion::getVersion, version));
+        return tripVersion == null ? null : new TripDetail(trip, tripVersion);
     }
 
     /** 版本历史，新版本在前；不查 content，只返回版本号、改动说明、作者和时间。 */

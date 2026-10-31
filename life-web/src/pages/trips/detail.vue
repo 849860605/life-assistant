@@ -4,9 +4,8 @@
     <view class="ed-head">
       <view class="back" @click="goBack"><Icon name="back" :size="22" color="var(--ink)" /></view>
       <text class="ed-title">{{ trip?.title }} 行程编辑</text>
-      <text v-if="isDemo" class="plan-chip"><Icon name="crown" :size="13" color="var(--accent)" /> 舒适方案</text>
       <text class="tag" :class="trip?.status === 'DRAFT' ? '' : 'ok'">{{ trip?.status === "DRAFT" ? "草稿" : "已确认" }}</text>
-      <text v-if="isDemo" class="tag">示例</text>
+      <text v-if="!isCurrent" class="tag">正在看第 {{ detail?.version.version }} 版</text>
       <view class="ed-actions">
         <view class="ghost-act" @click="notYet('分享')"><Icon name="send" :size="15" color="var(--ink)" />分享</view>
         <view class="ghost-act" @click="notYet('下载 PDF')"><Icon name="layers" :size="15" color="var(--ink)" />下载PDF</view>
@@ -16,9 +15,19 @@
     </view>
     <view class="ed-chips">
       <view class="ed-chip"><Icon name="calendar" :size="15" color="var(--accent)" />{{ cnDate(trip?.startDate) }} – {{ cnDate(trip?.endDate) }}（{{ days.length }}天{{ Math.max(days.length - 1, 0) }}晚）</view>
-      <view v-if="isDemo" class="ed-chip"><Icon name="users" :size="15" color="var(--accent)" />{{ REQUIREMENT.people }}</view>
-      <view class="ed-chip"><Icon name="wallet" :size="15" color="var(--accent)" />景点餐饮约 ¥{{ totalCost }}/人</view>
-      <text v-for="t in (isDemo ? REQUIREMENT.tags : [])" :key="t" class="ed-tag">{{ t }}</text>
+      <view v-if="trip?.destination" class="ed-chip"><Icon name="pin" :size="15" color="var(--accent)" />{{ trip.destination }}</view>
+      <view class="ed-chip"><Icon name="wallet" :size="15" color="var(--accent)" />景点餐饮约 ¥{{ totalCost }}/人<text v-if="stayCost"> · 住宿约 ¥{{ stayCost }}/间</text></view>
+      <view v-if="versions.length > 1" class="ed-chip ver-chip">
+        <text class="muted">版本</text>
+        <text v-for="v in versions" :key="v.version" class="ver" :class="{ on: v.version === detail?.version.version }" @click="load(v.version)">{{ v.version }}</text>
+      </view>
+      <text v-if="geoLoading" class="ed-tag">正在补地图信息…</text>
+    </view>
+    <view v-if="saved" class="saved">
+      <Icon name="checkCircle" :size="16" color="var(--ok)" />
+      <text>{{ saved.note }}，已保存为第 {{ saved.to }} 版</text>
+      <text class="saved-link" @click="go(`/pages/plan/updated?id=${tripId}&from=${saved.from}&to=${saved.to}`)">查看前后对比 ›</text>
+      <view class="saved-x" @click="saved = null"><Icon name="close" :size="14" color="var(--muted)" /></view>
     </view>
 
     <view class="ed-cols">
@@ -38,36 +47,38 @@
         <view class="day-h-sub">{{ day?.items.filter((x) => x.type !== "TRANSPORT").map((x) => x.name).join(" · ") }}</view>
 
         <view class="tl">
-          <template v-for="(item, i) in day?.items" :key="item.id">
+          <template v-for="item in day?.items" :key="item.id">
             <view class="tl-item">
               <view class="tl-time">{{ item.start }}</view>
               <view class="tl-dot" />
-              <view class="tl-card">
+              <view class="tl-card" :class="{ locked: item.locked }">
                 <view class="tl-main">
-                  <image v-if="imageFor(item.name)" class="tl-img" :src="imageFor(item.name)" mode="aspectFill" />
+                  <image v-if="item.photo && !broken[item.id]" class="tl-img" @error="broken[item.id] = true" :src="item.photo" mode="aspectFill" />
                   <view v-else class="tl-img ph" :class="item.type"><Icon :name="TYPE_ICON[item.type] || 'pin'" :size="24" color="#fff" /></view>
                   <view class="tl-body">
                     <view class="tl-name">
                       <text :class="{ link: item.url }" @click="openUrl(item.url)">{{ item.name }}</text>
-                      <text v-if="i === 0 && item.type === 'SPOT'" class="must">必去景点</text>
+                      <text v-if="item.type === 'SPOT' && (item.rating || 0) >= 4.8" class="must">高分景点</text>
+                      <text v-if="item.locked" class="kept-tag">已保留</text>
                     </view>
                     <view class="tl-note">{{ item.note }}</view>
                     <view class="tl-facts">
                       <text><Icon name="calendar" :size="12" color="var(--muted)" /> {{ duration(item) }}</text>
+                      <text v-if="item.rating" class="star">★ {{ item.rating }}</text>
                       <text v-if="item.address"><Icon name="pin" :size="12" color="var(--muted)" /> {{ item.address }}</text>
                       <text v-if="item.cost" class="cost">¥{{ item.cost }}/人</text>
                     </view>
                   </view>
-                  <view class="tl-more" @click="notYet('更多操作')"><Icon name="more" :size="16" color="var(--muted)" /></view>
+                  <view v-if="isCurrent" class="tl-more" @click="more(item)"><Icon name="more" :size="16" color="var(--muted)" /></view>
                 </view>
-                <view v-if="item.type !== 'TRANSPORT'" class="tl-acts">
-                  <view class="a keep" :class="{ on: kept[item.id] }" @click="toggleKeep(item.id)"><Icon name="heart" :size="13" :fill="kept[item.id]" color="var(--ok)" />{{ kept[item.id] ? "已保留" : "喜欢，保留" }}</view>
-                  <view class="a swap" @click="openReplace(item)"><Icon name="refresh" :size="13" color="var(--accent)" />去过了，换一个</view>
-                  <view class="a" @click="dislike(item.name)"><Icon name="close" :size="13" color="var(--muted)" />不感兴趣</view>
+                <view v-if="isCurrent && EDITABLE.includes(item.type)" class="tl-acts">
+                  <view class="a keep" :class="{ on: item.locked }" @click="toggleKeep(item)"><Icon name="heart" :size="13" :fill="!!item.locked" color="var(--ok)" />{{ item.locked ? "已保留" : "喜欢，保留" }}</view>
+                  <view class="a swap" @click="openReplace(item, 'VISITED')"><Icon name="refresh" :size="13" color="var(--accent)" />去过了，换一个</view>
+                  <view class="a" @click="openReplace(item, 'DISLIKE')"><Icon name="close" :size="13" color="var(--muted)" />不感兴趣</view>
                 </view>
               </view>
             </view>
-            <view v-if="leg(item.id)" class="tl-leg"><Icon name="car" :size="13" color="var(--muted)" />{{ leg(item.id) }}</view>
+            <view v-if="legFrom(day, item.id)" class="tl-leg"><Icon :name="legFrom(day, item.id)!.mode === 'WALK' ? 'users' : 'car'" :size="13" color="var(--muted)" />{{ legText(legFrom(day, item.id)) }}</view>
           </template>
         </view>
         <view class="tl-add" @click="addStop"><Icon name="plus" :size="16" color="var(--accent)" />添加景点 / 活动</view>
@@ -76,48 +87,69 @@
       <!-- 中：当天概览、美食、酒店 -->
       <view class="ed-mid">
         <view class="day-hero">
-          <image class="day-hero-img" :src="dayHero" mode="aspectFill" />
+          <image v-if="dayHero" class="day-hero-img" :src="dayHero" mode="aspectFill" />
+          <view v-else class="day-hero-img hero-ph" />
           <view class="overview">
             <view class="ov-title">当天行程概览</view>
             <view class="ov-grid">
               <view class="ov"><Icon name="pin" :size="18" color="var(--accent)" /><view><view class="ov-k">景点</view><view class="ov-v">{{ dayStats.spots }} 个</view></view></view>
               <view class="ov"><Icon name="food" :size="18" color="var(--accent)" /><view><view class="ov-k">美食</view><view class="ov-v">{{ dayStats.foods }} 个</view></view></view>
               <view class="ov"><Icon name="calendar" :size="18" color="var(--accent)" /><view><view class="ov-k">总时长</view><view class="ov-v">{{ dayStats.hours }}</view></view></view>
-              <view class="ov"><Icon name="car" :size="18" color="var(--accent)" /><view><view class="ov-k">交通</view><view class="ov-v">{{ isDemo && dayIndex === 0 ? DAY1_SUMMARY.transport : "待计算" }}</view></view></view>
+              <view class="ov"><Icon name="car" :size="18" color="var(--accent)" /><view><view class="ov-k">路上</view><view class="ov-v">{{ travel.minutes ? duration2(travel.minutes) : "—" }}</view></view></view>
             </view>
           </view>
         </view>
 
         <view class="panel">
           <view class="panel-head"><text class="panel-title"><Icon name="food" :size="16" color="var(--accent)" /> 行程中的美食推荐</text><text class="more" @click="go('/pages/search/food')">查看更多 ›</text></view>
-          <view class="muted small">基于行程位置推荐，已按用餐时间排序 <text v-if="!isDemo">（示例）</text></view>
-          <view v-for="f in FOODS.slice(0, 3)" :key="f.name" class="food">
-            <image class="food-img" :src="f.image" mode="aspectFill" />
+          <view class="muted small">{{ anchor ? `${anchor.name} 附近，高德评分从高到低` : "这一天还没有带位置的景点" }}</view>
+          <view v-if="nearLoading" class="muted small pad">正在找附近的餐厅…</view>
+          <view v-for="f in foods.slice(0, 3)" :key="f.id" class="food">
+            <image v-if="f.photo && !broken[f.id]" @error="broken[f.id] = true" class="food-img" :src="f.photo" mode="aspectFill" />
+            <view v-else class="food-img ph FOOD"><Icon name="food" :size="22" color="#fff" /></view>
             <view class="food-body">
               <view class="food-name">{{ f.name }}</view>
-              <view class="food-meta"><text class="star">★ {{ f.rating }}</text> <text class="muted">高德评分</text></view>
-              <view class="food-tags"><text class="ftag">{{ f.tags[0] }}</text><text class="ftag">人均 ¥{{ f.avgPrice }}</text></view>
-              <view class="muted small">距离景点 {{ f.distance }}</view>
+              <view class="food-meta"><text v-if="f.rating" class="star">★ {{ f.rating }}</text> <text class="muted">高德评分</text></view>
+              <view class="food-tags"><text class="ftag">{{ f.category }}</text><text v-if="f.cost" class="ftag">人均 ¥{{ f.cost }}</text></view>
+              <view v-if="f.distance != null" class="muted small">距离{{ anchor?.name }} {{ distanceText(f.distance) }}</view>
             </view>
-            <button class="btn ghost small add" :class="{ done: addedFood[f.name] }" @click="addFood(f.name)">{{ addedFood[f.name] ? "已加入" : "加入行程" }}</button>
+            <button v-if="isCurrent" class="btn ghost small add" :class="{ done: added[f.id] }" :disabled="added[f.id]" @click="addPlace(f, 'FOOD')">{{ added[f.id] ? "已加入" : "加入行程" }}</button>
           </view>
         </view>
 
         <view class="panel">
           <view class="panel-head"><text class="panel-title"><Icon name="bed" :size="16" color="var(--accent)" /> 当日酒店</text></view>
-          <view class="muted small"><Icon name="checkCircle" :size="12" color="var(--ok)" /> {{ cnDate(day?.date) }} 入住 · 钟楼附近 <text v-if="!isDemo">（示例）</text></view>
-          <view class="food">
-            <image class="food-img" :src="HOTELS[0].image" mode="aspectFill" />
-            <view class="food-body">
-              <view class="food-name">{{ HOTELS[0].name }}</view>
-              <view class="food-meta"><text class="star">★ {{ HOTELS[0].rating }}</text> <text class="muted">高德评分</text></view>
-              <view class="food-tags"><text v-for="t in HOTELS[0].tags" :key="t" class="ftag blue">{{ t }}</text></view>
+          <StayCard v-if="dayStay" :key="dayStay.id + dayStay.name" :stay="dayStay" :trip-id="tripId" :editable="isCurrent" @saved="onSaved" @updated="detail = $event" />
+          <template v-else-if="hotel">
+            <view class="muted small"><Icon name="checkCircle" :size="12" color="var(--ok)" /> {{ cnDate(day?.date) }} 住这里<text v-if="hotel.address"> · {{ hotel.address }}</text></view>
+            <view class="food">
+              <image v-if="hotel.photo" class="food-img" :src="hotel.photo" mode="aspectFill" />
+              <view v-else class="food-img ph"><Icon name="bed" :size="22" color="#fff" /></view>
+              <view class="food-body">
+                <view class="food-name">{{ hotel.name }}</view>
+                <view class="food-meta"><text v-if="hotel.rating" class="star">★ {{ hotel.rating }}</text> <text v-if="hotel.rating" class="muted">高德评分</text></view>
+                <view v-if="hotel.note" class="muted small">{{ hotel.note }}</view>
+              </view>
+              <view class="hotel-side">
+                <text v-if="hotel.cost" class="price">¥{{ hotel.cost }}</text>
+                <button v-if="isCurrent && hotelInDay" class="btn ghost small add" @click="openReplace(hotelInDay, null)">更换酒店</button>
+                <button v-else class="btn ghost small add" @click="go('/pages/search/flight?tab=hotel')">去比价</button>
+              </view>
             </view>
-            <view class="hotel-side">
-              <text class="price">¥{{ HOTELS[0].price }}<text class="qi">起</text></text>
-              <button class="btn ghost small add" @click="go('/pages/search/flight?tab=hotel')">更换酒店</button>
+          </template>
+          <template v-else>
+            <view class="muted small">行程里还没安排酒店，下面是{{ anchor?.name || "附近" }}的酒店（高德）</view>
+            <view v-for="h in hotels.slice(0, 2)" :key="h.id" class="food">
+              <image v-if="h.photo && !broken[h.id]" @error="broken[h.id] = true" class="food-img" :src="h.photo" mode="aspectFill" />
+              <view v-else class="food-img ph"><Icon name="bed" :size="22" color="#fff" /></view>
+              <view class="food-body">
+                <view class="food-name">{{ h.name }}</view>
+                <view class="food-meta"><text v-if="h.rating" class="star">★ {{ h.rating }}</text> <text class="muted">{{ h.category }}</text></view>
+                <view v-if="h.distance != null" class="muted small">距离 {{ distanceText(h.distance) }}</view>
+              </view>
+              <button v-if="isCurrent" class="btn ghost small add" :class="{ done: added[h.id] }" :disabled="added[h.id]" @click="addPlace(h, 'HOTEL')">{{ added[h.id] ? "已加入" : "加入行程" }}</button>
             </view>
-          </view>
+          </template>
         </view>
       </view>
 
@@ -129,14 +161,14 @@
             <text class="seg-item" :class="{ on: rightTab === 'time' }" @click="rightTab = 'time'">时间安排</text>
           </view>
           <template v-if="rightTab === 'map'">
-            <image v-if="isDemo && dayIndex === 0" class="r-map" :src="ROUTE_MAP_WIDE" mode="aspectFill" @click="go('/pages/plan/map')" />
-            <view v-else class="r-map empty-map"><Icon name="nav" :size="28" color="var(--muted)" /><text class="muted small">这一天的路线地图在阶段二接入</text></view>
+            <image v-if="dayMap" class="r-map" :src="dayMap" mode="aspectFill" @click="openMap" />
+            <view v-else class="r-map empty-map"><Icon name="nav" :size="28" color="var(--muted)" /><text class="muted small">{{ geoLoading ? "正在补坐标…" : "这一天的地点在高德上没找到坐标" }}</text></view>
             <view class="route-info">
               <view class="ri-title">路线信息</view>
               <view class="ri-grid">
-                <view class="ri"><Icon name="car" :size="18" color="var(--accent)" /><view><view class="ov-k">总距离</view><view class="ov-v">{{ isDemo && dayIndex === 0 ? DAY1_SUMMARY.distance : "待计算" }}</view></view></view>
-                <view class="ri"><Icon name="calendar" :size="18" color="var(--accent)" /><view><view class="ov-k">车程</view><view class="ov-v">{{ isDemo && dayIndex === 0 ? DAY1_SUMMARY.drive : "待计算" }}</view></view></view>
-                <view class="ri"><Icon name="wallet" :size="18" color="var(--accent)" /><view><view class="ov-k">交通费用</view><view class="ov-v">{{ isDemo && dayIndex === 0 ? DAY1_SUMMARY.transport : "待计算" }}</view></view></view>
+                <view class="ri"><Icon name="route" :size="18" color="var(--accent)" /><view><view class="ov-k">总距离</view><view class="ov-v">{{ travel.km ? `约 ${travel.km} 公里` : "—" }}</view></view></view>
+                <view class="ri"><Icon name="car" :size="18" color="var(--accent)" /><view><view class="ov-k">路上</view><view class="ov-v">{{ travel.minutes ? duration2(travel.minutes) : "—" }}</view></view></view>
+                <view class="ri"><Icon name="users" :size="18" color="var(--accent)" /><view><view class="ov-k">步行段</view><view class="ov-v">{{ walkLegs }} / {{ day?.legs?.length || 0 }} 段</view></view></view>
               </view>
             </view>
           </template>
@@ -147,25 +179,27 @@
 
         <view class="panel">
           <view class="panel-head"><text class="panel-title"><Icon name="sparkle" :size="16" color="var(--accent)" /> 附近其他推荐景点</text></view>
+          <view v-if="!spots.length" class="muted small pad">{{ nearLoading ? "正在找…" : anchor ? "附近没找到别的景点" : "这一天还没有带位置的景点" }}</view>
           <view class="near-grid">
-            <view v-for="r in REPLACEMENTS.slice(0, 3)" :key="r.name" class="near">
-              <image class="near-img" :src="r.image" mode="aspectFill" />
+            <view v-for="r in spots.slice(0, 3)" :key="r.id" class="near">
+              <image v-if="r.photo && !broken[r.id]" @error="broken[r.id] = true" class="near-img" :src="r.photo" mode="aspectFill" />
+              <view v-else class="near-img ph"><Icon name="pin" :size="20" color="#fff" /></view>
               <view class="near-name">{{ r.name }}</view>
-              <view class="near-meta"><text class="star">★ {{ r.rating }}</text> · {{ r.distance }}</view>
-              <view class="near-btn" @click="openReplace(day!.items[0], r.name)">替换为此景点</view>
+              <view class="near-meta"><text v-if="r.rating" class="star">★ {{ r.rating }}</text><text v-if="r.distance != null"> · {{ distanceText(r.distance) }}</text></view>
+              <view v-if="isCurrent" class="near-btn" :class="{ done: added[r.id] }" @click="!added[r.id] && addPlace(r, 'SPOT')">{{ added[r.id] ? "已加入" : "加入这一天" }}</view>
             </view>
           </view>
         </view>
 
         <view class="panel">
-          <view class="panel-head"><text class="panel-title"><Icon name="chat" :size="16" color="var(--accent)" /> AI 调整建议</text></view>
-          <view v-for="sg in (isDemo ? SUGGESTIONS : ['想调整哪里直接说，例如：第二天轻松一点'])" :key="sg" class="sg"><Icon name="checkCircle" :size="14" color="var(--ok)" /><text>{{ sg }}</text></view>
-          <button class="btn ghost regen" @click="regenerate">重新生成当天行程</button>
+          <view class="panel-head"><text class="panel-title"><Icon name="chat" :size="16" color="var(--accent)" /> 调整建议</text></view>
+          <view v-for="sg in suggestions" :key="sg.text" class="sg"><Icon :name="sg.warn ? 'flag' : 'checkCircle'" :size="14" :color="sg.warn ? 'var(--price)' : 'var(--ok)'" /><text>{{ sg.text }}</text></view>
+          <button class="btn ghost regen" @click="regenerate">让助手重新安排当天</button>
         </view>
       </view>
     </view>
 
-    <ReplaceModal v-if="replacing" :item="replacing" :day-no="dayIndex + 1" :initial="replaceTo" @close="replacing = null" @confirm="confirmReplace" />
+    <ReplaceModal v-if="replacing" :trip-id="tripId" :item="replacing" :day-no="dayIndex + 1" :reason="replaceReason" @close="replacing = null" @saved="onSaved" />
   </view>
 
   <view v-else class="page">
@@ -173,9 +207,14 @@
       <view class="title-row">
         <text class="title">{{ trip.title }}</text>
         <text class="tag" :class="trip.status === 'DRAFT' ? '' : 'ok'">{{ trip.status === "DRAFT" ? "草稿" : "已确认" }}</text>
-        <text v-if="isDemo" class="tag">示例</text>
       </view>
       <view class="meta">{{ trip.destination }} · {{ cnDate(trip.startDate) }} – {{ cnDate(trip.endDate) }}</view>
+    </view>
+    <view v-if="saved" class="saved">
+      <Icon name="checkCircle" :size="16" color="var(--ok)" />
+      <text>已保存为第 {{ saved.to }} 版</text>
+      <text class="saved-link" @click="go(`/pages/plan/updated?id=${tripId}&from=${saved.from}&to=${saved.to}`)">前后对比 ›</text>
+      <view class="saved-x" @click="saved = null"><Icon name="close" :size="14" color="var(--muted)" /></view>
     </view>
 
     <view class="tabs">
@@ -200,32 +239,37 @@
           </view>
           <view class="stop-card">
             <view class="stop-main">
-              <image v-if="imageFor(item.name)" class="thumb" :src="imageFor(item.name)" mode="aspectFill" />
+              <image v-if="item.photo && !broken[item.id]" class="thumb" @error="broken[item.id] = true" :src="item.photo" mode="aspectFill" />
               <view v-else class="thumb placeholder" :class="item.type"><Icon :name="TYPE_ICON[item.type] || 'pin'" :size="22" color="#fff" /></view>
               <view class="stop-body">
                 <view class="stop-name" :class="{ link: item.url }" @click="openUrl(item.url)">{{ item.name }}</view>
-                <view class="stop-time">{{ item.start }}<text v-if="item.end"> - {{ item.end }}</text><text v-if="item.cost" class="cost"> · ¥{{ item.cost }}/人</text></view>
+                <view class="stop-time">{{ item.start }}<text v-if="item.end"> - {{ item.end }}</text><text v-if="item.rating" class="star"> · ★{{ item.rating }}</text><text v-if="item.cost" class="cost"> · ¥{{ item.cost }}/人</text></view>
                 <view v-if="item.note" class="stop-note">{{ item.note }}</view>
               </view>
             </view>
-            <view v-if="item.type !== 'TRANSPORT'" class="stop-actions">
-              <view class="act keep" :class="{ on: kept[item.id] }" @click="toggleKeep(item.id)">
-                <Icon name="heart" :size="13" :fill="kept[item.id]" color="var(--ok)" />
-                <text>{{ kept[item.id] ? "已保留" : "喜欢，保留" }}</text>
+            <view v-if="isCurrent && EDITABLE.includes(item.type)" class="stop-actions">
+              <view class="act keep" :class="{ on: item.locked }" @click="toggleKeep(item)">
+                <Icon name="heart" :size="13" :fill="!!item.locked" color="var(--ok)" />
+                <text>{{ item.locked ? "已保留" : "喜欢，保留" }}</text>
               </view>
-              <view class="act" @click="replace(item.name)">
+              <view class="act" @click="openReplace(item, 'VISITED')">
                 <Icon name="refresh" :size="13" color="var(--ink)" />
                 <text>换一个</text>
               </view>
-              <view class="act ghost" @click="dislike(item.name)">
+              <view class="act ghost" @click="openReplace(item, 'DISLIKE')">
                 <Icon name="close" :size="13" color="var(--muted)" />
                 <text>不感兴趣</text>
               </view>
               <view class="grip" @click="edit"><Icon name="grip" :size="16" color="var(--muted)" /></view>
             </view>
+            <view v-if="legFrom(day, item.id)" class="stop-leg"><Icon name="car" :size="12" color="var(--muted)" />到下一站 {{ legText(legFrom(day, item.id)) }}</view>
           </view>
         </view>
         <view class="add" @click="addStop"><Icon name="plus" :size="16" color="var(--accent)" /><text>添加景点/活动</text></view>
+        <view v-if="dayStay" class="m-stay">
+          <view class="m-stay-title"><Icon name="bed" :size="15" color="var(--accent)" /> 今晚住</view>
+          <StayCard :key="dayStay.id + dayStay.name" :stay="dayStay" :trip-id="tripId" :editable="isCurrent" @saved="onSaved" @updated="detail = $event" />
+        </view>
       </view>
 
       <view v-if="tab === '费用明细'" class="costs">
@@ -236,7 +280,12 @@
           </view>
         </view>
         <view class="cost-total"><text>景点和餐饮合计（每人）</text><text class="price big">¥{{ totalCost }}</text></view>
-        <view class="muted small">不含机票和住宿；机票、酒店价格见比价页。</view>
+        <view v-for="st in stays" :key="st.id" class="cost-row">
+          <text>住宿 · {{ st.name }}（{{ nightsOf(st) }} 晚）</text>
+          <text class="muted">{{ st.price ? `¥${st.price} × ${nightsOf(st)} = ¥${st.price * nightsOf(st)}` : "暂无价格" }}</text>
+        </view>
+        <view v-if="stayCost" class="cost-total"><text>住宿合计（每间）</text><text class="price big">¥{{ stayCost }}</text></view>
+        <view class="muted small">不含机票；住宿是比价时的每晚最低价，以预订页为准。</view>
       </view>
 
       <view v-if="tips && tab === '行程总览'" class="tips">
@@ -265,87 +314,183 @@
 
     <view v-if="trip" class="bottom">
       <button v-if="trip.status === 'DRAFT'" class="btn" @click="confirmTrip">确认这个行程</button>
-      <button v-if="!isDemo" class="btn danger" @click="removeTrip">删除</button>
+      <button class="btn danger" @click="removeTrip">删除</button>
     </view>
   </view>
   </Shell>
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref } from "vue";
-import { onLoad } from "@dcloudio/uni-app";
+import { computed, reactive, ref, watch } from "vue";
+import { onLoad, onShow } from "@dcloudio/uni-app";
 import { api } from "../../api";
 import { showError } from "../../api/http";
-import type { ItineraryDay, ItineraryItem, ScheduleEvent, TripDetail, TripVersion } from "../../api/types";
+import type { ChangeReason, ItineraryDay, ItineraryItem, Place, ScheduleEvent, Stay, TripDetail, TripVersion } from "../../api/types";
 import Icon from "../../components/Icon.vue";
 import MarkdownView from "../../components/MarkdownView.vue";
 import ReplaceModal from "../../components/ReplaceModal.vue";
+import StayCard from "../../components/StayCard.vue";
 import Shell from "../../components/Shell.vue";
-import {
-  DAY1_LEGS, DAY1_SUMMARY, DAY_HERO, DEMO_TRIP, FOODS, HOTELS, imageFor, REPLACEMENTS, REQUIREMENT, ROUTE_MAP_WIDE, SUGGESTIONS,
-} from "../../demo/xian";
 import { useWide } from "../../utils/screen";
 import { hm, openUrl, shortDate } from "../../utils/format";
+import { dayMapUrl, dayTravel, distanceText, duration as duration2, legFrom, legText, located } from "../../utils/place";
 
-/** 行程详情（原型④）：按天切换的时间线，每项可以保留、换一个、不感兴趣；id=demo 时显示示例行程。 */
+/**
+ * 行程详情（原型④）：按天切换的时间线，每项可以保留、换一个、不感兴趣，改完存成新版本。
+ * 坐标、照片、路程由后端从高德补；电脑上中栏和右栏的美食、酒店、附近景点按当天第一个景点的位置从高德查。
+ */
 const TABS = ["行程总览", "地图路线", "费用明细"];
 const TYPE_ICON: Record<string, string> = { SPOT: "pin", FOOD: "food", HOTEL: "bed", TRANSPORT: "car", FREE: "sparkle" };
+/** 这些类型能保留、换、删；交通和自由活动不能 */
+const EDITABLE = ["SPOT", "FOOD", "HOTEL"];
 
-const isDemo = ref(false);
 const tripId = ref(0);
 const detail = ref<TripDetail | null>(null);
 const versions = ref<TripVersion[]>([]);
 const events = ref<ScheduleEvent[]>([]);
 const tab = ref("行程总览");
 const dayIndex = ref(0);
-const kept = reactive<Record<string, boolean>>({});
 const wide = useWide();
 const rightTab = ref("map");
-const addedFood = reactive<Record<string, boolean>>({});
 const replacing = ref<ItineraryItem | null>(null);
-const replaceTo = ref("");
-/** 示例行程的可编辑副本，替换景点后直接改它 */
-const demoDays = ref<ItineraryDay[]>(JSON.parse(JSON.stringify(DEMO_TRIP.days)));
+const replaceReason = ref<ChangeReason | null>(null);
+const geoLoading = ref(false);
+/** 最近一次修改：改了什么、从第几版到第几版，用来提示和跳前后对比 */
+const saved = ref<{ note: string; from: number; to: number } | null>(null);
+const foods = ref<Place[]>([]);
+const spots = ref<Place[]>([]);
+const hotels = ref<Place[]>([]);
+const nearLoading = ref(false);
+/** 这次打开页面后已加入行程的地点 id */
+const added = reactive<Record<string, boolean>>({});
+/** 加载失败的高德照片，改显示占位图 */
+const broken = reactive<Record<string, boolean>>({});
+let loaded = false;
 
-/** 页面头部要的信息，示例和真实行程统一成一个形状 */
-const trip = computed(() =>
-  isDemo.value
-    ? DEMO_TRIP
-    : detail.value && {
-        title: detail.value.trip.title,
-        destination: detail.value.trip.destination,
-        startDate: detail.value.trip.startDate,
-        endDate: detail.value.trip.endDate,
-        status: detail.value.trip.status,
-      },
-);
-const days = computed<ItineraryDay[]>(() => (isDemo.value ? demoDays.value : detail.value?.version.itinerary?.days || []));
+const trip = computed(() => detail.value?.trip);
+/** 只有当前版本能改；看历史版本时隐藏操作按钮 */
+const isCurrent = computed(() => !!detail.value && detail.value.version.version === detail.value.trip.currentVer);
+const days = computed<ItineraryDay[]>(() => detail.value?.version.itinerary?.days || []);
+const day = computed(() => days.value[dayIndex.value]);
+const tips = computed(() => detail.value?.version.itinerary?.tips);
+const totalCost = computed(() => days.value.reduce((s, d) => s + dayCost(d), 0));
+const travel = computed(() => dayTravel(day.value));
+const walkLegs = computed(() => (day.value?.legs || []).filter((l) => l.mode === "WALK").length);
+const dayMap = computed(() => dayMapUrl(day.value, 380, 270));
+/** 当天大图：第一张有照片的景点，没有就用任意有照片的项 */
+const dayHero = computed(() => {
+  const items = day.value?.items || [];
+  return (items.find((x) => x.type === "SPOT" && x.photo) || items.find((x) => x.photo))?.photo || "";
+});
+/** 找附近美食、景点的中心：当天第一个有坐标的景点，没有就用第一个有坐标的项 */
+const anchor = computed(() => {
+  const list = located(day.value);
+  return list.find((x) => x.type === "SPOT") || list[0];
+});
+const stays = computed<Stay[]>(() => detail.value?.version.itinerary?.stays || []);
+/** 当天晚上住的那段住宿；最后一天（离店日）显示离店的那家 */
+const dayStay = computed(() => {
+  const date = day.value?.date;
+  if (!date) return undefined;
+  return stays.value.find((st) => st.checkIn <= date && date < st.checkOut) || stays.value.find((st) => st.checkOut === date);
+});
+/** 住宿合计：每段每晚价格 × 晚数 */
+const stayCost = computed(() => stays.value.reduce((s, st) => s + (st.price || 0) * nightsOf(st), 0));
+
+function nightsOf(st: Stay) {
+  const a = new Date(`${st.checkIn}T00:00:00`).getTime();
+  const b = new Date(`${st.checkOut}T00:00:00`).getTime();
+  return a && b && b > a ? Math.round((b - a) / 86400000) : 0;
+}
+
+/** 行程没有住宿信息时（早期的行程）：当天安排里的酒店项，没有就往前找最近一天的 */
+const hotelInDay = computed(() => day.value?.items.find((x) => x.type === "HOTEL"));
+const hotel = computed(() => {
+  if (hotelInDay.value) return hotelInDay.value;
+  for (let i = dayIndex.value - 1; i >= 0; i--) {
+    const h = days.value[i].items.find((x) => x.type === "HOTEL");
+    if (h) return h;
+  }
+  return undefined;
+});
 /** 当天概览：景点数、吃饭数、从第一项开始到最后一项结束的时长 */
 const dayStats = computed(() => {
   const items = day.value?.items || [];
   const first = items.find((x) => x.start)?.start;
-  const last = [...items].reverse().find((x) => x.end)?.end;
-  const minutes = first && last ? toMin(last) - toMin(first) : 0;
+  const last = [...items].reverse().find((x) => x.end || x.start);
+  const minutes = first && last ? toMin(last.end || last.start!) - toMin(first) : 0;
   return {
     spots: items.filter((x) => x.type === "SPOT").length,
-    foods: items.filter((x) => x.type === "FOOD").length + (isDemo.value && dayIndex.value === 0 ? 2 : 0),
+    foods: items.filter((x) => x.type === "FOOD").length,
     hours: minutes > 0 ? `约 ${Math.round(minutes / 60)} 小时` : "待定",
+    minutes,
   };
 });
-const dayHero = computed(() => imageFor(day.value?.items.find((x) => x.type === "SPOT")?.name) || DAY_HERO);
-const tips = computed(() => (isDemo.value ? DEMO_TRIP.tips : detail.value?.version.itinerary?.tips));
-const day = computed(() => days.value[dayIndex.value]);
-const totalCost = computed(() => days.value.reduce((s, d) => s + dayCost(d), 0));
+/** 按真实数据给的提醒：路上太久、没安排午饭、一天排太满、有地点没找到坐标 */
+const suggestions = computed(() => {
+  const out: { text: string; warn: boolean }[] = [];
+  const d = day.value;
+  if (!d) return out;
+  const name = (id: string) => d.items.find((x) => x.id === id)?.name || "";
+  for (const l of d.legs || []) {
+    if (l.minutes >= 60) out.push({ text: `${name(l.from)} → ${name(l.to)} 路上要 ${duration2(l.minutes)}，可以考虑换近一点的地方`, warn: true });
+  }
+  const lunch = d.items.some((x) => x.type === "FOOD" && x.start && toMin(x.start) >= 600 && toMin(x.start) <= 840);
+  if (!lunch && d.items.length > 2) out.push({ text: "这一天没有安排午饭，可以从中间的美食推荐里加一家", warn: true });
+  if (dayStats.value.minutes >= 11 * 60) {
+    out.push({ text: `这一天安排了${dayStats.value.hours}，带老人小孩的话可以删掉一两项`, warn: true });
+  }
+  const missing = d.items.filter((x) => EDITABLE.includes(x.type) && x.lng == null).length;
+  if (missing && detail.value?.version.itinerary?.geo) out.push({ text: `有 ${missing} 个地点在高德上没对上，地图和路程里没算它们`, warn: false });
+  if (!out.length) out.push({ text: "这一天的路线和时间都比较顺，没发现明显问题", warn: false });
+  return out;
+});
 
 onLoad(async (query) => {
-  if (query?.id === "demo") {
-    isDemo.value = true;
-    uni.setNavigationBarTitle({ title: DEMO_TRIP.title });
+  tripId.value = Number(query?.id);
+  if (!tripId.value) {
+    uni.redirectTo({ url: "/pages/trips/trips" });
     return;
   }
-  tripId.value = Number(query?.id);
   await Promise.all([load(), loadVersions(), loadEvents()]);
+  loaded = true;
 });
+
+/** 从排序、替换页回来时刷新到最新版本 */
+onShow(() => {
+  if (loaded) load();
+});
+
+/** 换了一天或补完坐标后，按当天中心点查附近的美食、景点、酒店（只在电脑三栏里显示） */
+watch(
+  () => (wide.value && anchor.value ? `${anchor.value.lng},${anchor.value.lat}` : ""),
+  async (key) => {
+    if (!key || !anchor.value) {
+      foods.value = [];
+      spots.value = [];
+      hotels.value = [];
+      return;
+    }
+    const { lng, lat } = anchor.value as { lng: number; lat: number };
+    nearLoading.value = true;
+    const inTrip = new Set(days.value.flatMap((d) => d.items.map((x) => x.name)));
+    try {
+      const [f, s, h] = await Promise.all([
+        api.places({ kind: "food", lng, lat, radius: 2000, size: 8 }),
+        api.places({ kind: "spot", lng, lat, radius: 5000, size: 10 }),
+        hotel.value || dayStay.value ? Promise.resolve([] as Place[]) : api.places({ kind: "hotel", lng, lat, radius: 3000, size: 5 }),
+      ]);
+      foods.value = f.filter((p) => !inTrip.has(p.name));
+      spots.value = s.filter((p) => !inTrip.has(p.name) && (p.distance == null || p.distance > 150));
+      hotels.value = h;
+    } catch (e) {
+      showError(e);
+    } finally {
+      nearLoading.value = false;
+    }
+  },
+  { immediate: true },
+);
 
 function toMin(t: string) {
   const [h, m] = t.split(":").map(Number);
@@ -356,11 +501,6 @@ function duration(it: ItineraryItem) {
   if (!it.start || !it.end) return "时长待定";
   const hours = (toMin(it.end) - toMin(it.start)) / 60;
   return `约 ${Number.isInteger(hours) ? hours : hours.toFixed(1)} 小时`;
-}
-
-/** 示例第 1 天各站之间的交通；真实行程的交通在阶段二由高德计算 */
-function leg(id: string) {
-  return isDemo.value ? DAY1_LEGS[id] : "";
 }
 
 function go(url: string) {
@@ -378,41 +518,75 @@ function notYet(what: string) {
 }
 
 function changeNeeds() {
-  go("/pages/chat/chat?q=" + encodeURIComponent(`我想修改行程「${trip.value?.title}」的需求`));
+  go("/pages/chat/chat?q=" + encodeURIComponent(`我想修改行程「${trip.value?.title}」（tripId=${tripId.value}）的需求`));
 }
 
 function regenerate() {
-  if (isDemo.value) {
-    uni.showToast({ title: "示例行程：真实行程会让助手重排这一天", icon: "none" });
+  go("/pages/chat/chat?q=" + encodeURIComponent(`帮我重新安排行程「${trip.value?.title}」（tripId=${tripId.value}）的第${dayIndex.value + 1}天，保留我标了保留的地方`));
+}
+
+function openMap() {
+  go(`/pages/plan/map?id=${tripId.value}&day=${dayIndex.value + 1}`);
+}
+
+/** 换一个 / 不感兴趣：电脑上弹窗，手机上进替换页 */
+function openReplace(item: ItineraryItem, reason: ChangeReason | null) {
+  if (!wide.value) {
+    go(`/pages/plan/replace?id=${tripId.value}&item=${item.id}&reason=${reason || ""}`);
     return;
   }
-  go("/pages/chat/chat?q=" + encodeURIComponent(`帮我重新安排行程「${trip.value?.title}」（tripId=${tripId.value}）的第${dayIndex.value + 1}天`));
-}
-
-function addFood(name: string) {
-  addedFood[name] = !addedFood[name];
-  if (addedFood[name]) uni.showToast({ title: `已把${name}加到第${dayIndex.value + 1}天`, icon: "none" });
-}
-
-function openReplace(item: ItineraryItem, to = "") {
-  replaceTo.value = to;
+  replaceReason.value = reason;
   replacing.value = item;
 }
 
-/** 确认替换：示例行程直接改；真实行程交给助手改并保存新版本。 */
-function confirmReplace(name: string) {
-  const item = replacing.value!;
+/** 修改保存成新版本后：换上新内容、刷新版本列表、提示可以看前后对比 */
+function onSaved(d: TripDetail, note?: string) {
+  const from = detail.value?.version.version || d.version.version - 1;
   replacing.value = null;
-  if (isDemo.value) {
-    const target = demoDays.value[dayIndex.value].items.find((x) => x.id === item.id)!;
-    const row = REPLACEMENTS.find((r) => r.name === name);
-    target.name = name;
-    target.note = row?.desc || "";
-    target.address = undefined;
-    uni.showToast({ title: `已换成${name}，后续路线已重新规划`, icon: "none" });
-    return;
+  detail.value = d;
+  saved.value = { note: note || d.version.changeNote || "已修改", from, to: d.version.version };
+  uni.showToast({ title: `已保存为第 ${d.version.version} 版`, icon: "none" });
+  loadVersions();
+}
+
+async function toggleKeep(item: ItineraryItem) {
+  try {
+    detail.value = await api.lockItem(tripId.value, item.id, !item.locked);
+    uni.showToast({ title: item.locked ? "已取消保留" : "已保留，重新规划时不会动它", icon: "none" });
+  } catch (e) {
+    showError(e);
   }
-  go("/pages/chat/chat?q=" + encodeURIComponent(`把行程「${trip.value?.title}」（tripId=${tripId.value}）第${dayIndex.value + 1}天的「${item.name}」换成「${name}」，其他不变`));
+}
+
+/** 更多操作：删掉这一项、调整顺序 */
+function more(item: ItineraryItem) {
+  uni.showActionSheet({
+    itemList: ["删掉这一项", "调整这一天的顺序"],
+    success: async (res) => {
+      if (res.tapIndex === 1) {
+        edit();
+        return;
+      }
+      try {
+        onSaved(await api.removeItem(tripId.value, item.id, null));
+      } catch (e) {
+        showError(e);
+      }
+    },
+  });
+}
+
+/** 把附近的餐厅、景点、酒店加进当天 */
+async function addPlace(p: Place, type: string) {
+  try {
+    const d = await api.addItem(tripId.value, dayIndex.value + 1, {
+      name: p.name, poiId: p.id, address: p.address, lng: p.lng, lat: p.lat, photo: p.photo, rating: p.rating, cost: p.cost, type,
+    });
+    added[p.id] = true;
+    onSaved(d);
+  } catch (e) {
+    showError(e);
+  }
 }
 
 function dayCost(d: ItineraryDay) {
@@ -426,35 +600,18 @@ function cnDate(date?: string | null) {
 
 function switchTab(t: string) {
   if (t === "地图路线") {
-    uni.navigateTo({ url: `/pages/plan/map?day=${dayIndex.value + 1}` });
+    openMap();
     return;
   }
   tab.value = t;
 }
 
-function toggleKeep(id: string) {
-  kept[id] = !kept[id];
-}
-
-function replace(name: string) {
-  if (wide.value) {
-    const item = day.value?.items.find((x) => x.name === name);
-    if (item) openReplace(item);
-    return;
-  }
-  uni.navigateTo({ url: `/pages/plan/replace?name=${encodeURIComponent(name)}` });
-}
-
-function dislike(name: string) {
-  uni.showToast({ title: `已记下：不想去${name}`, icon: "none" });
-}
-
 function edit() {
-  uni.navigateTo({ url: `/pages/plan/edit?day=${dayIndex.value + 1}` });
+  go(`/pages/plan/edit?id=${tripId.value}&day=${dayIndex.value + 1}`);
 }
 
 function addStop() {
-  uni.navigateTo({ url: `/pages/chat/chat?q=${encodeURIComponent(`第${dayIndex.value + 1}天再加一个景点`)}` });
+  go("/pages/chat/chat?q=" + encodeURIComponent(`行程「${trip.value?.title}」（tripId=${tripId.value}）第${dayIndex.value + 1}天再加一个景点`));
 }
 
 async function loadEvents() {
@@ -471,10 +628,6 @@ function eventTime(iso: string) {
 }
 
 async function confirmTrip() {
-  if (isDemo.value) {
-    uni.showToast({ title: "这是示例行程", icon: "none" });
-    return;
-  }
   try {
     detail.value!.trip = await api.confirmTrip(tripId.value);
     uni.showToast({ title: "已确认", icon: "none" });
@@ -493,7 +646,7 @@ function removeTrip() {
       if (!res.confirm) return;
       try {
         await api.deleteTrip(tripId.value);
-        uni.navigateBack();
+        goBack();
       } catch (e) {
         showError(e);
       }
@@ -501,11 +654,23 @@ function removeTrip() {
   });
 }
 
+/** 读行程；当前版本还没补坐标就先显示已有内容，再让后端补，补完换上 */
 async function load(version?: number) {
   try {
-    detail.value = await api.trip(tripId.value, version);
-    dayIndex.value = 0;
-    uni.setNavigationBarTitle({ title: detail.value.trip.title });
+    const d = await api.trip(tripId.value, version);
+    if (detail.value?.version.version !== d.version.version) dayIndex.value = Math.min(dayIndex.value, Math.max((d.version.itinerary?.days.length || 1) - 1, 0));
+    detail.value = d;
+    uni.setNavigationBarTitle({ title: d.trip.title });
+    const it = d.version.itinerary;
+    if (it && !it.geo && d.version.version === d.trip.currentVer) {
+      geoLoading.value = true;
+      try {
+        const g = await api.tripGeo(tripId.value);
+        if (detail.value?.version.version === g.version.version) detail.value = g;
+      } finally {
+        geoLoading.value = false;
+      }
+    }
   } catch (e) {
     showError(e);
   }
@@ -564,6 +729,21 @@ async function loadVersions() {
 .tl-facts { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted); margin-top: 4px; }
 .tl-facts text { display: inline-flex; align-items: center; gap: 3px; }
 .tl-more { cursor: pointer; padding: 2px; }
+.tl-card.locked { border-color: var(--ok); }
+.kept-tag { font-size: 11px; font-weight: 600; color: var(--ok); background: var(--ok-soft); padding: 1px 6px; border-radius: 4px; }
+.tl-facts .star { color: var(--price); font-weight: 700; }
+.ver-chip { gap: 4px; }
+.ver { min-width: 22px; text-align: center; font-size: 12px; padding: 1px 6px; border-radius: 6px; cursor: pointer; }
+.ver.on { background: var(--accent); color: #fff; }
+.saved { display: flex; align-items: center; gap: 8px; padding: 10px 14px; margin-bottom: 14px; border-radius: 12px; background: var(--ok-soft); font-size: 14px; }
+.saved-link { color: var(--accent); cursor: pointer; font-weight: 600; }
+.saved-x { margin-left: auto; cursor: pointer; padding: 2px; }
+.hero-ph { background: linear-gradient(135deg, #93c5fd, #2563eb); }
+.ph { display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #93c5fd, #2563eb); }
+.ph.FOOD { background: linear-gradient(135deg, #fdba74, #f97316); }
+.pad { padding: 12px 0; }
+.near-btn.done { color: var(--ok); background: var(--ok-soft); cursor: default; }
+.stop-leg { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--line); }
 .tl-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .a { display: flex; align-items: center; gap: 3px; font-size: 12px; padding: 5px 8px; border-radius: 8px; border: 1px solid var(--line); cursor: pointer; white-space: nowrap; }
 .a.keep { color: var(--ok); background: var(--ok-soft); border-color: transparent; }
@@ -733,4 +913,6 @@ async function loadVersions() {
 .bottom { display: flex; gap: 10px; margin-top: 18px; }
 .bottom .btn { margin: 0; flex: 1; }
 .bottom .btn.danger { flex: 0 0 auto; }
+.m-stay { margin-top: 14px; padding: 12px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+.m-stay-title { display: flex; align-items: center; gap: 6px; font-weight: 700; font-size: 14px; }
 </style>

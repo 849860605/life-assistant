@@ -4,16 +4,17 @@
       <!-- 当前会话已经生成了行程：显示这个行程 -->
       <template v-if="trip">
         <view class="hero">
-          <image class="hero-img" :src="coverFor(trip.destination) || HERO" mode="aspectFill" />
+          <image v-if="cover" class="hero-img" :src="cover" mode="aspectFill" />
+          <view v-else class="hero-img blank" />
           <view class="hero-shade" />
           <view class="hero-text">
             <view class="hero-title">{{ trip.title }}</view>
-            <view class="hero-sub">{{ trip.destination }} · {{ shortDate(trip.startDate) }} – {{ shortDate(trip.endDate) }} · {{ trip.days.length }} 天 · {{ trip.status === "DRAFT" ? "草稿" : "已确认" }}</view>
+            <view class="hero-sub">{{ trip.destination }} · {{ shortDate(trip.startDate) }} – {{ shortDate(trip.endDate) }} · {{ days.length }} 天 · {{ trip.status === "DRAFT" ? "草稿" : "已确认" }}</view>
           </view>
         </view>
         <view class="block">
           <view class="block-title">逐日安排</view>
-          <view v-for="(d, i) in trip.days" :key="d.date" class="outline">
+          <view v-for="(d, i) in days" :key="d.date" class="outline">
             <view class="outline-no">{{ i + 1 }}</view>
             <view>
               <view class="outline-day">第{{ i + 1 }}天 · {{ shortDate(d.date) }} <text v-if="d.theme" class="muted">{{ d.theme }}</text></view>
@@ -22,72 +23,93 @@
           </view>
           <button class="btn open-btn" @click="openTrip(trip.tripId)">打开行程编辑</button>
         </view>
+        <view v-if="highlights.length" class="block">
+          <view class="block-title"><Icon name="sparkle" :size="16" color="var(--accent)" /> 行程亮点</view>
+          <view class="highlights">
+            <view v-for="h in highlights" :key="h.id" class="hl">
+              <image class="hl-img" :src="h.photo!" mode="aspectFill" />
+              <view class="hl-name"><Icon name="pin" :size="12" color="#e11d48" /> {{ h.name }}</view>
+              <view v-if="h.rating" class="hl-desc">★ {{ h.rating }} 高德评分</view>
+            </view>
+          </view>
+        </view>
+        <view v-if="mapSrc" class="block map-block">
+          <view class="outline-row">
+            <view class="block-title"><Icon name="nav" :size="16" color="var(--accent)" /> 第 1 天路线</view>
+            <view class="map-note">{{ travelNote }}</view>
+          </view>
+          <image class="mini-map" :src="mapSrc" mode="aspectFill" @click="openMap" />
+        </view>
       </template>
 
-      <!-- 还没有行程：示例方案 -->
-      <template v-else>
+      <!-- 当前会话给了三套方案：方案概要和逐日对比 -->
+      <template v-else-if="plans && plans.options && plans.options.length">
         <view class="hero">
-          <image class="hero-img" :src="HERO" mode="aspectFill" />
+          <image v-if="cover" class="hero-img" :src="cover" mode="aspectFill" />
+          <view v-else class="hero-img blank" />
           <view class="hero-shade" />
           <view class="hero-text">
-            <view class="hero-title">{{ CITY }} 4 天 3 晚 · 推荐方案</view>
-            <view class="hero-sub">根据你的需求生成了三套不同风格的行程方案 <text class="sample">示例</text></view>
-          </view>
-          <view class="req">
-            <view class="req-item"><Icon name="calendar" :size="18" color="var(--accent)" /><view><view class="req-label">出行时间</view><view class="req-value">{{ REQUIREMENT.dates }}</view></view></view>
-            <view class="req-item"><Icon name="users" :size="18" color="var(--accent)" /><view><view class="req-label">出行人数</view><view class="req-value">{{ REQUIREMENT.people }}</view></view></view>
-            <view class="req-item"><Icon name="wallet" :size="18" color="var(--accent)" /><view><view class="req-label">预算范围</view><view class="req-value">{{ REQUIREMENT.budget }}</view><view class="req-note">{{ REQUIREMENT.budgetNote }}</view></view></view>
-            <view class="req-item"><Icon name="heart" :size="18" color="var(--accent)" /><view><view class="req-label">旅行偏好标签</view><view class="req-value">{{ REQUIREMENT.tags.join(" · ") }}</view><view class="req-note">{{ REQUIREMENT.prefs }}</view></view></view>
+            <view class="hero-title">{{ plans.destination }} {{ plans.days }} 天 · 推荐方案</view>
+            <view class="hero-sub">
+              <text v-if="plans.startDate">{{ shortDate(plans.startDate) }} – {{ shortDate(plans.endDate) }} · </text>根据你的需求生成了 {{ plans.options.length }} 套不同风格的方案，选一套展开成完整行程
+            </view>
           </view>
         </view>
 
         <view class="tabs">
-          <text v-for="t in TABS" :key="t" class="tab" :class="{ on: tab === t }" @click="tab = t">{{ t }}</text>
+          <text v-for="t in TABS" :key="t" class="tab" :class="{ on: tab === t }" @click="tab = t">{{ t === TABS[0] ? `${t} (${plans.options.length})` : t }}</text>
         </view>
 
         <view v-if="tab === TABS[0]" class="plans">
-          <view v-for="p in PLANS" :key="p.key" class="plan" :class="[p.tone, { rec: p.recommended }]">
+          <view v-for="(p, i) in plans.options" :key="p.key || i" class="plan" :class="TONES[i % TONES.length]">
             <view class="plan-head">
-              <view class="plan-name"><Icon :name="p.icon" :size="18" color="var(--tone)" /><text>{{ p.name }}</text></view>
-              <text class="badge">{{ p.badge }}</text>
+              <view class="plan-name"><Icon :name="ICONS[i % ICONS.length]" :size="18" color="var(--tone)" /><text>{{ p.title }}</text></view>
             </view>
-            <view class="plan-price"><text class="per">人均约 </text>¥{{ p.price.toLocaleString() }}</view>
-            <view v-for="pt in p.points" :key="pt" class="point"><Icon name="check" :size="14" color="var(--tone)" /><text>{{ pt }}</text></view>
-            <image class="plan-img" :src="p.image" mode="aspectFill" />
-            <button class="btn plan-btn" :class="{ ghost: !p.recommended }" @click="openTrip('demo')">查看详细行程</button>
+            <view v-if="p.style" class="plan-style">{{ p.style }}</view>
+            <view v-if="p.budgetPerPerson" class="plan-price"><text class="per">人均约 </text>¥{{ Number(p.budgetPerPerson).toLocaleString() }}</view>
+            <view v-for="pt in p.highlights || []" :key="pt" class="point"><Icon name="check" :size="14" color="var(--tone)" /><text>{{ pt }}</text></view>
+            <view v-if="p.hotel" class="point muted"><Icon name="bed" :size="14" color="var(--muted)" /><text>{{ p.hotel }}</text></view>
+            <button class="btn plan-btn" :class="{ ghost: i !== 0 }" @click="choose(p.title)">选这个方案</button>
           </view>
-        </view>
-        <view v-else-if="tab === TABS[1]" class="compare">
-          <view class="cmp-row head"><text>对比项</text><text v-for="p in PLANS" :key="p.key">{{ p.name }}</text></view>
-          <view v-for="row in COMPARE" :key="row[0]" class="cmp-row"><text v-for="(c, i) in row" :key="i">{{ c }}</text></view>
         </view>
         <view v-else class="compare">
-          <view class="cmp-row head"><text>费用（人均）</text><text v-for="p in PLANS" :key="p.key">{{ p.name }}</text></view>
-          <view v-for="row in COSTS" :key="row[0]" class="cmp-row"><text v-for="(c, i) in row" :key="i">{{ c }}</text></view>
+          <view class="cmp-row head" :style="cmpCols"><text>逐日安排</text><text v-for="(p, i) in plans.options" :key="p.key || i">{{ p.title }}</text></view>
+          <view v-for="n in plans.days" :key="n" class="cmp-row" :style="cmpCols">
+            <text>第 {{ n }} 天</text>
+            <text v-for="(p, i) in plans.options" :key="p.key || i">{{ dayOf(p, n) }}</text>
+          </view>
+          <view class="cmp-row" :style="cmpCols">
+            <text>人均预算</text><text v-for="(p, i) in plans.options" :key="p.key || i">{{ p.budgetPerPerson ? `¥${Number(p.budgetPerPerson).toLocaleString()}` : "—" }}</text>
+          </view>
         </view>
+      </template>
 
+      <!-- 还没有行程和方案：说明能做什么 -->
+      <template v-else>
+        <view class="hero">
+          <image v-if="cover" class="hero-img" :src="cover" mode="aspectFill" />
+          <view v-else class="hero-img blank" />
+          <view class="hero-shade" />
+          <view class="hero-text">
+            <view class="hero-title">说出想去哪，AI 帮你规划</view>
+            <view class="hero-sub">规划好的行程和方案会显示在这里，可以直接打开编辑</view>
+          </view>
+        </view>
         <view class="block">
-          <view class="block-title"><Icon name="sparkle" :size="16" color="var(--accent)" /> 方案亮点预览</view>
-          <view class="highlights">
-            <view v-for="h in HIGHLIGHTS" :key="h.name" class="hl">
-              <image class="hl-img" :src="h.image" mode="aspectFill" />
-              <view class="hl-name"><Icon name="pin" :size="12" color="#e11d48" /> {{ h.name }}</view>
-              <view class="hl-desc">{{ h.desc }}</view>
+          <view class="block-title"><Icon name="sparkle" :size="16" color="var(--accent)" /> 我能帮你</view>
+          <view class="abilities">
+            <view v-for="a in ABILITIES" :key="a.label" class="ability">
+              <Icon :name="a.icon" :size="18" color="var(--accent)" />
+              <view><view class="ab-name">{{ a.label }}</view><view class="ab-desc">{{ a.desc }}</view></view>
             </view>
           </view>
         </view>
-
-        <view class="block map-block">
-          <view class="outline-row">
-            <view class="block-title"><Icon name="nav" :size="16" color="var(--accent)" /> 行程地图预览</view>
-            <view class="steps">
-              <view v-for="(d, i) in DAY_OUTLINE" :key="d.day" class="step">
-                <view class="outline-no">{{ i + 1 }}</view>
-                <view><view class="outline-day">{{ d.day }}</view><view class="outline-text">{{ d.text }}</view></view>
-              </view>
-            </view>
+        <view class="block">
+          <view class="block-title">试试这样问</view>
+          <view v-for="q in examples" :key="q" class="example" @click="emit('send', q)">
+            <text>{{ q }}</text>
+            <Icon name="right" :size="16" color="var(--muted)" />
           </view>
-          <image class="mini-map" :src="ROUTE_MAP_WIDE" mode="aspectFill" @click="openMap" />
         </view>
       </template>
     </view>
@@ -95,39 +117,92 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref, watch } from "vue";
+import { api } from "../api";
+import type { ItineraryDay, ItineraryItem } from "../api/types";
 import Icon from "./Icon.vue";
-import { CITY, coverFor, DAY_OUTLINE, HERO, HIGHLIGHTS, PLANS, REQUIREMENT, ROUTE_MAP_WIDE } from "../demo/xian";
+import { cityCover } from "../utils/cover";
 import { shortDate } from "../utils/format";
+import { cityOf, currentCity, dayMapUrl, dayTravel, duration, located } from "../utils/place";
 
 /**
- * 对话页右侧（电脑）：当前会话生成过行程时显示这个行程的逐日安排，否则显示三套示例方案、亮点和地图预览。
- * trip 是会话里最后一张行程卡的数据。
+ * 对话页右侧（电脑）：当前会话生成过行程时显示这个行程（逐日安排、亮点照片、第一天路线图）；
+ * 给过三套方案时显示方案概要和逐日对比，选中后把选择发到对话里；都没有时说明能做什么、给几个示例问题。
+ * trip 是会话里最后一张行程卡的数据，plans 是最后一张 plan_options 卡的数据。
  */
-defineProps<{ trip: any | null }>();
+const props = defineProps<{ trip: any | null; plans?: any | null }>();
+const emit = defineEmits<{ (e: "send", text: string): void }>();
 
-const TABS = ["推荐方案 (3)", "行程对比", "费用明细"];
+const TABS = ["推荐方案", "逐日对比"];
+const TONES = ["green", "blue", "violet"];
+const ICONS = ["wallet", "star", "crown"];
+const ABILITIES = [
+  { label: "定制行程", desc: "先问清需求，再按天排好路线", icon: "route" },
+  { label: "机票酒店比价", desc: "多个平台同时查，按价格排", icon: "plane" },
+  { label: "美食推荐", desc: "大众点评和携程的评分合在一起看", icon: "food" },
+  { label: "天气提醒", desc: "出发前看天气，提醒带什么", icon: "weather" },
+];
 const tab = ref(TABS[0]);
-const COMPARE = [
-  ["住宿", "经济型", "舒适型", "高端"],
-  ["交通", "公共交通", "专车/包车", "专车 + 讲解"],
-  ["景点", "经典必玩", "精选 + 夜游", "小众 + 深度"],
-  ["节奏", "紧凑", "轻松", "轻松"],
-];
-const COSTS = [
-  ["机票（往返）", "¥1,100", "¥1,300", "¥1,600"],
-  ["住宿（3 晚）", "¥600", "¥1,000", "¥2,100"],
-  ["门票", "¥350", "¥380", "¥520"],
-  ["餐饮", "¥450", "¥650", "¥900"],
-  ["市内交通", "¥300", "¥470", "¥480"],
-];
+const city = currentCity();
+const examples = [`帮我规划${city} 3 天 2 晚，预算每人 3000`, `${city}有哪些适合带老人去的景点？`, `${city}本地人常去的小吃店有哪些？`];
+
+const cover = ref("");
+/** 从后端取到的结构化行程（带坐标和照片），比卡片里的数据全 */
+const loadedDays = ref<ItineraryDay[] | null>(null);
+const days = computed<ItineraryDay[]>(() => loadedDays.value || props.trip?.days || []);
+const highlights = computed<ItineraryItem[]>(() =>
+  days.value.flatMap((d) => d.items).filter((i) => i.photo && i.type === "SPOT").slice(0, 5));
+const mapSrc = computed(() => dayMapUrl(days.value[0], 220, 120));
+const travelNote = computed(() => {
+  const t = dayTravel(days.value[0]);
+  const stops = located(days.value[0]).length;
+  return t.minutes ? `${stops} 个地点 · 路上约 ${duration(t.minutes)} · ${t.km} 公里` : `${stops} 个地点`;
+});
+const cmpCols = computed(() => ({ gridTemplateColumns: `1fr repeat(${props.plans?.options?.length || 3}, 1.4fr)` }));
+
+/** 封面跟着当前显示的内容：行程或方案的目的地，否则当前城市。 */
+watch(
+  () => [props.trip?.destination, props.plans?.destination],
+  async () => {
+    const dest = props.trip?.destination || props.plans?.destination;
+    cover.value = await cityCover(dest ? cityOf(dest) : city);
+  },
+  { immediate: true },
+);
+
+/** 行程卡变了就取完整行程；还没补坐标时让后端补上。 */
+watch(
+  () => props.trip?.tripId,
+  async (id) => {
+    loadedDays.value = null;
+    if (!id) return;
+    try {
+      let detail = await api.trip(id);
+      if (detail.version.itinerary && !detail.version.itinerary.geo) detail = await api.tripGeo(id);
+      if (props.trip?.tripId === id && detail.version.itinerary) loadedDays.value = detail.version.itinerary.days;
+    } catch {
+      // 取不到就用卡片里的数据
+    }
+  },
+  { immediate: true },
+);
+
+function dayOf(p: any, n: number): string {
+  const d = (p.outline || []).find((x: any) => x.day === n);
+  if (!d) return "—";
+  return d.title + (d.places?.length ? `：${d.places.join("、")}` : "");
+}
+
+function choose(title: string) {
+  emit("send", `就按「${title}」方案，展开成完整行程`);
+}
 
 function openTrip(id: number | string) {
   uni.navigateTo({ url: `/pages/trips/detail?id=${id}` });
 }
 
 function openMap() {
-  uni.navigateTo({ url: "/pages/plan/map" });
+  uni.navigateTo({ url: `/pages/plan/map?id=${props.trip?.tripId}&day=1` });
 }
 </script>
 
@@ -140,23 +215,7 @@ function openMap() {
 .hero-text { position: relative; padding: 26px 26px 16px; color: #111827; }
 .hero-title { font-size: 26px; font-weight: 800; }
 .hero-sub { font-size: 14px; color: #374151; margin-top: 6px; }
-.sample { font-size: 11px; padding: 1px 6px; border-radius: 999px; background: rgba(0, 0, 0, 0.08); }
-.req {
-  position: relative;
-  margin: 10px 16px 16px;
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-  background: #fff;
-  border-radius: 14px;
-  padding: 14px;
-  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.12);
-  color: #1b2333;
-}
-.req-item { display: flex; gap: 8px; align-items: flex-start; }
-.req-label { font-size: 12px; color: #687386; }
-.req-value { font-size: 13px; font-weight: 600; margin-top: 2px; }
-.req-note { font-size: 11px; color: #687386; }
+.hero-img.blank { background: linear-gradient(135deg, #93c5fd, #2563eb); }
 .tabs { display: flex; gap: 10px; }
 .tab { padding: 7px 18px; border-radius: 999px; font-size: 14px; background: var(--surface); border: 1px solid var(--line); cursor: pointer; }
 .tab.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
@@ -164,14 +223,12 @@ function openMap() {
 .plan { --tone: #16a34a; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 16px; display: flex; flex-direction: column; gap: 6px; }
 .plan.blue { --tone: #2563eb; }
 .plan.violet { --tone: #7c3aed; }
-.plan.rec { border: 2px solid var(--tone); box-shadow: 0 8px 24px rgba(37, 99, 235, 0.15); }
 .plan-head { display: flex; justify-content: space-between; align-items: center; }
 .plan-name { display: flex; align-items: center; gap: 6px; font-weight: 800; font-size: 16px; color: var(--tone); }
-.badge { font-size: 11px; padding: 2px 8px; border-radius: 6px; background: var(--tone); color: #fff; }
+.plan-style { font-size: 12px; color: var(--muted); }
 .plan-price { font-size: 24px; font-weight: 800; color: var(--tone); font-variant-numeric: tabular-nums; }
 .per { font-size: 13px; font-weight: 400; }
 .point { display: flex; align-items: center; gap: 6px; font-size: 13px; }
-.plan-img { width: 100%; height: 96px; border-radius: 10px; margin-top: 6px; }
 .plan-btn { margin: 4px 0 0; }
 .plan-btn.ghost { color: var(--tone); border-color: var(--tone); }
 .block { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px; }
@@ -182,22 +239,26 @@ function openMap() {
 .hl-desc { font-size: 12px; color: var(--muted); }
 .map-block { display: flex; gap: 14px; align-items: stretch; }
 .outline-row { flex: 1; min-width: 0; }
-.steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
-.step { display: flex; gap: 6px; }
 .outline { display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
 .outline:last-of-type { border-bottom: none; }
 .outline-no { width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .outline-day { font-size: 13px; font-weight: 700; color: var(--accent); }
 .outline-text { font-size: 12px; color: var(--ink); }
+.map-note { font-size: 13px; color: var(--muted); }
+.abilities { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.ability { display: flex; gap: 10px; align-items: flex-start; }
+.ab-name { font-weight: 600; font-size: 14px; }
+.ab-desc { font-size: 12px; color: var(--muted); }
+.example { display: flex; align-items: center; justify-content: space-between; padding: 10px 2px; border-bottom: 1px solid var(--line); font-size: 14px; cursor: pointer; }
+.example:last-child { border-bottom: none; }
+.example:hover { color: var(--accent); }
 .mini-map { width: 220px; height: 120px; border-radius: 12px; flex-shrink: 0; cursor: pointer; }
 .open-btn { margin: 12px 0 0; }
 .compare { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
-.cmp-row { display: grid; grid-template-columns: 1.2fr 1fr 1fr 1fr; padding: 10px 16px; border-bottom: 1px solid var(--line); font-size: 14px; font-variant-numeric: tabular-nums; }
+.cmp-row { display: grid; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line); font-size: 14px; font-variant-numeric: tabular-nums; }
 .cmp-row:last-child { border-bottom: none; }
 .cmp-row.head { background: var(--surface-2); font-weight: 600; }
 @media (max-width: 1380px) {
-  .req { grid-template-columns: repeat(2, 1fr); }
-  .highlights { grid-template-columns: repeat(3, 1fr); }
-  .steps { grid-template-columns: repeat(2, 1fr); }
+    .highlights { grid-template-columns: repeat(3, 1fr); }
 }
 </style>

@@ -15,6 +15,12 @@
       </view>
       <view class="day-items">{{ d.items.filter((x: any) => x.type !== "TRANSPORT").map((x: any) => x.name).join(" → ") }}</view>
     </view>
+    <view v-for="st in data.stays || []" :key="st.id" class="xcard-row stay">
+      <text class="day-no">住</text>
+      <text class="stay-name">{{ st.name }}</text>
+      <text class="muted">{{ shortDate(st.checkIn) }}–{{ shortDate(st.checkOut) }}</text>
+      <text v-if="st.price" class="stay-price">¥{{ st.price }}/晚 · {{ st.platform }}</text>
+    </view>
     <view class="trip-actions">
       <button class="btn small" @click="openTrip">查看详情</button>
     </view>
@@ -43,6 +49,9 @@ function openTrip() {
 }
 .day-theme { font-weight: 600; }
 .day-items { font-size: 14px; margin-top: 2px; }
+.stay { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; font-size: 13px; }
+.stay-name { font-weight: 600; }
+.stay-price { color: var(--price); font-weight: 600; font-variant-numeric: tabular-nums; }
 .trip-actions { padding: 10px 14px 12px; display: flex; justify-content: flex-end; }
 .trip-actions .btn { margin: 0; }
 </style>

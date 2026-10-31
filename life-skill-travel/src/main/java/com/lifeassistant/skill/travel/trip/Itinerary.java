@@ -12,26 +12,106 @@ import java.util.Locale;
 import java.util.Set;
 
 /**
- * 结构化行程，存在 t_trip_version.itinerary：逐日的安排加一段注意事项。行程正文（Markdown）由它生成。
+ * 结构化行程，存在 t_trip_version.itinerary：逐日的安排、住宿和一段注意事项。行程正文（Markdown）由它生成。
+ * geo 为 true 表示已经用高德补过坐标、照片和路程（补不上的项也算补过，不再重试）。
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public record Itinerary(List<Day> days, String tips) {
+public record Itinerary(List<Day> days, String tips, Boolean geo, List<Stay> stays) {
+
+    public Itinerary(List<Day> days, String tips) {
+        this(days, tips, null, null);
+    }
+
+    /** 换掉逐日安排，其余不变。 */
+    public Itinerary withDays(List<Day> newDays) {
+        return new Itinerary(newDays, tips, geo, stays);
+    }
+
+    /** 换掉住宿，其余不变。 */
+    public Itinerary withStays(List<Stay> newStays) {
+        return new Itinerary(days, tips, geo, newStays);
+    }
+
+    /** 标记已补过地理信息。 */
+    public Itinerary located(List<Day> newDays, List<Stay> newStays) {
+        return new Itinerary(newDays, tips, true, newStays);
+    }
+
+    /**
+     * 一段住宿：checkIn 当晚入住、checkOut 当天离店（yyyy-MM-dd）。price 是每晚最低价，platform、url 是最低价所在平台
+     * 和预订链接，quotes 是各平台报价，queriedAt 是比价时间；options 是比价时的其他候选，换酒店时从里面选。
+     * poiId、lng、lat、photo、rating 由后端在高德补上。
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record Stay(String id, String name, String checkIn, String checkOut, String address, Integer price,
+                       String platform, String url, String queriedAt, List<StayQuote> quotes,
+                       List<StayOption> options, String poiId, Double lng, Double lat, String photo,
+                       Double rating) {
+
+        /** 住几晚，日期不对返回 0。 */
+        public int nights() {
+            LocalDate in = parseDate(checkIn);
+            LocalDate out = parseDate(checkOut);
+            return in == null || out == null || !out.isAfter(in) ? 0 : (int) java.time.temporal.ChronoUnit.DAYS.between(in, out);
+        }
+
+        /** 这一天和这段住宿有关：入住当天到离店当天（含）。 */
+        public boolean covers(String date) {
+            LocalDate d = parseDate(date);
+            LocalDate in = parseDate(checkIn);
+            LocalDate out = parseDate(checkOut);
+            return d != null && in != null && out != null && !d.isBefore(in) && !d.isAfter(out);
+        }
+
+        public boolean located() {
+            return lng != null && lat != null;
+        }
+    }
+
+    /** 一个平台的报价：每晚价格、预订链接、价格口径、平台上匹配到的酒店名。 */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record StayQuote(String platform, Integer price, String url, String basis, String matchedName) {
+    }
+
+    /** 比价时的另一家候选酒店。 */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record StayOption(String name, Integer price, String platform, String url, List<StayQuote> quotes) {
+    }
 
     /** 安排的类型：景点、吃饭、住宿、交通、自由活动 */
     public static final Set<String> TYPES = Set.of("SPOT", "FOOD", "HOTEL", "TRANSPORT", "FREE");
 
-    /** 一天：日期 yyyy-MM-dd、当天主题、按时间排的安排。 */
+    /** 一天：日期 yyyy-MM-dd、当天主题、按时间排的安排、相邻两项之间的路程。 */
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record Day(String date, String theme, List<Item> items) {
+    public record Day(String date, String theme, List<Item> items, List<Leg> legs) {
+
+        public Day(String date, String theme, List<Item> items) {
+            this(date, theme, items, null);
+        }
     }
 
     /**
-     * 一项安排。id 形如 d1-2（第 1 天第 2 项），以后单项替换、锁定用它定位；locked 表示用户要保留，重新规划时不动。
+     * 一项安排。id 形如 d1-2（第 1 天第 2 项），单项替换、锁定用它定位；locked 表示用户要保留，重新规划时不动。
      * start、end 是 HH:mm；cost 是人均花费（元）；url 是点评或预订链接。
+     * poiId、lng、lat、photo、rating 由后端按名称在高德补上，模型不填。
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record Item(String id, String start, String end, String type, String name, String address, String note,
-                       Integer cost, String url, Boolean locked) {
+                       Integer cost, String url, Boolean locked, String poiId, Double lng, Double lat, String photo,
+                       Double rating) {
+
+        public Item(String id, String start, String end, String type, String name, String address, String note,
+                    Integer cost, String url, Boolean locked) {
+            this(id, start, end, type, name, address, note, cost, url, locked, null, null, null, null, null);
+        }
+
+        public boolean located() {
+            return lng != null && lat != null;
+        }
+    }
+
+    /** 相邻两项之间怎么走：mode 是 WALK 步行或 DRIVE 打车/自驾，minutes 分钟，km 公里。 */
+    public record Leg(String from, String to, String mode, int minutes, double km) {
     }
 
     /**
@@ -107,6 +187,19 @@ public record Itinerary(List<Day> days, String tips) {
                 }
                 if (item.cost() != null && item.cost() > 0) {
                     out.append(" · 人均 ¥").append(item.cost());
+                }
+                out.append("\n");
+            }
+            out.append("\n");
+        }
+        if (stays != null && !stays.isEmpty()) {
+            out.append("## 住宿\n\n");
+            for (Stay stay : stays) {
+                out.append("- ").append(dayLabel(stay.checkIn())).append(" – ").append(dayLabel(stay.checkOut()))
+                        .append("（").append(stay.nights()).append(" 晚）")
+                        .append(stay.url() == null ? "**" + stay.name() + "**" : "[**" + stay.name() + "**](" + stay.url() + ")");
+                if (stay.price() != null) {
+                    out.append(" · 约 ¥").append(stay.price()).append("/晚（").append(stay.platform()).append("，以预订页为准）");
                 }
                 out.append("\n");
             }

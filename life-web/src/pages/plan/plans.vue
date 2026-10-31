@@ -1,46 +1,90 @@
 <template>
   <Shell active="plan">
   <view class="page">
-    <view class="head">
-      <view class="title">西安4天3晚 · 推荐方案</view>
-      <view class="sub">按你的需求生成 3 种不同风格的方案 <text class="tag">示例</text></view>
-    </view>
-    <view class="plans">
-      <view v-for="p in PLANS" :key="p.key" class="plan" :class="[p.tone, { recommended: p.recommended }]">
-        <view v-if="p.recommended" class="ribbon">推荐</view>
-        <view class="plan-body">
-          <view class="plan-info">
-            <view class="plan-name">
-              <view class="plan-icon"><Icon :name="p.icon" :size="14" color="#fff" /></view>
-              <text>{{ p.name }}</text>
+    <template v-if="saved">
+      <view class="head">
+        <view class="title">{{ saved.data.destination }} {{ saved.data.days }} 天 · 推荐方案</view>
+        <view class="sub">按你的需求生成的 {{ options.length }} 种不同风格的方案</view>
+      </view>
+      <view class="plans">
+        <view v-for="(p, i) in options" :key="p.key" class="plan" :class="[TONES[i % TONES.length], { recommended: i === 1 }]">
+          <view v-if="i === 1" class="ribbon">推荐</view>
+          <view class="plan-body">
+            <view class="plan-info">
+              <view class="plan-name">
+                <view class="plan-icon"><Icon :name="ICONS[i % ICONS.length]" :size="14" color="#fff" /></view>
+                <text>{{ p.title }}</text>
+              </view>
+              <view class="plan-tagline">{{ p.style }}</view>
+              <view v-if="p.budgetPerPerson" class="plan-price">¥{{ p.budgetPerPerson.toLocaleString() }}<text class="per"> /人</text></view>
+              <view v-for="pt in p.highlights" :key="pt" class="point">
+                <Icon name="check" :size="14" color="var(--tone)" />
+                <text>{{ pt }}</text>
+              </view>
+              <view v-if="p.hotel" class="point muted">住：{{ p.hotel }}</view>
+              <view class="outline">
+                <view v-for="d in p.outline" :key="d.day" class="outline-row">
+                  <text class="outline-day">D{{ d.day }}</text>
+                  <text>{{ d.title }}</text>
+                </view>
+              </view>
             </view>
-            <view class="plan-tagline">{{ p.tagline }}</view>
-            <view class="plan-price">¥{{ p.price.toLocaleString() }}<text class="per"> /人</text></view>
-            <view v-for="pt in p.points" :key="pt" class="point">
-              <Icon name="check" :size="14" color="var(--tone)" />
-              <text>{{ pt }}</text>
+            <view class="plan-side">
+              <image v-if="photos[i]" class="plan-img" :src="photos[i]" mode="aspectFill" />
+              <view v-else class="plan-img blank"><Icon name="trip" :size="26" color="#fff" /></view>
+              <button class="btn small detail" @click="pick(p)">选这个方案</button>
             </view>
-          </view>
-          <view class="plan-side">
-            <image class="plan-img" :src="p.image" mode="aspectFill" />
-            <button class="btn small detail" @click="openPlan">查看详情</button>
           </view>
         </view>
       </view>
+      <view class="note">预算为人均估算，含大交通、住宿、门票和餐饮；选定后助手会查真实机票、酒店价格再排完整行程。</view>
+    </template>
+    <view v-else class="empty">
+      <Icon name="trip" :size="34" color="var(--muted)" />
+      <view>还没有方案</view>
+      <view class="muted small">在对话里说出想去哪、玩几天，助手会先给出三套不同风格的方案</view>
+      <button class="btn small" @click="toChat">去规划</button>
     </view>
-    <view class="note">价格为人均估算，含机票、住宿、门票和餐饮，以实际预订为准。</view>
   </view>
   </Shell>
 </template>
 
 <script setup lang="ts">
+import { computed, onMounted, ref } from "vue";
 import Shell from "../../components/Shell.vue";
 import Icon from "../../components/Icon.vue";
-import { PLANS } from "../../demo/xian";
+import { api } from "../../api";
+import { loadPlans } from "../../utils/plans";
+import { cityOf } from "../../utils/place";
 
-/** 三套方案对比（原型③）：省钱、舒适、深度体验，点开进行程详情。 */
-function openPlan() {
-  uni.navigateTo({ url: "/pages/trips/detail?id=demo" });
+/** 三套方案对比（原型③）：读最近一次对话里的方案卡，选一套回到那个对话让助手展开。 */
+const TONES = ["green", "blue", "violet"];
+const ICONS = ["wallet", "star", "compass"];
+
+const saved = loadPlans();
+const options = computed<any[]>(() => saved?.data?.options || []);
+const photos = ref<string[]>([]);
+
+// 每套方案配一张图：第一天第一个地点在高德的照片
+onMounted(() => {
+  const city = cityOf(saved?.data?.destination);
+  options.value.forEach((o, i) => {
+    const place = o.outline?.[0]?.places?.[0];
+    if (!place) return;
+    api.places({ kind: "spot", city, keyword: place, size: 1 })
+      .then((list) => { photos.value[i] = list[0]?.photo || ""; })
+      .catch(() => {});
+  });
+});
+
+function pick(p: any) {
+  const q = encodeURIComponent(`就按「${p.title}」方案，展开成完整行程`);
+  const id = saved?.conversationId;
+  uni.reLaunch({ url: `/pages/chat/chat?${id ? `id=${id}&` : ""}q=${q}` });
+}
+
+function toChat() {
+  uni.reLaunch({ url: "/pages/chat/chat" });
 }
 </script>
 
@@ -93,6 +137,13 @@ function openPlan() {
 .plan-img { width: 120px; height: 96px; border-radius: 10px; }
 .detail { margin: 0; background: var(--tone) !important; }
 .note { font-size: 12px; color: var(--muted); text-align: center; margin-top: 14px; }
+.plan-img.blank { background: linear-gradient(135deg, #93c5fd, #2563eb); display: flex; align-items: center; justify-content: center; }
+.outline { margin-top: 8px; font-size: 12px; line-height: 1.7; }
+.outline-row { display: flex; gap: 6px; }
+.outline-day { color: var(--tone); font-weight: 600; font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+.empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 80px 0; }
 @media (min-width: 700px) {
   .plans { flex-direction: row; }
   .plan { flex: 1; }

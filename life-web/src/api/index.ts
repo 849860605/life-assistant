@@ -1,8 +1,16 @@
 import { request } from "./http";
 import type {
-  ChatMessage, Conversation, MemoryCategory, MemoryItem, ScheduleEvent, TokenView, TripDetail, TripVersion,
-  Trip, UserView,
+  ChangeReason, ChatMessage, Conversation, MemoryCategory, MemoryItem, Place, PlacePick, ScheduleEvent, TokenView,
+  TripDetail, TripVersion, Trip, UserView,
 } from "./types";
+
+/** 拼查询串，跳过空值。 */
+function qs(params: Record<string, string | number | boolean | null | undefined>): string {
+  const parts = Object.entries(params)
+    .filter(([, v]) => v !== null && v !== undefined && v !== "")
+    .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`);
+  return parts.length ? "?" + parts.join("&") : "";
+}
 
 /** 所有后端接口，路径和后端 /api/v1 一一对应。 */
 export const api = {
@@ -23,6 +31,32 @@ export const api = {
   tripEvents: (id: number) => request<ScheduleEvent[]>("GET", `/api/v1/trips/${id}/events`),
   confirmTrip: (id: number) => request<Trip>("POST", `/api/v1/trips/${id}/confirm`),
   deleteTrip: (id: number) => request<void>("DELETE", `/api/v1/trips/${id}`),
+  tripGeo: (id: number) => request<TripDetail>("POST", `/api/v1/trips/${id}/geo`),
+  alternatives: (id: number, itemId: string, keyword?: string) =>
+    request<Place[]>("GET", `/api/v1/trips/${id}/items/${itemId}/alternatives` + qs({ keyword })),
+  replaceItem: (id: number, itemId: string, place: PlacePick, reason?: ChangeReason | null) =>
+    request<TripDetail>("POST", `/api/v1/trips/${id}/items/${itemId}/replace`, { place, reason: reason || null }),
+  removeItem: (id: number, itemId: string, reason?: ChangeReason | null) =>
+    request<TripDetail>("POST", `/api/v1/trips/${id}/items/${itemId}/remove`, { reason: reason || null }),
+  lockItem: (id: number, itemId: string, locked: boolean) =>
+    request<TripDetail>("POST", `/api/v1/trips/${id}/items/${itemId}/lock?locked=${locked}`),
+  reorderDay: (id: number, day: number, ids: string[]) =>
+    request<TripDetail>("PUT", `/api/v1/trips/${id}/days/${day}/order`, { ids }),
+  switchStay: (id: number, stayId: string, name: string) =>
+    request<TripDetail>("POST", `/api/v1/trips/${id}/stays/${stayId}/switch`, { name }),
+  requoteStay: (id: number, stayId: string) =>
+    request<TripDetail>("POST", `/api/v1/trips/${id}/stays/${stayId}/requote`),
+  addItem: (id: number, day: number, place: PlacePick) =>
+    request<TripDetail>("POST", `/api/v1/trips/${id}/days/${day}/items`, place),
+
+  places: (p: { kind?: "spot" | "food" | "hotel"; city?: string; keyword?: string; lng?: number; lat?: number; radius?: number; size?: number }) =>
+    request<Place[]>("GET", "/api/v1/places" + qs(p)),
+  searchFlights: (origin: string, destination: string, date: string) =>
+    request<Record<string, any>>("GET", "/api/v1/search/flights" + qs({ origin, destination, date })),
+  searchHotels: (p: { city: string; place?: string; checkIn: string; checkOut: string; maxPrice?: number }) =>
+    request<Record<string, any>>("GET", "/api/v1/search/hotels" + qs(p)),
+  searchRestaurants: (p: { city: string; near?: string; cuisine?: string; maxPrice?: number }) =>
+    request<Record<string, any>>("GET", "/api/v1/search/restaurants" + qs(p)),
 
   events: (from: string, to: string) => request<ScheduleEvent[]>("GET", `/api/v1/events?from=${from}&to=${to}`),
   createEvent: (body: { title: string; startAt: string; location?: string; remindMinutesBefore?: number | null }) =>

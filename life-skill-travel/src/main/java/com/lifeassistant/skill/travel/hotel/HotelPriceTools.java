@@ -40,14 +40,16 @@ public class HotelPriceTools {
     private final ObjectMapper objectMapper;
     private final CallRecorder recorder;
     private final CardHub cards;
+    private final HotelQuoteBook quoteBook;
 
     public HotelPriceTools(List<HotelPriceSource> sources, McpServerRegistry mcpServers, ObjectMapper objectMapper,
-                           CallRecorder recorder, CardHub cards) {
+                           CallRecorder recorder, CardHub cards, HotelQuoteBook quoteBook) {
         this.sources = sources;
         this.mcpServers = mcpServers;
         this.objectMapper = objectMapper;
         this.recorder = recorder;
         this.cards = cards;
+        this.quoteBook = quoteBook;
     }
 
     /** 按地点找候选酒店并一次完成多平台比价；RollingGo 没配置时提示改用地图找酒店再 compareHotelPrices。 */
@@ -151,15 +153,35 @@ public class HotelPriceTools {
         response.put("checkOut", String.valueOf(out));
         response.put("notConfigured", sources.stream().filter(s -> !s.available()).map(HotelPriceSource::platform).toList());
         response.put("results", results);
+        String queriedAt = CardHub.now();
+        CallRecorder.Scope scope = CallRecorder.current();
+        quoteBook.record(scope == null ? null : scope.conversationId(), new HotelQuoteBook.Comparison(city,
+                String.valueOf(in), String.valueOf(out), queriedAt, entries(results)));
         if (!results.isEmpty()) {
             Map<String, Object> card = new LinkedHashMap<>(response);
             card.put("city", city);
-            card.put("queriedAt", CardHub.now());
+            card.put("queriedAt", queriedAt);
             if (cards.emit("hotels", card, summary(results))) {
                 response.put("card", CardHub.SHOWN_HINT);
             }
         }
         return response;
+    }
+
+    /** 比价结果转成报价簿的条目。 */
+    @SuppressWarnings("unchecked")
+    private static List<HotelQuoteBook.Entry> entries(List<Map<String, Object>> results) {
+        return results.stream().map(r -> new HotelQuoteBook.Entry((String) r.get("hotel"),
+                (List<HotelPriceSource.Quote>) r.get("quotes"))).toList();
+    }
+
+    /** 不经过对话直接比价（行程页上"重新比价"用），返回每家酒店的各平台报价，不发卡片也不记报价簿。 */
+    public HotelQuoteBook.Comparison quote(List<String> hotels, String city, LocalDate checkIn, LocalDate checkOut) {
+        Map<String, Object> response = quoteAll(hotels.stream().limit(MAX_HOTELS).toList(), city, checkIn, checkOut, List.of());
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> results = (List<Map<String, Object>>) response.get("results");
+        return new HotelQuoteBook.Comparison(city, String.valueOf(checkIn), String.valueOf(checkOut), CardHub.now(),
+                entries(results));
     }
 
     /** 卡片的文字版：序号、酒店名、各平台里的最低价。 */

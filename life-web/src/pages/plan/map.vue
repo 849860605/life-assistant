@@ -1,48 +1,120 @@
 <template>
   <Shell active="map">
   <view class="page">
-    <view class="head">
-      <text class="title">第1天 · 3月10日</text>
-      <text class="tag">示例</text>
+    <view v-if="!tripId" class="empty">
+      <Icon name="nav" :size="34" color="var(--muted)" />
+      <view>还没有行程路线</view>
+      <button class="btn small" @click="toChat">先在对话里生成一个行程</button>
     </view>
-    <view class="layout">
-      <view class="stops">
-        <view v-for="s in DAY1_ROUTE" :key="s.no" class="stop">
-          <view class="no">{{ s.no }}</view>
-          <view class="stop-body">
-            <view class="name">{{ s.name }}</view>
-            <view class="time">{{ s.time }}</view>
-            <view v-if="s.next" class="next"><Icon name="car" :size="12" color="var(--muted)" /> 到下一站 {{ s.next }}</view>
+    <template v-else>
+      <view class="head">
+        <text class="title">第{{ dayNo }}天<text v-if="date"> · {{ date }}</text></text>
+        <text v-if="day?.theme" class="tag">{{ day.theme }}</text>
+      </view>
+      <scroll-view v-if="dayCount > 1" scroll-x class="days">
+        <view class="days-inner">
+          <text v-for="n in dayCount" :key="n" class="day" :class="{ on: n === dayNo }" @click="dayNo = n">D{{ n }}</text>
+        </view>
+      </scroll-view>
+      <view class="layout">
+        <view class="stops">
+          <view v-if="!stops.length" class="none muted">{{ loading ? "正在补坐标…" : "这一天的地点在高德上没找到坐标" }}</view>
+          <view v-for="(s, i) in stops" :key="s.id" class="stop">
+            <view class="no">{{ i + 1 }}</view>
+            <view class="stop-body">
+              <view class="name">{{ s.name }}</view>
+              <view class="time">{{ s.start }}<text v-if="s.end"> - {{ s.end }}</text></view>
+              <view v-if="legFrom(day, s.id)" class="next">
+                <Icon :name="legFrom(day, s.id)!.mode === 'WALK' ? 'users' : 'car'" :size="12" color="var(--muted)" /> 到下一站 {{ legText(legFrom(day, s.id)) }}
+                <text class="nav-link" @click="navigate(s, stops[i + 1], legFrom(day, s.id)!.mode === 'WALK' ? 'walk' : 'car')">导航</text>
+              </view>
+            </view>
+            <image v-if="s.photo && !broken[s.id]" class="thumb" @error="broken[s.id] = true" :src="s.photo" mode="aspectFill" />
           </view>
-          <image class="thumb" :src="s.image" mode="aspectFill" />
+        </view>
+        <view class="map-wrap">
+          <image v-if="map" class="map" :src="map" mode="widthFix" />
+          <view v-else class="map blank" />
         </view>
       </view>
-      <view class="map-wrap">
-        <image class="map" :src="ROUTE_MAP" mode="widthFix" />
-        <view class="map-tools">
-          <view class="tool"><Icon name="locate" :size="18" color="var(--ink)" /></view>
-          <view class="tool"><Icon name="plus" :size="18" color="var(--ink)" /></view>
-        </view>
+      <view class="summary">
+        <text>全天路上约 <text class="strong">{{ travel.minutes ? duration(travel.minutes) : "—" }}</text></text>
+        <text>共 <text class="strong">{{ travel.km || 0 }} 公里</text></text>
       </view>
-    </view>
-    <view class="actions">
-      <view class="action" @click="toast('路线已按距离优化')"><Icon name="route" :size="16" color="var(--accent)" /><text>路线优化</text></view>
-      <view class="action" @click="toast('公共交通约 52 分钟')"><Icon name="bus" :size="16" color="var(--accent)" /><text>公共交通</text></view>
-      <view class="action" @click="toast('自驾约 45 分钟')"><Icon name="car" :size="16" color="var(--accent)" /><text>自驾导航</text></view>
-    </view>
-    <view class="note">地图和驾车时长来自高德；实时导航在阶段二接入。</view>
+      <view class="actions">
+        <view class="action" @click="edit"><Icon name="route" :size="16" color="var(--accent)" /><text>调整顺序</text></view>
+        <view class="action" @click="navigateAll('bus')"><Icon name="bus" :size="16" color="var(--accent)" /><text>公共交通</text></view>
+        <view class="action" @click="navigateAll('car')"><Icon name="car" :size="16" color="var(--accent)" /><text>驾车导航</text></view>
+      </view>
+      <view class="note">地图、路程来自高德，路程按打车估算（1 公里内按步行）；导航会打开高德地图。</view>
+    </template>
   </view>
   </Shell>
 </template>
 
 <script setup lang="ts">
 import Shell from "../../components/Shell.vue";
+import { computed, reactive, ref } from "vue";
+import { onLoad } from "@dcloudio/uni-app";
+import { api } from "../../api";
+import { showError } from "../../api/http";
+import type { ItineraryItem, TripDetail } from "../../api/types";
 import Icon from "../../components/Icon.vue";
-import { DAY1_ROUTE, ROUTE_MAP } from "../../demo/xian";
+import { openUrl } from "../../utils/format";
+import { dayMapUrl, dayTravel, duration, legFrom, legText, located } from "../../utils/place";
 
-/** 地图路线（原型⑥）：当天的站点列表 + 路线地图（高德静态地图）。 */
-function toast(title: string) {
-  uni.showToast({ title, icon: "none" });
+/** 地图路线（原型⑥）：当天有坐标的站点、各段路程和路线地图（高德）。参数 ?id=行程&day=第几天 */
+const tripId = ref(0);
+const dayNo = ref(1);
+const detail = ref<TripDetail | null>(null);
+const loading = ref(false);
+/** 加载失败的高德照片 */
+const broken = reactive<Record<string, boolean>>({});
+
+const day = computed(() => detail.value?.version.itinerary?.days[dayNo.value - 1]);
+const dayCount = computed(() => detail.value?.version.itinerary?.days.length || 0);
+const date = computed(() => (day.value ? `${Number(day.value.date.slice(5, 7))}月${Number(day.value.date.slice(8, 10))}日` : ""));
+const stops = computed(() => located(day.value));
+const map = computed(() => dayMapUrl(day.value, 600, 700));
+const travel = computed(() => dayTravel(day.value));
+
+onLoad(async (query) => {
+  tripId.value = Number(query?.id) || 0;
+  dayNo.value = Number(query?.day) || 1;
+  if (!tripId.value) return;
+  loading.value = true;
+  try {
+    detail.value = await api.trip(tripId.value);
+    if (detail.value.version.itinerary && !detail.value.version.itinerary.geo) detail.value = await api.tripGeo(tripId.value);
+    dayNo.value = Math.min(dayNo.value, dayCount.value) || 1;
+  } catch (e) {
+    showError(e);
+  } finally {
+    loading.value = false;
+  }
+});
+
+/** 用高德网页版导航（手机上会尝试唤起高德 App） */
+function navigate(a: ItineraryItem, b: ItineraryItem | undefined, mode: "car" | "bus" | "walk") {
+  if (!b) return;
+  const p = (x: ItineraryItem) => `${x.lng},${x.lat},${encodeURIComponent(x.name)}`;
+  openUrl(`https://uri.amap.com/navigation?from=${p(a)}&to=${p(b)}&mode=${mode}&coordinate=gaode&callnative=1`);
+}
+
+function navigateAll(mode: "car" | "bus") {
+  if (stops.value.length < 2) {
+    uni.showToast({ title: "这一天不到两个有坐标的地点", icon: "none" });
+    return;
+  }
+  navigate(stops.value[0], stops.value[stops.value.length - 1], mode);
+}
+
+function edit() {
+  uni.navigateTo({ url: `/pages/plan/edit?id=${tripId.value}&day=${dayNo.value}` });
+}
+
+function toChat() {
+  uni.reLaunch({ url: "/pages/chat/chat" });
 }
 </script>
 
@@ -51,6 +123,17 @@ function toast(title: string) {
 .head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
 .title { font-size: 18px; font-weight: 700; color: var(--accent); }
 .tag { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--surface-2); color: var(--muted); }
+.days { white-space: nowrap; margin-bottom: 12px; }
+.days-inner { display: inline-flex; gap: 8px; }
+.day { padding: 4px 14px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); font-size: 13px; cursor: pointer; }
+.day.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.empty { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 80px 0; }
+.empty .btn { margin: 0; }
+.none { padding: 20px 0; font-size: 13px; text-align: center; }
+.nav-link { color: var(--accent); margin-left: 6px; cursor: pointer; white-space: nowrap; }
+.map.blank { height: 360px; background: var(--surface-2); }
+.summary { display: flex; justify-content: center; gap: 18px; margin-top: 12px; font-size: 14px; }
+.strong { font-weight: 700; color: var(--accent); }
 .layout { display: flex; flex-direction: column; gap: 12px; }
 .stops { background: var(--surface); border-radius: 14px; padding: 4px 12px; border: 1px solid var(--line); }
 .stop { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
@@ -71,7 +154,7 @@ function toast(title: string) {
 .stop-body { flex: 1; min-width: 0; }
 .name { font-weight: 600; }
 .time, .next { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.next { display: flex; align-items: center; gap: 4px; }
+.next { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
 .thumb { width: 64px; height: 48px; border-radius: 8px; flex-shrink: 0; }
 .map-wrap { position: relative; border-radius: 14px; overflow: hidden; border: 1px solid var(--line); }
 .map { width: 100%; display: block; }

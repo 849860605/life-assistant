@@ -71,18 +71,109 @@ export interface ItineraryItem {
   cost?: number;
   url?: string;
   locked?: boolean;
+  /** 以下由后端按名称在高德补上 */
+  poiId?: string;
+  lng?: number;
+  lat?: number;
+  photo?: string;
+  rating?: number;
+}
+
+/** 相邻两项之间的路程：WALK 步行、DRIVE 打车/自驾 */
+export interface ItineraryLeg {
+  from: string;
+  to: string;
+  mode: "WALK" | "DRIVE";
+  minutes: number;
+  km: number;
 }
 
 export interface ItineraryDay {
   date: string;
   theme?: string;
   items: ItineraryItem[];
+  legs?: ItineraryLeg[];
+}
+
+/** 一个平台的酒店报价（每晚） */
+export interface StayQuote {
+  platform: string;
+  price: number;
+  url?: string;
+  basis?: string;
+  matchedName?: string;
+}
+
+/** 比价时的另一家候选酒店 */
+export interface StayOption {
+  name: string;
+  price?: number;
+  platform?: string;
+  url?: string;
+  quotes?: StayQuote[];
+}
+
+/** 一段住宿：checkIn 当晚入住，checkOut 当天离店 */
+export interface Stay {
+  id: string;
+  name: string;
+  checkIn: string;
+  checkOut: string;
+  address?: string;
+  /** 每晚最低价和所在平台 */
+  price?: number;
+  platform?: string;
+  url?: string;
+  queriedAt?: string;
+  quotes?: StayQuote[];
+  options?: StayOption[];
+  poiId?: string;
+  lng?: number;
+  lat?: number;
+  photo?: string;
+  rating?: number;
 }
 
 export interface Itinerary {
   days: ItineraryDay[];
+  stays?: Stay[];
   tips?: string;
+  /** 已经补过坐标和路程 */
+  geo?: boolean;
 }
+
+/** 高德地点 */
+export interface Place {
+  id: string;
+  name: string;
+  category: string;
+  address: string | null;
+  area: string | null;
+  lng: number | null;
+  lat: number | null;
+  rating: number | null;
+  cost: number | null;
+  photo: string | null;
+  photos: string[];
+  tel: string | null;
+  distance: number | null;
+}
+
+/** 在行程里换成或加入的地点 */
+export interface PlacePick {
+  name: string;
+  poiId?: string | null;
+  address?: string | null;
+  lng?: number | null;
+  lat?: number | null;
+  photo?: string | null;
+  rating?: number | null;
+  cost?: number | null;
+  type?: string;
+  note?: string;
+}
+
+export type ChangeReason = "VISITED" | "DISLIKE";
 
 export interface TripVersion {
   tripId: number;

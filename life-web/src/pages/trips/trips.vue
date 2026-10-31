@@ -40,14 +40,15 @@ import { api } from "../../api";
 import { showError } from "../../api/http";
 import type { Trip } from "../../api/types";
 import Icon from "../../components/Icon.vue";
-import { coverFor } from "../../demo/xian";
+import { cityCover } from "../../utils/cover";
+import { cityOf } from "../../utils/place";
 
-/** 我的行程（原型⑫）：进行中、收藏、历史；第一条是示例行程。 */
+/** 我的行程（原型⑫）：进行中、收藏、历史。封面是目的地城市热门景点的照片（高德）。收藏还没有数据，先显示空状态。 */
 const TABS = ["进行中", "收藏", "历史"];
 
 interface Row {
   key: string;
-  id: number | "demo";
+  id: number;
   title: string;
   dates: string;
   summary: string;
@@ -60,22 +61,11 @@ interface Row {
 const tab = ref(TABS[0]);
 const trips = ref<Trip[]>([]);
 const loaded = ref(false);
+/** 目的地城市 → 封面图 */
+const covers = ref<Record<string, string>>({});
 
-const DEMO: Row = {
-  key: "demo",
-  id: "demo",
-  title: "西安4天3晚（示例）",
-  dates: "3月10日 – 3月13日",
-  summary: "12 个景点 · 1 家酒店",
-  state: "进行中",
-  stateTone: "ok",
-  cover: coverFor("西安"),
-  group: "进行中",
-};
-
-const rows = computed<Row[]>(() => [
-  DEMO,
-  ...trips.value.map((t) => {
+const rows = computed<Row[]>(() =>
+  trips.value.map((t) => {
     const finished = t.status === "FINISHED" || (!!t.endDate && t.endDate < today());
     return {
       key: String(t.id),
@@ -85,16 +75,19 @@ const rows = computed<Row[]>(() => [
       summary: `${t.destination || ""}${t.currentVer > 1 ? ` · 第 ${t.currentVer} 版` : ""}`,
       state: finished ? "已完成" : t.status === "DRAFT" ? "草稿" : "进行中",
       stateTone: finished ? "" : t.status === "DRAFT" ? "draft" : "ok",
-      cover: coverFor(t.destination || t.title),
+      cover: covers.value[cityOf(t.destination || t.title)] || "",
       group: finished ? "历史" : "进行中",
     };
   }),
-]);
+);
 const shown = computed(() => rows.value.filter((r) => r.group === tab.value));
 
 onShow(async () => {
   try {
     trips.value = await api.trips();
+    for (const city of new Set(trips.value.map((t) => cityOf(t.destination || t.title)))) {
+      if (city && !(city in covers.value)) cityCover(city).then((url) => (covers.value = { ...covers.value, [city]: url }));
+    }
   } catch (e) {
     showError(e);
   } finally {
@@ -115,12 +108,19 @@ function open(t: Row) {
   uni.navigateTo({ url: `/pages/trips/detail?id=${t.id}` });
 }
 
-function edit(t: Row) {
-  if (t.id === "demo") {
-    uni.navigateTo({ url: "/pages/plan/edit" });
-  } else {
-    uni.navigateTo({ url: "/pages/chat/chat?q=" + encodeURIComponent(`我想调整行程「${t.title}」（tripId=${t.id}）`) });
+/** 有逐日安排的行程去编辑页调顺序；早期只有正文的行程去对话里改。 */
+async function edit(t: Row) {
+  try {
+    const detail = await api.trip(t.id);
+    if (detail.version.itinerary?.days?.length) {
+      uni.navigateTo({ url: `/pages/plan/edit?id=${t.id}&day=1` });
+      return;
+    }
+  } catch (e) {
+    showError(e);
+    return;
   }
+  uni.navigateTo({ url: "/pages/chat/chat?q=" + encodeURIComponent(`我想调整行程「${t.title}」（tripId=${t.id}）`) });
 }
 </script>
 

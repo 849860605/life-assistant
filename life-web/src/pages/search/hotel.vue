@@ -1,17 +1,26 @@
 <template>
   <Shell active="flight">
   <view class="page">
-    <view class="head"><text class="title">西安 · 酒店推荐</text></view>
-    <HotelList />
+    <view class="head"><text class="title">酒店比价</text></view>
+    <HotelList v-if="ready" :initial="query" />
   </view>
   </Shell>
 </template>
 
 <script setup lang="ts">
+import { ref } from "vue";
+import { onLoad } from "@dcloudio/uni-app";
 import Shell from "../../components/Shell.vue";
 import HotelList from "../../components/HotelList.vue";
 
-/** 酒店推荐（原型⑨）的独立页，内容和机票页里的"酒店"标签相同。 */
+/** 酒店比价（原型⑨）的独立页，内容和机票页里的"酒店"标签相同；支持 ?city=&place=&checkIn=&checkOut=。 */
+const query = ref<Record<string, string | undefined>>({});
+const ready = ref(false);
+
+onLoad((q) => {
+  query.value = q || {};
+  ready.value = true;
+});
 </script>
 
 <style scoped>
@@ -20,6 +29,5 @@ import HotelList from "../../components/HotelList.vue";
 .title { font-size: 18px; font-weight: 700; }
 @media (min-width: 1024px) {
   .page, .container { max-width: 1180px; padding: 24px 28px; }
-  .list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 }
 </style>

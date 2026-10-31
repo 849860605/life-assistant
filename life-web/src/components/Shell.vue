@@ -1,7 +1,7 @@
 <template>
   <view class="shell" :class="{ wide }">
     <view v-if="wide" class="sidebar">
-      <view class="brand" @click="go(NAV[0])">
+      <view class="brand" @click="goKey('home')">
         <view class="logo"><Icon name="chat" :size="16" color="#fff" /></view>
         <text class="brand-name">生活助手</text>
       </view>
@@ -21,7 +21,7 @@
             <view class="recent-date">{{ t.dates }}</view>
           </view>
         </view>
-        <view class="recent-all" @click="go(NAV[8])">查看全部 ›</view>
+        <view class="recent-all" @click="goKey('trips')">查看全部 ›</view>
       </view>
     </view>
 
@@ -33,10 +33,10 @@
         </view>
         <view class="top-right">
           <slot name="topbar" />
-          <view class="top-item"><Icon name="pin" :size="16" color="var(--ink)" /><text>{{ city }}</text></view>
+          <view class="top-item" @click="picking = true"><Icon name="pin" :size="16" color="var(--ink)" /><text>{{ city }}</text><Icon name="down" :size="12" color="var(--muted)" /></view>
           <view v-if="weather" class="top-item"><Icon name="weather" :size="16" color="#f59e0b" /><text>{{ weather }}</text></view>
-          <view class="top-item" @click="go(NAV[8])"><Icon name="trip" :size="16" color="var(--ink)" /><text>历史行程</text></view>
-          <view class="top-item" @click="go(NAV[9])"><Icon name="heart" :size="16" color="var(--ink)" /><text>收藏</text></view>
+          <view class="top-item" @click="goKey('trips')"><Icon name="trip" :size="16" color="var(--ink)" /><text>历史行程</text></view>
+          <view class="top-item" @click="goKey('fav')"><Icon name="heart" :size="16" color="var(--ink)" /><text>收藏</text></view>
           <view class="top-item"><Icon name="bell" :size="17" color="var(--ink)" /></view>
           <view class="me" @click="goMe">
             <view class="avatar">{{ initial }}</view>
@@ -49,6 +49,7 @@
         <slot />
       </view>
     </view>
+    <CityPicker v-if="picking" :current="city" @close="picking = false" @pick="changeCity" />
   </view>
 </template>
 
@@ -56,8 +57,10 @@
 import { computed, onMounted, ref } from "vue";
 import { api } from "../api";
 import { getToken } from "../api/http";
+import CityPicker from "./CityPicker.vue";
 import Icon from "./Icon.vue";
-import { CITY, coverFor } from "../demo/xian";
+import { cityCover } from "../utils/cover";
+import { cityOf, currentCity, setCurrentCity } from "../utils/place";
 import { useWide } from "../utils/screen";
 
 /**
@@ -77,25 +80,29 @@ interface NavItem {
   url: string;
 }
 
-const NAV: NavItem[] = [
+const city = currentCity();
+/** 最近一个行程的 id，侧栏"旅行规划"打开它；没有行程时去对话 */
+const latestId = ref<number | null>(null);
+
+const NAV = computed<NavItem[]>(() => [
   { key: "home", label: "首页", icon: "home", url: "/pages/home/home" },
   { key: "chat", label: "AI 对话", icon: "chat", url: "/pages/chat/chat" },
-  { key: "plan", label: "旅行规划", icon: "users", url: "/pages/trips/detail?id=demo" },
+  { key: "plan", label: "旅行规划", icon: "users", url: latestId.value ? `/pages/trips/detail?id=${latestId.value}` : "/pages/chat/chat" },
   { key: "flight", label: "机票酒店", icon: "plane", url: "/pages/search/flight" },
   { key: "food", label: "美食推荐", icon: "food", url: "/pages/search/food" },
   { key: "ticket", label: "景点门票", icon: "ticket", url: "/pages/search/flight?tab=ticket" },
   { key: "map", label: "地图出行", icon: "nav", url: "/pages/plan/map" },
-  { key: "weather", label: "天气查询", icon: "weather", url: "/pages/chat/chat?q=" + encodeURIComponent(`${CITY}这周天气怎么样，适合出去玩吗？`) },
+  { key: "weather", label: "天气查询", icon: "weather", url: "/pages/chat/chat?q=" + encodeURIComponent(`${city}这周天气怎么样，适合出去玩吗？`) },
   { key: "trips", label: "我的行程", icon: "trip", url: "/pages/trips/trips" },
   { key: "fav", label: "我的收藏", icon: "heart", url: "/pages/discover/discover" },
-];
+]);
 
 const wide = useWide();
 const keyword = ref("");
-const city = CITY;
+const picking = ref(false);
 const weather = ref("");
 const nickname = ref("");
-const recent = ref<{ key: string; id: number | "demo"; title: string; dates: string; cover: string }[]>([]);
+const recent = ref<{ key: string; id: number; title: string; dates: string; cover: string }[]>([]);
 const initial = computed(() => (nickname.value || "我").slice(0, 1).toUpperCase());
 
 onMounted(async () => {
@@ -103,20 +110,21 @@ onMounted(async () => {
   // 顶栏和最近行程都是锦上添花，失败不提示
   api.me().then((u) => (nickname.value = u.nickname || u.username)).catch(() => {});
   api.weatherToday(city).then((w) => (weather.value = `${w.tempMin}~${w.tempMax}°C ${w.text}`)).catch(() => {});
-  if (props.showRecent) {
-    api.trips().then((list) => {
-      recent.value = [
-        { key: "demo", id: "demo", title: "西安 4 天（示例）", dates: "3.10 – 3.13", cover: coverFor("西安") },
-        ...list.slice(0, 3).map((t) => ({
-          key: String(t.id),
-          id: t.id,
-          title: t.title,
-          dates: t.startDate ? `${t.startDate.slice(5).replace("-", ".")} – ${(t.endDate || t.startDate).slice(5).replace("-", ".")}` : "日期待定",
-          cover: coverFor(t.destination || t.title),
-        })),
-      ];
-    }).catch(() => {});
-  }
+  api.trips().then((list) => {
+    latestId.value = list[0]?.id ?? null;
+    if (!props.showRecent) return;
+    recent.value = list.slice(0, 3).map((t) => ({
+      key: String(t.id),
+      id: t.id,
+      title: t.title,
+      dates: t.startDate ? `${t.startDate.slice(5).replace("-", ".")} – ${(t.endDate || t.startDate).slice(5).replace("-", ".")}` : "日期待定",
+      cover: "",
+    }));
+    // 封面用目的地城市热门景点的照片，取到一张换一张
+    recent.value.forEach((r, i) => {
+      cityCover(cityOf(list[i].destination || list[i].title)).then((url) => (r.cover = url));
+    });
+  }).catch(() => {});
 });
 
 /** 侧栏跳转用 reLaunch，不在电脑上堆出很深的页面栈。 */
@@ -124,12 +132,27 @@ function go(n: NavItem) {
   uni.reLaunch({ url: n.url });
 }
 
-function openTrip(id: number | "demo") {
+function goKey(key: string) {
+  const n = NAV.value.find((x) => x.key === key);
+  if (n) go(n);
+}
+
+function openTrip(id: number) {
   uni.reLaunch({ url: `/pages/trips/detail?id=${id}` });
 }
 
 function goMe() {
   uni.reLaunch({ url: "/pages/me/me" });
+}
+
+/** 换城市：存下来，重新打开当前页，让页面按新城市取数据。 */
+function changeCity(c: string) {
+  picking.value = false;
+  setCurrentCity(c);
+  const pages = getCurrentPages();
+  const page = pages[pages.length - 1] as any;
+  const query = page?.options ? Object.entries(page.options).map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join("&") : "";
+  uni.reLaunch({ url: "/" + (page?.route || "pages/home/home") + (query ? "?" + query : "") });
 }
 
 function search() {
