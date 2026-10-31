@@ -126,6 +126,9 @@ life:
   # 没配和风时天气用高德兜底（没有逐小时和预警，日出日落按经纬度计算）
   amap:
     key: ${AMAP_KEY:}
+  # 行程导出 PDF 用的中文字体目录，没有字体时运行 tools/fetch-fonts.sh
+  pdf:
+    font-dir: ${LIFE_PDF_FONT_DIR:data/fonts}
   # 酒店多平台比价：携程问道（不配 Key 也能低频用）、美团 ht-ai、飞猪 FlyAI（调用官方命令行工具）
   hotel:
     ctrip:

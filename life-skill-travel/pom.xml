@@ -27,5 +27,11 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- 行程导出 PDF：HTML + CSS 排版，PDFBox 输出；中文字体在运行时从 life.pdf.font-dir 加载 -->
+        <dependency>
+            <groupId>io.github.openhtmltopdf</groupId>
+            <artifactId>openhtmltopdf-pdfbox</artifactId>
+            <version>1.1.90</version>
+        </dependency>
     </dependencies>
 </project>

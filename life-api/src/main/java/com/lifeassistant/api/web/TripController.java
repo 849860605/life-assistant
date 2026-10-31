@@ -6,6 +6,11 @@ import com.lifeassistant.core.schedule.ScheduleEvent;
 import com.lifeassistant.core.place.AmapPlaceService;
 import com.lifeassistant.skill.travel.trip.Trip;
 import com.lifeassistant.skill.travel.trip.TripEditor;
+import com.lifeassistant.skill.travel.trip.TripPdf;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import com.lifeassistant.skill.travel.trip.TripService;
 import com.lifeassistant.skill.travel.trip.TripVersion;
 import lombok.RequiredArgsConstructor;
@@ -19,10 +24,11 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /**
- * 行程接口：列表、详情、历史版本、关联日程、确认和删除，以及在页面上直接改行程（换一个、删掉、保留、调顺序、加入、换酒店、重新比价）。
+ * 行程接口：列表、详情、历史版本、关联日程、确认和删除，以及在页面上直接改行程（换一个、删掉、保留、调顺序、加入、换酒店、重新比价），导出 PDF。
  * 行程由出游技能在对话中生成。
  */
 @RestController
@@ -33,6 +39,7 @@ public class TripController {
     private final AuthFacade authFacade;
     private final TripService tripService;
     private final TripEditor tripEditor;
+    private final TripPdf tripPdf;
 
     /** 换掉或删掉某项时的请求：换成的地点（删掉时不用）和原因（VISITED 去过了、DISLIKE 不感兴趣，可空）。 */
     public record ItemChange(TripEditor.PlacePick place, TripEditor.Reason reason) {
@@ -137,6 +144,17 @@ public class TripController {
     @PostMapping("/{id}/stays/{stayId}/requote")
     public ApiResponse<TripService.TripDetail> requote(@PathVariable long id, @PathVariable String stayId) {
         return ApiResponse.ok(tripEditor.requote(authFacade.current(), id, stayId));
+    }
+
+    /** GET /api/v1/trips/{id}/pdf：导出 PDF（不传 version 时导出当前版本），作为附件下载。 */
+    @GetMapping("/{id}/pdf")
+    public ResponseEntity<byte[]> pdf(@PathVariable long id, @RequestParam(required = false) Integer version) {
+        TripService.TripDetail detail = tripService.get(authFacade.current(), id, version);
+        String name = (detail.trip().getTitle() == null ? "行程" : detail.trip().getTitle()).replaceAll("[\\\\/:*?\"<>|]", "_") + ".pdf";
+        return ResponseEntity.ok().contentType(MediaType.APPLICATION_PDF)
+                .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
+                        .filename(name, StandardCharsets.UTF_8).build().toString())
+                .body(tripPdf.render(detail));
     }
 
     /** GET /api/v1/trips/{id}/versions：行程的全部历史版本。 */

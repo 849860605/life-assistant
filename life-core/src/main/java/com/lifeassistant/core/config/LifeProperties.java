@@ -21,6 +21,7 @@ public class LifeProperties {
     private QWeather qweather = new QWeather();
     private Amap amap = new Amap();
     private Search search = new Search();
+    private Pdf pdf = new Pdf();
     /** 远程 MCP 服务：名字 → 连接配置 */
     private Map<String, McpServer> mcp = new LinkedHashMap<>();
     private Graph graph = new Graph();
@@ -84,6 +85,13 @@ public class LifeProperties {
         /** 放 Key 的请求头和前缀，默认 Authorization: Bearer <key> */
         private String authHeader = "Authorization";
         private String authPrefix = "Bearer ";
+    }
+
+    /** 行程导出 PDF 的配置。 */
+    @Data
+    public static class Pdf {
+        /** 中文字体目录，放 NotoSansSC-Regular.ttf 和 NotoSansSC-Bold.ttf（tools/fetch-fonts.sh 下载） */
+        private String fontDir = "data/fonts";
     }
 
     /** 联网搜索配置，目前用博查。 */

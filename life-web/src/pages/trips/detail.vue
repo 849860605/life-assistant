@@ -8,7 +8,7 @@
       <text v-if="!isCurrent" class="tag">正在看第 {{ detail?.version.version }} 版</text>
       <view class="ed-actions">
         <view class="ghost-act" @click="notYet('分享')"><Icon name="send" :size="15" color="var(--ink)" />分享</view>
-        <view class="ghost-act" @click="notYet('下载 PDF')"><Icon name="layers" :size="15" color="var(--ink)" />下载PDF</view>
+        <view class="ghost-act" @click="downloadPdf"><Icon name="layers" :size="15" color="var(--ink)" />下载PDF</view>
         <button class="btn ghost small" @click="changeNeeds">修改需求</button>
         <button v-if="trip?.status === 'DRAFT'" class="btn small" @click="confirmTrip">确认行程</button>
       </view>
@@ -209,6 +209,7 @@
         <text class="tag" :class="trip.status === 'DRAFT' ? '' : 'ok'">{{ trip.status === "DRAFT" ? "草稿" : "已确认" }}</text>
       </view>
       <view class="meta">{{ trip.destination }} · {{ cnDate(trip.startDate) }} – {{ cnDate(trip.endDate) }}</view>
+      <view class="m-pdf" @click="downloadPdf"><Icon name="layers" :size="14" color="var(--accent)" />导出 PDF</view>
     </view>
     <view v-if="saved" class="saved">
       <Icon name="checkCircle" :size="16" color="var(--ok)" />
@@ -324,7 +325,7 @@
 import { computed, reactive, ref, watch } from "vue";
 import { onLoad, onShow } from "@dcloudio/uni-app";
 import { api } from "../../api";
-import { showError } from "../../api/http";
+import { API_BASE, getToken, showError } from "../../api/http";
 import type { ChangeReason, ItineraryDay, ItineraryItem, Place, ScheduleEvent, Stay, TripDetail, TripVersion } from "../../api/types";
 import Icon from "../../components/Icon.vue";
 import MarkdownView from "../../components/MarkdownView.vue";
@@ -540,6 +541,29 @@ function openReplace(item: ItineraryItem, reason: ChangeReason | null) {
 }
 
 /** 修改保存成新版本后：换上新内容、刷新版本列表、提示可以看前后对比 */
+/**
+ * 导出 PDF：后端排版好直接下载。网页里新开标签页下载（链接上带 token，因为新标签页带不了请求头）；
+ * 其他端先下载再用系统查看器打开。看历史版本时导出那个版本。
+ */
+function downloadPdf() {
+  if (!detail.value) return;
+  const url = `${API_BASE}/api/v1/trips/${tripId.value}/pdf?version=${detail.value.version.version}`
+    + `&Authorization=${encodeURIComponent("Bearer " + getToken())}`;
+  // #ifdef H5
+  window.open(url, "_blank");
+  uni.showToast({ title: "正在生成 PDF，十几秒后开始下载", icon: "none" });
+  // #endif
+  // #ifndef H5
+  uni.showLoading({ title: "正在生成 PDF" });
+  uni.downloadFile({
+    url,
+    success: (res) => uni.openDocument({ filePath: res.tempFilePath, fileType: "pdf", showMenu: true }),
+    fail: () => uni.showToast({ title: "PDF 下载失败", icon: "none" }),
+    complete: () => uni.hideLoading(),
+  });
+  // #endif
+}
+
 function onSaved(d: TripDetail, note?: string) {
   const from = detail.value?.version.version || d.version.version - 1;
   replacing.value = null;
@@ -915,4 +939,5 @@ async function loadVersions() {
 .bottom .btn.danger { flex: 0 0 auto; }
 .m-stay { margin-top: 14px; padding: 12px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
 .m-stay-title { display: flex; align-items: center; gap: 6px; font-weight: 700; font-size: 14px; }
+.m-pdf { display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; font-size: 13px; color: var(--accent); cursor: pointer; }
 </style>

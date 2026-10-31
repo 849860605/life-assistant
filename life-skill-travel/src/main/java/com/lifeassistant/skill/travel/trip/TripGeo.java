@@ -50,7 +50,57 @@ public class TripGeo {
         for (Itinerary.Item item : day.items()) {
             items.add(locate(item, city, day.date(), stays));
         }
+        items = dropOutliers(day.items(), items, city);
         return new Itinerary.Day(day.date(), day.theme(), items, legs(items));
+    }
+
+    /** 新找到的地点离当天其他地点的中位位置超过这么远，多半是同名的别处（比如别的区县的"龙井村"） */
+    private static final double OUTLIER_KM = 50;
+
+    /**
+     * 检查这次新补上坐标的项：离当天其他地点太远的，用地址再找一次；还是太远就不要这个坐标，免得地图和路程算错。
+     */
+    private List<Itinerary.Item> dropOutliers(List<Itinerary.Item> before, List<Itinerary.Item> after, String city) {
+        List<Itinerary.Item> out = new ArrayList<>(after);
+        for (int i = 0; i < out.size(); i++) {
+            Itinerary.Item item = out.get(i);
+            if (!item.located() || before.get(i).located()) {
+                continue;
+            }
+            List<Itinerary.Item> others = new ArrayList<>(out);
+            others.remove(i);
+            double[] center = median(others);
+            if (center == null || distanceKm(center[1], center[0], item.lat(), item.lng()) <= OUTLIER_KM) {
+                continue;
+            }
+            Itinerary.Item original = before.get(i);
+            AmapPlaceService.Place retry = null;
+            if (original.address() != null && !original.address().isBlank()) {
+                try {
+                    retry = places.search(original.address().replaceAll("[(（].*?[)）]", ""), city, null, 1).stream()
+                            .filter(p -> p.lng() != null
+                                    && distanceKm(center[1], center[0], p.lat(), p.lng()) <= OUTLIER_KM)
+                            .findFirst().orElse(null);
+                } catch (RuntimeException e) {
+                    log.warn("按地址重找 {} 失败：{}", original.name(), e.getMessage());
+                }
+            }
+            AmapPlaceService.Place p = retry;
+            out.set(i, p == null ? original : new Itinerary.Item(original.id(), original.start(), original.end(),
+                    original.type(), original.name(), original.address(), original.note(), original.cost(),
+                    original.url(), original.locked(), p.id(), p.lng(), p.lat(), p.photo(), p.rating()));
+        }
+        return out;
+    }
+
+    /** 有坐标的项的中位位置（经度、纬度分别取中位数）；少于 2 个返回空。 */
+    private static double[] median(List<Itinerary.Item> items) {
+        List<Double> lngs = items.stream().filter(Itinerary.Item::located).map(Itinerary.Item::lng).sorted().toList();
+        List<Double> lats = items.stream().filter(Itinerary.Item::located).map(Itinerary.Item::lat).sorted().toList();
+        if (lngs.size() < 2) {
+            return null;
+        }
+        return new double[]{lngs.get(lngs.size() / 2), lats.get(lats.size() / 2)};
     }
 
     /** 住宿按酒店名在高德找，补坐标、照片、评分、地址。 */
