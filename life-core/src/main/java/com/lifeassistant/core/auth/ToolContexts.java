@@ -11,6 +11,7 @@ import java.util.Map;
 public final class ToolContexts {
 
     public static final String CONVERSATION_ID = "conversationId";
+    public static final String SKILL_ID = "skillId";
 
     private ToolContexts() {
     }
@@ -18,6 +19,11 @@ public final class ToolContexts {
     /** 构造传给模型调用的 ToolContext 内容：用户身份 + 会话 ID。 */
     public static Map<String, Object> of(UserCtx ctx, String conversationId) {
         return Map.of(UserCtx.KEY, ctx, CONVERSATION_ID, conversationId);
+    }
+
+    /** 同上，再带上技能 id，调用日志按技能归类用。 */
+    public static Map<String, Object> of(UserCtx ctx, String conversationId, String skillId) {
+        return Map.of(UserCtx.KEY, ctx, CONVERSATION_ID, conversationId, SKILL_ID, skillId);
     }
 
     /** 从 ToolContext 取用户身份，取不到抛 UNAUTHORIZED。 */

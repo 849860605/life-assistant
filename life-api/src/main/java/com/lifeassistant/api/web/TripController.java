@@ -10,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -17,7 +18,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 
 /**
- * 行程接口：列表、详情、历史版本、关联日程和删除。行程由出游技能在对话中生成。
+ * 行程接口：列表、详情、历史版本、关联日程、确认和删除。行程由出游技能在对话中生成。
  */
 @RestController
 @RequestMapping("/api/v1/trips")
@@ -44,6 +45,12 @@ public class TripController {
     @GetMapping("/{id}/events")
     public ApiResponse<List<ScheduleEvent>> events(@PathVariable long id) {
         return ApiResponse.ok(tripService.events(authFacade.current(), id));
+    }
+
+    /** POST /api/v1/trips/{id}/confirm：确认草稿行程。 */
+    @PostMapping("/{id}/confirm")
+    public ApiResponse<Trip> confirm(@PathVariable long id) {
+        return ApiResponse.ok(tripService.confirm(authFacade.current(), id));
     }
 
     /** DELETE /api/v1/trips/{id}：删除行程，关联的日程和提醒一起删。 */

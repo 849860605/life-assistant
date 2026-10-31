@@ -1,6 +1,7 @@
 package com.lifeassistant.core.platform;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.lifeassistant.core.audit.CallRecorder;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -20,9 +21,11 @@ public class MeituanHtClient {
 
     private final RestClient restClient;
     private final String token;
+    private final CallRecorder recorder;
 
-    public MeituanHtClient(@Value("${life.hotel.meituan.token:}") String token) {
+    public MeituanHtClient(@Value("${life.hotel.meituan.token:}") String token, CallRecorder recorder) {
         this.token = token;
+        this.recorder = recorder;
         this.restClient = RestClient.builder()
                 .baseUrl("https://mcp-open-cater.meituan.com")
                 .requestFactory(HttpTimeouts.factory(Duration.ofSeconds(90)))
@@ -35,6 +38,10 @@ public class MeituanHtClient {
 
     /** 提一个问题，成功返回 Markdown；接口返回失败时抛 IllegalStateException，网络错误抛 RestClientException。 */
     public String query(String city, String question, String originQuery) {
+        return recorder.platform("美团", question, () -> doQuery(city, question, originQuery));
+    }
+
+    private String doQuery(String city, String question, String originQuery) {
         Map<String, String> body = Map.of(
                 "city", city == null ? "" : city,
                 "query", question,

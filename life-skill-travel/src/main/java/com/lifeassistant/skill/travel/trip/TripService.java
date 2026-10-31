@@ -27,9 +27,18 @@ public class TripService {
     /** 出游技能建的日程在 t_schedule_event.source 里的取值，source_ref 是行程 id */
     public static final String SCHEDULE_SOURCE = "TRAVEL";
 
-    /** 一次保存的输入；元信息字段为空表示沿用原值，content 每次都是完整正文。 */
+    /**
+     * 一次保存的输入；元信息字段为空表示沿用原值，content 每次都是完整正文。
+     * itinerary 是结构化行程的 JSON（可空）；draft 为 true 时新建的行程是草稿，用户认可后再确认。
+     */
     public record TripDraft(String title, String tripType, String destination, LocalDate startDate,
-                            LocalDate endDate, String content, String changeNote) {
+                            LocalDate endDate, String content, String changeNote, String itinerary, boolean draft) {
+
+        /** 只有正文、直接确认的保存。 */
+        public TripDraft(String title, String tripType, String destination, LocalDate startDate, LocalDate endDate,
+                         String content, String changeNote) {
+            this(title, tripType, destination, startDate, endDate, content, changeNote, null, false);
+        }
     }
 
     /** 行程主记录加上某一个版本的内容。 */
@@ -38,7 +47,7 @@ public class TripService {
 
     /**
      * 保存一个新版本：tripId 为空时新建行程（版本从 1 开始），否则合并元信息并把版本号加 1。
-     * 行程只在用户认可后才保存，所以新行程直接是 CONFIRMED。
+     * 新行程是草稿（draft）还是已确认看 draft；已有行程的状态不变。
      *
      * @param createdBy USER 或 AI
      */
@@ -50,7 +59,7 @@ public class TripService {
             trip.setUserId(ctx.userId());
             trip.setSpaceId(ctx.spaceId());
             trip.setCurrentVer(0);
-            trip.setStatus("CONFIRMED");
+            trip.setStatus(draft.draft() ? "DRAFT" : "CONFIRMED");
             apply(trip, draft);
             tripMapper.insert(trip);
         } else {
@@ -62,6 +71,7 @@ public class TripService {
         tripVersion.setTripId(trip.getId());
         tripVersion.setVersion(version);
         tripVersion.setContent(draft.content());
+        tripVersion.setItinerary(draft.itinerary());
         tripVersion.setChangeNote(draft.changeNote());
         tripVersion.setCreatedBy(createdBy);
         versionMapper.insert(tripVersion);
@@ -70,6 +80,17 @@ public class TripService {
         trip.setUpdatedAt(OffsetDateTime.now());
         tripMapper.updateById(trip);
         return new TripDetail(trip, tripVersion);
+    }
+
+    /** 用户认可草稿：状态改成已确认。 */
+    public Trip confirm(UserCtx ctx, long tripId) {
+        Trip trip = getOwned(ctx, tripId);
+        if (!"CONFIRMED".equals(trip.getStatus())) {
+            trip.setStatus("CONFIRMED");
+            trip.setUpdatedAt(OffsetDateTime.now());
+            tripMapper.updateById(trip);
+        }
+        return trip;
     }
 
     /** 删除行程：版本随外键级联删除，关联的出游日程和提醒也一起删掉。 */

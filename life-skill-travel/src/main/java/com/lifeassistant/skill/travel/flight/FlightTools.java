@@ -1,5 +1,6 @@
 package com.lifeassistant.skill.travel.flight;
 
+import com.lifeassistant.core.card.CardHub;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
@@ -24,9 +25,11 @@ public class FlightTools {
     private static final int MAX_FLIGHTS = 12;
 
     private final List<FlightPriceSource> sources;
+    private final CardHub cards;
 
-    public FlightTools(List<FlightPriceSource> sources) {
+    public FlightTools(List<FlightPriceSource> sources, CardHub cards) {
         this.sources = sources;
+        this.cards = cards;
     }
 
     /** 某一航班在各平台的价格。 */
@@ -70,8 +73,33 @@ public class FlightTools {
             platforms.put(r.platform(), r.status().equals("OK") ? "OK，" + r.offers().size() + " 个航班"
                     : r.status() + (r.note() == null ? "" : "：" + r.note()));
         }
-        return Map.of("origin", origin, "destination", destination, "date", day.toString(),
-                "platforms", platforms, "flights", merge(results));
+        List<Flight> flights = merge(results);
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("origin", origin);
+        out.put("destination", destination);
+        out.put("date", day.toString());
+        out.put("platforms", platforms);
+        out.put("flights", flights);
+        if (!flights.isEmpty()) {
+            Map<String, Object> card = new LinkedHashMap<>(out);
+            card.put("queriedAt", CardHub.now());
+            if (cards.emit("flights", card, summary(origin, destination, day, flights))) {
+                out.put("card", CardHub.SHOWN_HINT);
+            }
+        }
+        return out;
+    }
+
+    /** 卡片的文字版：序号、航班号、起降时间、最低价和平台。 */
+    private static String summary(String origin, String destination, LocalDate day, List<Flight> flights) {
+        StringBuilder out = new StringBuilder("机票 " + origin + "→" + destination + " " + day + "：");
+        for (int i = 0; i < flights.size(); i++) {
+            Flight f = flights.get(i);
+            out.append(i == 0 ? "" : "；").append(i + 1).append(". ").append(f.flightNo()).append(" ")
+                    .append(f.depTime()).append("-").append(f.arrTime())
+                    .append(f.lowest() == null ? "" : " 最低" + f.lowest() + "元(" + f.lowestPlatform() + ")");
+        }
+        return out.toString();
     }
 
     /** 按航班号合并各平台结果，算出最低价，按最低价排序并截取前 MAX_FLIGHTS 个。 */

@@ -1,5 +1,6 @@
 package com.lifeassistant.core.platform;
 
+import com.lifeassistant.core.audit.CallRecorder;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -18,9 +19,11 @@ public class CtripWendaoClient {
 
     private final RestClient restClient;
     private final String token;
+    private final CallRecorder recorder;
 
-    public CtripWendaoClient(@Value("${life.hotel.ctrip.token:}") String token) {
+    public CtripWendaoClient(@Value("${life.hotel.ctrip.token:}") String token, CallRecorder recorder) {
         this.token = token;
+        this.recorder = recorder;
         this.restClient = RestClient.builder()
                 .baseUrl("https://wendao-skill-prod.ctrip.com")
                 .requestFactory(HttpTimeouts.factory(Duration.ofSeconds(60)))
@@ -35,7 +38,7 @@ public class CtripWendaoClient {
         }
         body.put("query", question);
         body.put("source", "github");
-        return restClient.post().uri("/skill/query").contentType(MediaType.APPLICATION_JSON)
-                .body(body).retrieve().body(String.class);
+        return recorder.platform("携程", question, () -> restClient.post().uri("/skill/query")
+                .contentType(MediaType.APPLICATION_JSON).body(body).retrieve().body(String.class));
     }
 }

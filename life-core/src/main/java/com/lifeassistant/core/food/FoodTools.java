@@ -1,5 +1,6 @@
 package com.lifeassistant.core.food;
 
+import com.lifeassistant.core.card.CardHub;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
@@ -24,9 +25,11 @@ public class FoodTools {
     private static final int MAX_RAW = 1500;
 
     private final List<RestaurantSource> sources;
+    private final CardHub cards;
 
-    public FoodTools(List<RestaurantSource> sources) {
+    public FoodTools(List<RestaurantSource> sources, CardHub cards) {
         this.sources = sources;
+        this.cards = cards;
     }
 
     /**
@@ -73,14 +76,31 @@ public class FoodTools {
                 raw.put(r.platform(), r.raw().length() > MAX_RAW ? r.raw().substring(0, MAX_RAW) + "…" : r.raw());
             }
         }
+        List<Restaurant> restaurants = merge(results);
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("query", query.shortQuestion());
         out.put("platforms", platforms);
-        out.put("restaurants", merge(results));
+        out.put("restaurants", restaurants);
+        if (!restaurants.isEmpty() && cards.emit("restaurants", Map.of("query", query.shortQuestion(),
+                "queriedAt", CardHub.now(), "platforms", platforms, "restaurants", restaurants), summary(restaurants))) {
+            out.put("card", CardHub.SHOWN_HINT);
+        }
         if (!raw.isEmpty()) {
             out.put("raw", raw);
         }
         return out;
+    }
+
+    /** 卡片的文字版：序号、店名、评分、人均。 */
+    private static String summary(List<Restaurant> restaurants) {
+        StringBuilder out = new StringBuilder("餐厅列表：");
+        for (int i = 0; i < restaurants.size(); i++) {
+            Restaurant r = restaurants.get(i);
+            out.append(i == 0 ? "" : "；").append(i + 1).append(". ").append(r.name())
+                    .append(r.rating() == null ? "" : " " + r.rating() + "分")
+                    .append(r.avgPrice() == null ? "" : " 人均" + r.avgPrice() + "元");
+        }
+        return out.toString();
     }
 
     /** 按店名合并各平台结果；两个平台都有的排前面，其次按评分从高到低，截取前 MAX_SHOPS 家。 */

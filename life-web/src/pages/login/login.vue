@@ -34,7 +34,7 @@ async function submit() {
   try {
     const result = await api.login(username.value.trim(), password.value);
     setToken(result.token);
-    uni.switchTab({ url: "/pages/chat/chat" });
+    uni.switchTab({ url: "/pages/home/home" });
   } catch (e) {
     error.value = e instanceof Error ? e.message : "登录失败";
   } finally {

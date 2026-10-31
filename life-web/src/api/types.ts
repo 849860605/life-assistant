@@ -24,16 +24,27 @@ export interface ChatMessage {
   id: number;
   role: "USER" | "ASSISTANT" | "SYSTEM" | "TOOL";
   content: string;
+  /** JSON 字符串，助手消息上可能有 {"cards": [...]} */
+  metadata: string | null;
   createdAt: string;
 }
 
-/** 对话流里的一个事件：route 选中技能，delta 增量文字，done 结束，error 出错。 */
+/** 工具结果卡片：kind 决定用哪个组件；offset 是卡片出现时回答已输出的字数。 */
+export interface Card {
+  kind: "restaurants" | "flights" | "hotels" | "trip" | "requirement" | string;
+  data: any;
+  summary?: string;
+  offset?: number;
+}
+
+/** 对话流里的一个事件：route 选中技能，delta 增量文字，card 卡片，done 结束，error 出错。 */
 export interface ChatEvent {
-  type: "route" | "delta" | "done" | "error";
+  type: "route" | "delta" | "card" | "done" | "error";
   skillId?: string;
   skillName?: string;
   text?: string;
   message?: string;
+  card?: Card;
 }
 
 export interface Trip {
@@ -48,10 +59,36 @@ export interface Trip {
   updatedAt: string;
 }
 
+/** 行程里的一项安排；type 是 SPOT / FOOD / HOTEL / TRANSPORT / FREE。 */
+export interface ItineraryItem {
+  id: string;
+  start?: string;
+  end?: string;
+  type: string;
+  name: string;
+  address?: string;
+  note?: string;
+  cost?: number;
+  url?: string;
+  locked?: boolean;
+}
+
+export interface ItineraryDay {
+  date: string;
+  theme?: string;
+  items: ItineraryItem[];
+}
+
+export interface Itinerary {
+  days: ItineraryDay[];
+  tips?: string;
+}
+
 export interface TripVersion {
   tripId: number;
   version: number;
   content?: string;
+  itinerary?: Itinerary | null;
   changeNote: string | null;
   createdBy: "USER" | "AI";
   createdAt: string;

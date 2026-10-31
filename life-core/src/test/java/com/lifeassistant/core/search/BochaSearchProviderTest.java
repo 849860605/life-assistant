@@ -1,5 +1,6 @@
 package com.lifeassistant.core.search;
 
+import com.lifeassistant.core.audit.CallRecorder;
 import com.lifeassistant.core.config.LifeProperties;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
@@ -89,6 +90,6 @@ class BochaSearchProviderTest {
         LifeProperties properties = new LifeProperties();
         properties.getSearch().setBochaApiKey(key);
         properties.getSearch().setBochaBaseUrl(baseUrl);
-        return new BochaSearchProvider(RestClient.builder(), properties);
+        return new BochaSearchProvider(RestClient.builder(), properties, CallRecorder.NOOP);
     }
 }

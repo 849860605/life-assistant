@@ -1,6 +1,10 @@
 {
 	"pages": [
 		{
+			"path": "pages/home/home",
+			"style": { "navigationStyle": "custom" }
+		},
+		{
 			"path": "pages/chat/chat",
 			"style": { "navigationBarTitleText": "生活助手" }
 		},
@@ -10,11 +14,47 @@
 		},
 		{
 			"path": "pages/trips/trips",
-			"style": { "navigationBarTitleText": "行程" }
+			"style": { "navigationBarTitleText": "我的行程" }
 		},
 		{
 			"path": "pages/trips/detail",
 			"style": { "navigationBarTitleText": "行程详情" }
+		},
+		{
+			"path": "pages/discover/discover",
+			"style": { "navigationBarTitleText": "发现" }
+		},
+		{
+			"path": "pages/plan/plans",
+			"style": { "navigationBarTitleText": "推荐方案" }
+		},
+		{
+			"path": "pages/plan/replace",
+			"style": { "navigationBarTitleText": "景点替换" }
+		},
+		{
+			"path": "pages/plan/map",
+			"style": { "navigationBarTitleText": "地图路线" }
+		},
+		{
+			"path": "pages/plan/edit",
+			"style": { "navigationBarTitleText": "行程调整" }
+		},
+		{
+			"path": "pages/plan/updated",
+			"style": { "navigationBarTitleText": "行程已更新" }
+		},
+		{
+			"path": "pages/search/food",
+			"style": { "navigationBarTitleText": "附近美食" }
+		},
+		{
+			"path": "pages/search/flight",
+			"style": { "navigationBarTitleText": "机票比价" }
+		},
+		{
+			"path": "pages/search/hotel",
+			"style": { "navigationBarTitleText": "酒店推荐" }
 		},
 		{
 			"path": "pages/schedule/schedule",
@@ -26,23 +66,24 @@
 		}
 	],
 	"tabBar": {
-		"color": "#66746F",
-		"selectedColor": "#2E6A57",
+		"color": "#8A94A6",
+		"selectedColor": "#2563EB",
 		"backgroundColor": "#FFFFFF",
 		"borderStyle": "white",
-		"fontSize": "14px",
-		"height": "52px",
+		"fontSize": "11px",
+		"iconWidth": "22px",
+		"height": "56px",
 		"list": [
-			{ "pagePath": "pages/chat/chat", "text": "对话" },
-			{ "pagePath": "pages/trips/trips", "text": "行程" },
-			{ "pagePath": "pages/schedule/schedule", "text": "日程" },
-			{ "pagePath": "pages/me/me", "text": "我的" }
+			{ "pagePath": "pages/home/home", "text": "首页", "iconPath": "static/tab/home.png", "selectedIconPath": "static/tab/home-on.png" },
+			{ "pagePath": "pages/trips/trips", "text": "行程", "iconPath": "static/tab/trip.png", "selectedIconPath": "static/tab/trip-on.png" },
+			{ "pagePath": "pages/discover/discover", "text": "发现", "iconPath": "static/tab/discover.png", "selectedIconPath": "static/tab/discover-on.png" },
+			{ "pagePath": "pages/me/me", "text": "我的", "iconPath": "static/tab/me.png", "selectedIconPath": "static/tab/me-on.png" }
 		]
 	},
 	"globalStyle": {
 		"navigationBarTextStyle": "black",
 		"navigationBarTitleText": "生活助手",
 		"navigationBarBackgroundColor": "#FFFFFF",
-		"backgroundColor": "#F4F6F5"
+		"backgroundColor": "#F4F6FA"
 	}
 }

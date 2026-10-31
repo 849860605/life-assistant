@@ -21,6 +21,7 @@ export const api = {
     request<TripDetail>("GET", `/api/v1/trips/${id}` + (version ? `?version=${version}` : "")),
   tripVersions: (id: number) => request<TripVersion[]>("GET", `/api/v1/trips/${id}/versions`),
   tripEvents: (id: number) => request<ScheduleEvent[]>("GET", `/api/v1/trips/${id}/events`),
+  confirmTrip: (id: number) => request<Trip>("POST", `/api/v1/trips/${id}/confirm`),
   deleteTrip: (id: number) => request<void>("DELETE", `/api/v1/trips/${id}`),
 
   events: (from: string, to: string) => request<ScheduleEvent[]>("GET", `/api/v1/events?from=${from}&to=${to}`),
@@ -32,6 +33,9 @@ export const api = {
   saveMemory: (body: { category: MemoryCategory; key: string; content: string }) =>
     request<void>("PUT", "/api/v1/memories", body),
   deleteMemory: (id: number) => request<void>("DELETE", `/api/v1/memories/${id}`),
+
+  weatherToday: (city: string) =>
+    request<{ city: string; text: string; tempMin: number; tempMax: number }>("GET", `/api/v1/weather/today?city=${encodeURIComponent(city)}`),
 
   configureBark: (deviceKey: string) => request<void>("PUT", "/api/v1/notify/bark", { deviceKey }),
   testNotify: () => request<void>("POST", "/api/v1/notify/test"),

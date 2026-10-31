@@ -1,6 +1,8 @@
 package com.lifeassistant.core.conversation;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lifeassistant.core.config.LifeProperties;
 import lombok.RequiredArgsConstructor;
 import org.springframework.ai.chat.memory.ChatMemory;
@@ -20,6 +22,8 @@ import java.util.Objects;
  * <p>
  * 没用 Spring AI 的 MessageWindowChatMemory：它每次会用窗口内的消息覆盖整个会话，
  * 超出窗口的历史会被删掉，而我们要保留全部历史给前端展示。
+ * <p>
+ * 助手消息上带了卡片时，把卡片的文字版接在正文后面给模型，模型才知道用户看到的是哪些餐厅、航班。
  */
 @Component
 @RequiredArgsConstructor
@@ -27,6 +31,7 @@ public class PersistentChatMemory implements ChatMemory {
 
     private final ChatMessageMapper chatMessageMapper;
     private final LifeProperties properties;
+    private final ObjectMapper objectMapper;
 
     /** 追加消息；跳过工具消息和空文本（如只含工具调用的助手消息）。 */
     @Override
@@ -47,7 +52,7 @@ public class PersistentChatMemory implements ChatMemory {
     @Override
     public List<Message> get(String conversationId) {
         return chatMessageMapper.selectRecent(conversationId, properties.getModels().getMemoryWindow()).stream()
-                .map(PersistentChatMemory::toMessage)
+                .map(this::toMessage)
                 .filter(Objects::nonNull)
                 .toList();
     }
@@ -59,13 +64,34 @@ public class PersistentChatMemory implements ChatMemory {
                 .eq(ChatMessageEntity::getConversationId, conversationId));
     }
 
-    /** 数据库行转回 Spring AI 消息；TOOL 返回 null，由调用方过滤。 */
-    private static Message toMessage(ChatMessageEntity entity) {
+    /** 数据库行转回 Spring AI 消息；TOOL 和没有内容的助手消息返回 null，由调用方过滤。 */
+    private Message toMessage(ChatMessageEntity entity) {
         return switch (MessageType.valueOf(entity.getRole())) {
             case USER -> new UserMessage(entity.getContent());
-            case ASSISTANT -> new AssistantMessage(entity.getContent());
+            case ASSISTANT -> {
+                String text = (entity.getContent() + cardSummaries(entity.getMetadata())).strip();
+                yield text.isEmpty() ? null : new AssistantMessage(text);
+            }
             case SYSTEM -> new SystemMessage(entity.getContent());
             case TOOL -> null;
         };
+    }
+
+    /** metadata.cards 里每张卡片的 summary，拼成"[已展示给用户的卡片]"段落；没有卡片返回空串。 */
+    private String cardSummaries(String metadata) {
+        if (metadata == null || metadata.isBlank()) {
+            return "";
+        }
+        try {
+            StringBuilder out = new StringBuilder();
+            for (JsonNode card : objectMapper.readTree(metadata).path("cards")) {
+                if (card.hasNonNull("summary")) {
+                    out.append("\n").append(card.get("summary").asText());
+                }
+            }
+            return out.isEmpty() ? "" : "\n\n[已展示给用户的卡片]" + out;
+        } catch (Exception e) {
+            return "";
+        }
     }
 }

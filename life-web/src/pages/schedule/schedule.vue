@@ -1,4 +1,5 @@
 <template>
+  <Shell active="">
   <view class="container">
     <view class="top">
       <text class="muted">未来 60 天</text>
@@ -43,9 +44,11 @@
       </view>
     </view>
   </view>
+  </Shell>
 </template>
 
 <script setup lang="ts">
+import Shell from "../../components/Shell.vue";
 import { computed, reactive, ref } from "vue";
 import { onShow } from "@dcloudio/uni-app";
 import { api } from "../../api";
@@ -160,4 +163,8 @@ function remove(e: ScheduleEvent) {
 .small { font-size: 13px; }
 .del { font-size: 13px; color: var(--muted); cursor: pointer; flex-shrink: 0; }
 .del:hover { color: var(--danger); }
+@media (min-width: 1024px) {
+  .page, .container { max-width: 1180px; padding: 24px 28px; }
+  .list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+}
 </style>

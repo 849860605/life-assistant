@@ -3,12 +3,16 @@ package com.lifeassistant.core.conversation;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.lifeassistant.common.auth.UserCtx;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lifeassistant.common.error.BizException;
+import com.lifeassistant.core.card.Card;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -20,6 +24,7 @@ public class ConversationService {
 
     private final ConversationMapper conversationMapper;
     private final ChatMessageMapper chatMessageMapper;
+    private final ObjectMapper objectMapper;
 
     /** 新建会话，ID 用随机 UUID，状态 ACTIVE。 */
     public Conversation create(UserCtx ctx, String title) {
@@ -75,6 +80,29 @@ public class ConversationService {
                     .eq(Conversation::getId, conversationId)
                     .isNull(Conversation::getTitle)
                     .set(Conversation::getTitle, firstInput.length() > 30 ? firstInput.substring(0, 30) : firstInput));
+        }
+    }
+
+    /**
+     * 把本轮的卡片存到本轮的助手消息上（metadata.cards）。模型这轮一个字没写时助手消息不会入库，就补一条空文本的。
+     */
+    public void attachCards(String conversationId, List<Card> cards) {
+        if (cards.isEmpty()) {
+            return;
+        }
+        String json;
+        try {
+            json = objectMapper.writeValueAsString(Map.of("cards", cards));
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException(e);
+        }
+        if (chatMessageMapper.attachToLastAnswer(conversationId, json) == 0) {
+            ChatMessageEntity entity = new ChatMessageEntity();
+            entity.setConversationId(conversationId);
+            entity.setRole("ASSISTANT");
+            entity.setContent("");
+            entity.setMetadata(json);
+            chatMessageMapper.insert(entity);
         }
     }
 

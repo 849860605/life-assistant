@@ -3,6 +3,7 @@ package com.lifeassistant.core.config;
 import com.baomidou.mybatisplus.annotation.DbType;
 import com.baomidou.mybatisplus.extension.plugins.MybatisPlusInterceptor;
 import com.baomidou.mybatisplus.extension.plugins.inner.PaginationInnerInterceptor;
+import com.lifeassistant.core.audit.CallRecorder;
 import com.lifeassistant.core.llm.ParallelToolCallingManager;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.springframework.ai.model.tool.ToolCallingManager;
@@ -41,12 +42,14 @@ public class CoreConfig {
     }
 
     /**
-     * 模型一次要求多个工具调用时并行执行（Spring AI 默认是逐个执行），替换自动配置里的 ToolCallingManager。
+     * 模型一次要求多个工具调用时并行执行（Spring AI 默认是逐个执行），替换自动配置里的 ToolCallingManager；
+     * 每次工具调用写调用日志。
      */
     @Bean
-    public ToolCallingManager toolCallingManager(ObjectProvider<ToolCallbackResolver> toolCallbackResolver) {
+    public ToolCallingManager toolCallingManager(ObjectProvider<ToolCallbackResolver> toolCallbackResolver,
+                                                 CallRecorder callRecorder) {
         return new ParallelToolCallingManager(
-                toolCallbackResolver.getIfAvailable(() -> new DelegatingToolCallbackResolver(List.of())));
+                toolCallbackResolver.getIfAvailable(() -> new DelegatingToolCallbackResolver(List.of())), callRecorder);
     }
 
     /**

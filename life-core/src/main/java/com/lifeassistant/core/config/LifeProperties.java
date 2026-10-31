@@ -3,6 +3,7 @@ package com.lifeassistant.core.config;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import java.math.BigDecimal;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -40,6 +41,18 @@ public class LifeProperties {
         private String defaultProvider = "dashscope";
         /** 提供方名 → 连接配置，名字就是型号前缀，例如 deepseek:deepseek-chat 里的 deepseek */
         private Map<String, Provider> providers = new LinkedHashMap<>();
+        /** 型号（"提供方:型号"）→ 单价，用来算每次调用的费用；没配的型号不算费用 */
+        private Map<String, Price> pricing = new LinkedHashMap<>();
+    }
+
+    /** 模型单价，单位：元 / 百万 Token。 */
+    @Data
+    public static class Price {
+        /** 输入（缓存未命中） */
+        private BigDecimal input = BigDecimal.ZERO;
+        /** 输入（缓存命中） */
+        private BigDecimal cachedInput = BigDecimal.ZERO;
+        private BigDecimal output = BigDecimal.ZERO;
     }
 
     /** 一个模型提供方的连接配置。 */

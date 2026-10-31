@@ -7,6 +7,8 @@ import com.alibaba.cloud.ai.graph.streaming.OutputType;
 import com.alibaba.cloud.ai.graph.streaming.StreamingOutput;
 import com.lifeassistant.common.auth.UserCtx;
 import com.lifeassistant.common.error.BizException;
+import com.lifeassistant.core.card.Card;
+import com.lifeassistant.core.card.CardHub;
 import com.lifeassistant.core.conversation.Conversation;
 import com.lifeassistant.core.conversation.ConversationService;
 import com.lifeassistant.core.skill.SkillRegistry;
@@ -15,12 +17,14 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * 一轮对话的入口：校验会话归属 → 运行编排图 → 把图的输出转换成前端事件。
+ * 一轮对话的入口：校验会话归属 → 运行编排图 → 把图的输出转换成前端事件，并合入工具发出的卡片。
  */
 @Slf4j
 @Service
@@ -30,10 +34,12 @@ public class ChatOrchestrator {
     private final CompiledGraph lifeGraph;
     private final ConversationService conversationService;
     private final SkillRegistry skillRegistry;
+    private final CardHub cardHub;
 
     /**
      * 以会话 id 作为图的 thread 运行一轮，流式输出事件，正常结束时补一个 done；
      * 出错时只发 error（业务异常透出原文，其他异常给通用提示）。
+     * 工具发的卡片记下出现时回答已输出的字数，本轮结束时存到助手消息上，翻历史时能还原。
      *
      * @param ctx 必须在请求线程里取好，图里的节点拿不到登录态
      */
@@ -48,12 +54,32 @@ public class ChatOrchestrator {
         inputs.put(LifeGraphConfig.CONVERSATION_ID, conversationId);
         RunnableConfig config = RunnableConfig.builder().threadId(conversationId).build();
 
-        return lifeGraph.stream(inputs, config)
+        CardHub.Turn turn = cardHub.open(conversationId);
+        Flux<ChatEvent> graphEvents = lifeGraph.stream(inputs, config)
                 // CompiledGraph.stream 内部用 flatMap 把输出转出来，下游按 1 个 1 个要（SSE 背压）时
                 // 突发到达的分片会被打乱顺序。这里一次把需求要满，flatMap 就会按到达顺序直接放行，再由缓冲按顺序交给下游
                 .onBackpressureBuffer()
                 .concatMap(output -> Flux.fromIterable(toEvents(output, conversationId, firstInput)))
-                .concatWith(Flux.just(ChatEvent.done()))
+                .doFinally(signal -> turn.close());
+
+        AtomicInteger textLength = new AtomicInteger();
+        List<Card> shown = new ArrayList<>();
+        return Flux.merge(graphEvents, turn.cards().map(ChatEvent::card))
+                .map(event -> {
+                    if (event.text() != null) {
+                        textLength.addAndGet(event.text().length());
+                    }
+                    if (event.card() == null) {
+                        return event;
+                    }
+                    Card placed = event.card().at(textLength.get());
+                    shown.add(placed);
+                    return ChatEvent.card(placed);
+                })
+                .concatWith(Flux.defer(() -> {
+                    conversationService.attachCards(conversationId, shown);
+                    return Flux.just(ChatEvent.done());
+                }))
                 .onErrorResume(e -> {
                     log.error("对话 {} 出错", conversationId, e);
                     String message = e instanceof BizException biz ? biz.getMessage() : "这次回答出错了，请稍后再试";

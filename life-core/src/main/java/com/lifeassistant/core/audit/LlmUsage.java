@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 
 /**
@@ -21,5 +22,9 @@ public class LlmUsage {
     private String model;
     private Integer promptTokens;
     private Integer completionTokens;
+    /** 缓存命中的输入 Token 数，接口没返回时为空 */
+    private Integer cachedTokens;
+    /** 费用（元），没配单价时为空 */
+    private BigDecimal cost;
     private OffsetDateTime createdAt;
 }

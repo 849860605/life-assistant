@@ -2,6 +2,8 @@ package com.lifeassistant.skill.travel.hotel;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.lifeassistant.core.audit.CallRecorder;
+import com.lifeassistant.core.card.CardHub;
 import com.lifeassistant.core.mcp.McpServerRegistry;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.annotation.Tool;
@@ -11,6 +13,7 @@ import org.springframework.stereotype.Component;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -35,11 +38,16 @@ public class HotelPriceTools {
     private final List<HotelPriceSource> sources;
     private final McpServerRegistry mcpServers;
     private final ObjectMapper objectMapper;
+    private final CallRecorder recorder;
+    private final CardHub cards;
 
-    public HotelPriceTools(List<HotelPriceSource> sources, McpServerRegistry mcpServers, ObjectMapper objectMapper) {
+    public HotelPriceTools(List<HotelPriceSource> sources, McpServerRegistry mcpServers, ObjectMapper objectMapper,
+                           CallRecorder recorder, CardHub cards) {
         this.sources = sources;
         this.mcpServers = mcpServers;
         this.objectMapper = objectMapper;
+        this.recorder = recorder;
+        this.cards = cards;
     }
 
     /** 按地点找候选酒店并一次完成多平台比价；RollingGo 没配置时提示改用地图找酒店再 compareHotelPrices。 */
@@ -66,7 +74,8 @@ public class HotelPriceTools {
         List<HotelPriceSource.Quote> rollingGo;
         List<String> names;
         try {
-            JsonNode list = unwrap(search.get().call(searchArgs(place, placeType, in, out, maxPrice, minStar, size)))
+            String args = searchArgs(place, placeType, in, out, maxPrice, minStar, size);
+            JsonNode list = unwrap(recorder.platform("RollingGo", args, () -> search.get().call(args)))
                     .path("hotelInformationList");
             names = new ArrayList<>();
             rollingGo = new ArrayList<>();
@@ -137,10 +146,35 @@ public class HotelPriceTools {
             }
             executor.shutdownNow();
         }
-        return Map.of(
-                "checkIn", String.valueOf(in), "checkOut", String.valueOf(out),
-                "notConfigured", sources.stream().filter(s -> !s.available()).map(HotelPriceSource::platform).toList(),
-                "results", results);
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("checkIn", String.valueOf(in));
+        response.put("checkOut", String.valueOf(out));
+        response.put("notConfigured", sources.stream().filter(s -> !s.available()).map(HotelPriceSource::platform).toList());
+        response.put("results", results);
+        if (!results.isEmpty()) {
+            Map<String, Object> card = new LinkedHashMap<>(response);
+            card.put("city", city);
+            card.put("queriedAt", CardHub.now());
+            if (cards.emit("hotels", card, summary(results))) {
+                response.put("card", CardHub.SHOWN_HINT);
+            }
+        }
+        return response;
+    }
+
+    /** 卡片的文字版：序号、酒店名、各平台里的最低价。 */
+    @SuppressWarnings("unchecked")
+    private static String summary(List<Map<String, Object>> results) {
+        StringBuilder out = new StringBuilder("酒店比价：");
+        for (int i = 0; i < results.size(); i++) {
+            Map<String, Object> r = results.get(i);
+            HotelPriceSource.Quote best = ((List<HotelPriceSource.Quote>) r.get("quotes")).stream()
+                    .filter(q -> q.price() != null)
+                    .min(Comparator.comparing(HotelPriceSource.Quote::price)).orElse(null);
+            out.append(i == 0 ? "" : "；").append(i + 1).append(". ").append(r.get("hotel"))
+                    .append(best == null ? " 无价格" : " 最低" + best.price() + "元/晚(" + best.platform() + ")");
+        }
+        return out.toString();
     }
 
     /** 拼 searchHotels 的参数，字段按 RollingGo 的工具定义。 */

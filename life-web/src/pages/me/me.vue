@@ -1,4 +1,5 @@
 <template>
+  <Shell active="">
   <view class="container">
     <view v-if="user" class="card account">
       <view>
@@ -6,6 +7,11 @@
         <view class="muted small">{{ user.username }} · {{ user.timezone }}</view>
       </view>
       <button class="btn ghost small" @click="logout">退出登录</button>
+    </view>
+
+    <view class="card links">
+      <view class="link-row" @click="go('/pages/schedule/schedule')"><text>我的日程和提醒</text><text class="muted">›</text></view>
+      <view class="link-row" @click="go('/pages/chat/chat')"><text>对话记录</text><text class="muted">›</text></view>
     </view>
 
     <!-- 记忆 -->
@@ -63,9 +69,11 @@
       </view>
     </view>
   </view>
+  </Shell>
 </template>
 
 <script setup lang="ts">
+import Shell from "../../components/Shell.vue";
 import { reactive, ref } from "vue";
 import { onShow } from "@dcloudio/uni-app";
 import { api } from "../../api";
@@ -188,6 +196,11 @@ function confirm(title: string, content: string, action: () => Promise<void>) {
     },
   });
 }
+
+/** 打开日程、对话等二级页面。 */
+function go(url: string) {
+  uni.navigateTo({ url });
+}
 </script>
 
 <style scoped>
@@ -220,4 +233,11 @@ function confirm(title: string, content: string, action: () => Promise<void>) {
 .token { display: flex; align-items: center; gap: 10px; font-size: 14px; }
 .del { margin-left: auto; font-size: 13px; color: var(--muted); cursor: pointer; flex-shrink: 0; }
 .del:hover { color: var(--danger); }
+.links { padding: 0 16px; margin-top: 12px; }
+.link-row { display: flex; justify-content: space-between; padding: 13px 0; border-bottom: 1px solid var(--line); cursor: pointer; }
+.link-row:last-child { border-bottom: none; }
+@media (min-width: 1024px) {
+  .page, .container { max-width: 1180px; padding: 24px 28px; }
+  .list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+}
 </style>

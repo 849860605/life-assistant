@@ -108,6 +108,10 @@ life:
         type: openai
         base-url: ${OPENAI_BASE_URL:https://api.openai.com}
         api-key: ${OPENAI_API_KEY:}
+    # 单价（元/百万 Token），算 t_llm_usage.cost 用。按官网高峰价填，闲时实际更便宜；没配的型号不算费用
+    pricing:
+      "[deepseek:deepseek-flash]": {input: 2, cached-input: 0.04, output: 8}
+      "[deepseek:deepseek-v4-pro]": {input: 9, cached-input: 0.3, output: 27}
   # 每个用途用哪个模型，写法"提供方:型号"，不写前缀用 default-provider
   models:
     router: ${LIFE_MODEL_ROUTER:qwen-turbo}

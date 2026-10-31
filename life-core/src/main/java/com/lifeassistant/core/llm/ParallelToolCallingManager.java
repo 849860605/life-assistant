@@ -1,5 +1,8 @@
 package com.lifeassistant.core.llm;
 
+import com.lifeassistant.common.auth.UserCtx;
+import com.lifeassistant.core.audit.CallRecorder;
+import com.lifeassistant.core.auth.ToolContexts;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
@@ -31,7 +34,7 @@ import java.util.concurrent.Future;
 /**
  * 并行执行工具调用。Spring AI 默认的 DefaultToolCallingManager 把模型一次返回的多个工具调用按顺序逐个执行；
  * 这里改成每个调用一个虚拟线程同时执行，结果按原顺序拼回去，其余行为（ToolContext、异常处理、returnDirect）保持一致。
- * 工具都是无状态的，身份通过 ToolContext 传递，并行执行是安全的。
+ * 工具都是无状态的，身份通过 ToolContext 传递，并行执行是安全的。每次调用的参数、耗时和成败写入调用日志。
  */
 public class ParallelToolCallingManager implements ToolCallingManager {
 
@@ -39,9 +42,15 @@ public class ParallelToolCallingManager implements ToolCallingManager {
     private final ToolExecutionExceptionProcessor exceptionProcessor;
     /** 工具定义的解析逻辑不变，直接交给默认实现 */
     private final DefaultToolCallingManager definitions;
+    private final CallRecorder recorder;
 
     public ParallelToolCallingManager(ToolCallbackResolver toolCallbackResolver) {
+        this(toolCallbackResolver, CallRecorder.NOOP);
+    }
+
+    public ParallelToolCallingManager(ToolCallbackResolver toolCallbackResolver, CallRecorder recorder) {
         this.toolCallbackResolver = toolCallbackResolver;
+        this.recorder = recorder;
         this.exceptionProcessor = DefaultToolExecutionExceptionProcessor.builder().build();
         this.definitions = DefaultToolCallingManager.builder().toolCallbackResolver(toolCallbackResolver).build();
     }
@@ -112,14 +121,39 @@ public class ParallelToolCallingManager implements ToolCallingManager {
         return callback;
     }
 
-    /** 执行一个工具；参数为空时按 {} 处理，工具异常转成给模型看的错误文字。 */
+    /**
+     * 执行一个工具；参数为空时按 {} 处理，工具异常转成给模型看的错误文字。
+     * 执行期间设置调用归属，工具内部的平台调用记录会带上用户和会话；结束后记一条工具调用日志。
+     */
     private String invoke(ToolCallback callback, AssistantMessage.ToolCall call, ToolContext toolContext) {
         String arguments = StringUtils.hasText(call.arguments()) ? call.arguments() : "{}";
+        CallRecorder.Scope scope = scope(toolContext);
+        long start = System.nanoTime();
+        String result = null;
+        String error = null;
         try {
-            return callback.call(arguments, toolContext);
+            result = recorder.withScope(scope, () -> callback.call(arguments, toolContext));
+            return result;
         } catch (ToolExecutionException e) {
-            return exceptionProcessor.process(e);
+            error = e.getMessage();
+            result = exceptionProcessor.process(e);
+            return result;
+        } catch (RuntimeException e) {
+            error = e.getMessage();
+            throw e;
+        } finally {
+            boolean success = error == null && (result == null || !result.startsWith("{\"error\""));
+            recorder.tool(scope, call.name(), arguments, result, (System.nanoTime() - start) / 1_000_000, success,
+                    error);
         }
+    }
+
+    /** 从 ToolContext 取调用归属；取不到的字段为空。 */
+    private static CallRecorder.Scope scope(ToolContext toolContext) {
+        Map<String, Object> context = toolContext.getContext();
+        Long userId = context.get(UserCtx.KEY) instanceof UserCtx ctx ? ctx.userId() : null;
+        return new CallRecorder.Scope(userId, (String) context.get(ToolContexts.CONVERSATION_ID),
+                (String) context.get(ToolContexts.SKILL_ID));
     }
 
     /** 和默认实现一样：在请求的 toolContext 基础上加入本轮之前的对话历史。 */

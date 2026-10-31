@@ -4,6 +4,7 @@ import com.lifeassistant.api.auth.StpAdminUtil;
 import com.lifeassistant.common.api.ApiResponse;
 import com.lifeassistant.core.audit.AdminOpLogger;
 import com.lifeassistant.core.audit.LlmUsageMapper;
+import com.lifeassistant.core.audit.ToolCallLogMapper;
 import com.lifeassistant.core.eval.EvalRun;
 import com.lifeassistant.core.eval.EvalService;
 import com.lifeassistant.core.schedule.ReminderDispatcher;
@@ -35,6 +36,7 @@ public class AdminController {
     private final EvalService evalService;
     private final ReminderDispatcher reminderDispatcher;
     private final LlmUsageMapper usageMapper;
+    private final ToolCallLogMapper toolCallLogMapper;
     private final AdminOpLogger opLogger;
 
     /** 管理员登录请求体。 */
@@ -64,7 +66,13 @@ public class AdminController {
         return ApiResponse.ok();
     }
 
-    /** GET /admin/api/v1/usage/daily：最近 days 天（限制在 1~90）每天每个模型的 Token 用量。 */
+    /** GET /admin/api/v1/calls/stats：最近 days 天（限制在 1~90）各工具和各平台的调用次数、失败数、平均和 P95 耗时。 */
+    @GetMapping("/calls/stats")
+    public ApiResponse<List<Map<String, Object>>> callStats(@RequestParam(defaultValue = "7") int days) {
+        return ApiResponse.ok(toolCallLogMapper.stats(Math.min(Math.max(days, 1), 90)));
+    }
+
+    /** GET /admin/api/v1/usage/daily：最近 days 天（限制在 1~90）每天每个模型的 Token 用量和费用（元）。 */
     @GetMapping("/usage/daily")
     public ApiResponse<List<Map<String, Object>>> dailyUsage(@RequestParam(defaultValue = "7") int days) {
         return ApiResponse.ok(usageMapper.dailySummary(Math.min(Math.max(days, 1), 90)));

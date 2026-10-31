@@ -67,7 +67,7 @@ public class SkillRunner {
                 .options(ChatModelRegistry.options(model, null))
                 .tools(tools.toArray())
                 .toolCallbacks(skill.toolCallbacks())
-                .toolContext(ToolContexts.of(ctx, conversationId))
+                .toolContext(ToolContexts.of(ctx, conversationId, skill.id()))
                 .advisors(MessageChatMemoryAdvisor.builder(chatMemory).conversationId(conversationId).build())
                 .stream()
                 .chatResponse()

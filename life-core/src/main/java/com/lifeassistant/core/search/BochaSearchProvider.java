@@ -3,6 +3,7 @@ package com.lifeassistant.core.search;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.lifeassistant.common.error.BizException;
 import com.lifeassistant.common.error.ErrorCode;
+import com.lifeassistant.core.audit.CallRecorder;
 import com.lifeassistant.core.config.LifeProperties;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
@@ -26,10 +27,13 @@ public class BochaSearchProvider implements WebSearchProvider {
 
     private final RestClient restClient;
     private final String apiKey;
+    private final CallRecorder recorder;
 
-    public BochaSearchProvider(RestClient.Builder externalRestClientBuilder, LifeProperties properties) {
+    public BochaSearchProvider(RestClient.Builder externalRestClientBuilder, LifeProperties properties,
+                               CallRecorder recorder) {
         LifeProperties.Search config = properties.getSearch();
         this.apiKey = config.getBochaApiKey();
+        this.recorder = recorder;
         this.restClient = externalRestClientBuilder.clone().baseUrl(config.getBochaBaseUrl()).build();
     }
 
@@ -53,13 +57,12 @@ public class BochaSearchProvider implements WebSearchProvider {
             body.put("include", String.join("|", sites));
         }
         try {
-            JsonNode root = restClient.post().uri("/v1/web-search")
+            return recorder.platform("博查", query, () -> parse(restClient.post().uri("/v1/web-search")
                     .header("Authorization", "Bearer " + apiKey)
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(body)
                     .retrieve()
-                    .body(JsonNode.class);
-            return parse(root);
+                    .body(JsonNode.class)));
         } catch (RestClientException e) {
             log.warn("博查搜索失败：{}", e.getMessage());
             throw new BizException(ErrorCode.EXTERNAL_SERVICE, "联网搜索暂时不可用", e);

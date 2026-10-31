@@ -11,10 +11,11 @@ import java.util.Map;
 @Mapper
 public interface LlmUsageMapper extends BaseMapper<LlmUsage> {
 
-    /** 最近 days 天按（北京时间日期, 模型）汇总的 Token 数和调用次数，日期倒序。 */
+    /** 最近 days 天按（北京时间日期, 模型）汇总的 Token 数、缓存命中数、费用（元）和调用次数，日期倒序。 */
     @Select("""
             SELECT to_char(created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD') AS day, model,
-                   SUM(prompt_tokens) AS prompt_tokens, SUM(completion_tokens) AS completion_tokens, COUNT(*) AS calls
+                   SUM(prompt_tokens) AS prompt_tokens, SUM(completion_tokens) AS completion_tokens,
+                   SUM(cached_tokens) AS cached_tokens, ROUND(SUM(cost), 4) AS cost, COUNT(*) AS calls
             FROM t_llm_usage
             WHERE created_at >= now() - make_interval(days => #{days})
             GROUP BY 1, 2 ORDER BY 1 DESC, 2
