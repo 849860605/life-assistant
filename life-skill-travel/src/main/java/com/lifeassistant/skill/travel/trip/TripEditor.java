@@ -21,10 +21,10 @@ import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
@@ -43,6 +43,11 @@ public class TripEditor {
 
     private static final int AROUND_RADIUS = 8000;
     private static final int MAX_ALTERNATIVES = 12;
+    private static final int LOCK_STRIPES = 64;
+    /** 一天最多这么多项，防止页面上无限加 */
+    private static final int MAX_ITEMS_PER_DAY = 40;
+    private static final int MAX_NAME = 100;
+    private static final int MAX_TEXT = 300;
 
     private final TripService tripService;
     private final TripGeo geo;
@@ -50,7 +55,14 @@ public class TripEditor {
     private final MemoryService memory;
     private final HotelPriceTools hotelPriceTools;
     private final ObjectMapper objectMapper;
-    private final Map<Long, Object> locks = new ConcurrentHashMap<>();
+    /** 按行程 id 分段的锁：同一行程的修改、补坐标、比价写回排队执行，避免互相覆盖 */
+    private final ReentrantLock[] stripes = new ReentrantLock[LOCK_STRIPES];
+
+    {
+        for (int i = 0; i < LOCK_STRIPES; i++) {
+            stripes[i] = new ReentrantLock();
+        }
+    }
 
     /** 用户选中的地点（来自候选列表或搜索结果）。type 只在加入行程时用。 */
     public record PlacePick(String name, String poiId, String address, Double lng, Double lat, String photo,
@@ -107,93 +119,142 @@ public class TripEditor {
 
     /** 把某项换成选中的地点，时间不变，重算当天路程。 */
     public TripService.TripDetail replace(UserCtx ctx, long tripId, String itemId, PlacePick pick, Reason reason) {
-        if (pick == null || pick.name() == null || pick.name().isBlank()) {
-            throw new BizException(ErrorCode.BAD_REQUEST, "没选要换成的地点");
-        }
-        TripService.TripDetail detail = tripService.get(ctx, tripId, null);
-        Itinerary itinerary = itinerary(detail);
-        Found found = find(itinerary, itemId);
-        Itinerary.Item old = found.item();
-        Itinerary.Item fresh = new Itinerary.Item(old.id(), old.start(), old.end(), old.type(), pick.name(),
-                pick.address(), pick.note(), pick.cost(), null, null, pick.poiId(), pick.lng(), pick.lat(), pick.photo(),
-                pick.rating());
-        remember(ctx, old.name(), reason);
-        return save(ctx, detail, itinerary, found.day(), items(itinerary, found.day(), old.id(), fresh),
-                "把「" + old.name() + "」换成「" + pick.name() + "」");
+        PlacePick place = clean(pick);
+        return locked(tripId, () -> {
+            TripService.TripDetail detail = tripService.get(ctx, tripId, null);
+            Itinerary itinerary = itinerary(detail);
+            Found found = find(itinerary, itemId);
+            Itinerary.Item old = found.item();
+            Itinerary.Item fresh = new Itinerary.Item(old.id(), old.start(), old.end(), old.type(), place.name(),
+                    place.address(), place.note(), place.cost(), null, null, place.poiId(), place.lng(), place.lat(), place.photo(),
+                    place.rating());
+            remember(ctx, old.name(), reason);
+            return save(ctx, detail, unbook(itinerary, old.id()), found.day(), items(itinerary, found.day(), old.id(), fresh),
+                    "把「" + old.name() + "」换成「" + place.name() + "」");
+        });
     }
 
     /** 删掉某项，重算当天路程。 */
     public TripService.TripDetail remove(UserCtx ctx, long tripId, String itemId, Reason reason) {
-        TripService.TripDetail detail = tripService.get(ctx, tripId, null);
-        Itinerary itinerary = itinerary(detail);
-        Found found = find(itinerary, itemId);
-        remember(ctx, found.item().name(), reason);
-        return save(ctx, detail, itinerary, found.day(), items(itinerary, found.day(), itemId, null),
-                "删掉「" + found.item().name() + "」" + (reason == Reason.DISLIKE ? "（不感兴趣）" : reason == Reason.VISITED ? "（去过了）" : ""));
+        return locked(tripId, () -> {
+            TripService.TripDetail detail = tripService.get(ctx, tripId, null);
+            Itinerary itinerary = itinerary(detail);
+            Found found = find(itinerary, itemId);
+            remember(ctx, found.item().name(), reason);
+            return save(ctx, detail, unbook(itinerary, itemId), found.day(), items(itinerary, found.day(), itemId, null),
+                    "删掉「" + found.item().name() + "」" + (reason == Reason.DISLIKE ? "（不感兴趣）" : reason == Reason.VISITED ? "（去过了）" : ""));
+        });
     }
 
     /** 标记保留或取消保留；只改当前版本。 */
     public TripService.TripDetail lock(UserCtx ctx, long tripId, String itemId, boolean locked) {
-        TripService.TripDetail detail = tripService.get(ctx, tripId, null);
-        Itinerary itinerary = itinerary(detail);
-        Found found = find(itinerary, itemId);
-        Itinerary.Item i = found.item();
-        Itinerary.Item changed = new Itinerary.Item(i.id(), i.start(), i.end(), i.type(), i.name(), i.address(),
-                i.note(), i.cost(), i.url(), locked ? Boolean.TRUE : null, i.poiId(), i.lng(), i.lat(), i.photo(),
-                i.rating());
-        Itinerary updated = withDay(itinerary, found.day(), new Itinerary.Day(itinerary.days().get(found.day()).date(),
-                itinerary.days().get(found.day()).theme(), items(itinerary, found.day(), itemId, changed),
-                itinerary.days().get(found.day()).legs()));
-        String json = json(updated);
-        tripService.updateItinerary(tripId, detail.version().getVersion(), json);
-        detail.version().setItinerary(json);
-        return detail;
+        return locked(tripId, () -> {
+            TripService.TripDetail detail = tripService.get(ctx, tripId, null);
+            Itinerary itinerary = itinerary(detail);
+            Found found = find(itinerary, itemId);
+            Itinerary.Item i = found.item();
+            Itinerary.Item changed = new Itinerary.Item(i.id(), i.start(), i.end(), i.type(), i.name(), i.address(),
+                    i.note(), i.cost(), i.url(), locked ? Boolean.TRUE : null, i.poiId(), i.lng(), i.lat(), i.photo(),
+                    i.rating());
+            Itinerary updated = withDay(itinerary, found.day(), new Itinerary.Day(itinerary.days().get(found.day()).date(),
+                    itinerary.days().get(found.day()).theme(), items(itinerary, found.day(), itemId, changed),
+                    itinerary.days().get(found.day()).legs()));
+            String json = json(updated);
+            tripService.updateItinerary(tripId, detail.version().getVersion(), json);
+            detail.version().setItinerary(json);
+            return detail;
+        });
+    }
+
+    /**
+     * 标记已预约或取消：targetId 是某项安排（d1-3）或某段住宿（s1）的 id。用户自己在平台上订好后标记，
+     * 只改当前版本，不算新版本；正文里也会写上"已预约"。
+     */
+    public TripService.TripDetail markBooked(UserCtx ctx, long tripId, String targetId, boolean booked) {
+        return locked(tripId, () -> {
+            TripService.TripDetail detail = tripService.get(ctx, tripId, null);
+            Itinerary itinerary = itinerary(detail);
+            boolean isStay = itinerary.stays() != null && itinerary.stays().stream().anyMatch(st -> st.id().equals(targetId));
+            if (!isStay) {
+                find(itinerary, targetId);
+            }
+            List<String> ids = new ArrayList<>(itinerary.booked() == null ? List.of() : itinerary.booked());
+            ids.remove(targetId);
+            if (booked) {
+                ids.add(targetId);
+            }
+            Itinerary updated = itinerary.withBooked(ids);
+            String json = json(updated);
+            String content = updated.toMarkdown();
+            tripService.updateItinerary(tripId, detail.version().getVersion(), json, content);
+            detail.version().setItinerary(json);
+            detail.version().setContent(content);
+            return detail;
+        });
+    }
+
+    /** 换掉、删掉的项不再算已预约。 */
+    private static Itinerary unbook(Itinerary itinerary, String id) {
+        if (!itinerary.isBooked(id)) {
+            return itinerary;
+        }
+        List<String> ids = new ArrayList<>(itinerary.booked());
+        ids.remove(id);
+        return itinerary.withBooked(ids);
     }
 
     /**
      * 调整某天的顺序：ids 是这一天全部项的新顺序。原来的时间段按先后不动，依次分给新顺序里的项。
      */
     public TripService.TripDetail reorder(UserCtx ctx, long tripId, int dayIndex, List<String> ids) {
-        TripService.TripDetail detail = tripService.get(ctx, tripId, null);
-        Itinerary itinerary = itinerary(detail);
-        if (dayIndex < 0 || dayIndex >= itinerary.days().size()) {
-            throw BizException.notFound("这一天");
-        }
-        List<Itinerary.Item> old = itinerary.days().get(dayIndex).items();
-        if (ids == null || ids.size() != old.size() || !Set.copyOf(ids).equals(old.stream().map(Itinerary.Item::id)
-                .collect(Collectors.toSet()))) {
-            throw new BizException(ErrorCode.BAD_REQUEST, "顺序里的项和这一天的安排对不上，刷新后再试");
-        }
-        List<Itinerary.Item> reordered = new ArrayList<>();
-        for (int k = 0; k < ids.size(); k++) {
-            String id = ids.get(k);
-            Itinerary.Item i = old.stream().filter(x -> x.id().equals(id)).findFirst().orElseThrow();
-            Itinerary.Item slot = old.get(k);
-            reordered.add(new Itinerary.Item(i.id(), slot.start(), slot.end(), i.type(), i.name(), i.address(),
-                    i.note(), i.cost(), i.url(), i.locked(), i.poiId(), i.lng(), i.lat(), i.photo(), i.rating()));
-        }
-        return save(ctx, detail, itinerary, dayIndex, reordered, "调整第 " + (dayIndex + 1) + " 天的顺序");
+        return locked(tripId, () -> {
+            TripService.TripDetail detail = tripService.get(ctx, tripId, null);
+            Itinerary itinerary = itinerary(detail);
+            if (dayIndex < 0 || dayIndex >= itinerary.days().size()) {
+                throw BizException.notFound("这一天");
+            }
+            List<Itinerary.Item> old = itinerary.days().get(dayIndex).items();
+            if (ids == null || ids.size() != old.size() || !Set.copyOf(ids).equals(old.stream().map(Itinerary.Item::id)
+                    .collect(Collectors.toSet()))) {
+                throw new BizException(ErrorCode.BAD_REQUEST, "顺序里的项和这一天的安排对不上，刷新后再试");
+            }
+            List<Itinerary.Item> reordered = new ArrayList<>();
+            for (int k = 0; k < ids.size(); k++) {
+                String id = ids.get(k);
+                Itinerary.Item i = old.stream().filter(x -> x.id().equals(id)).findFirst().orElseThrow();
+                Itinerary.Item slot = old.get(k);
+                reordered.add(new Itinerary.Item(i.id(), slot.start(), slot.end(), i.type(), i.name(), i.address(),
+                        i.note(), i.cost(), i.url(), i.locked(), i.poiId(), i.lng(), i.lat(), i.photo(), i.rating()));
+            }
+            return save(ctx, detail, itinerary, dayIndex, reordered, "调整第 " + (dayIndex + 1) + " 天的顺序");
+        });
     }
 
     /**
      * 把一个地点加进某天：吃饭放到午饭（12:00）或晚饭（18:00）里还空着的那顿，其他的接在当天最后一项后面。
      */
     public TripService.TripDetail add(UserCtx ctx, long tripId, int dayIndex, PlacePick pick) {
-        TripService.TripDetail detail = tripService.get(ctx, tripId, null);
-        Itinerary itinerary = itinerary(detail);
-        if (dayIndex < 0 || dayIndex >= itinerary.days().size()) {
-            throw BizException.notFound("这一天");
-        }
-        List<Itinerary.Item> items = new ArrayList<>(itinerary.days().get(dayIndex).items());
-        String type = pick.type() == null ? "SPOT" : pick.type();
-        String[] slot = slot(items, type);
-        int next = items.stream().map(i -> i.id().replaceAll(".*-", "")).filter(s -> s.matches("\\d+"))
-                .mapToInt(Integer::parseInt).max().orElse(0) + 1;
-        items.add(new Itinerary.Item("d" + (dayIndex + 1) + "-" + next, slot[0], slot[1], type, pick.name(),
-                pick.address(), pick.note(), pick.cost(), null, null, pick.poiId(), pick.lng(), pick.lat(), pick.photo(),
-                pick.rating()));
-        items.sort(Comparator.comparing(i -> i.start() == null ? "99:99" : i.start()));
-        return save(ctx, detail, itinerary, dayIndex, items, "第 " + (dayIndex + 1) + " 天加入「" + pick.name() + "」");
+        PlacePick place = clean(pick);
+        return locked(tripId, () -> {
+            TripService.TripDetail detail = tripService.get(ctx, tripId, null);
+            Itinerary itinerary = itinerary(detail);
+            if (dayIndex < 0 || dayIndex >= itinerary.days().size()) {
+                throw BizException.notFound("这一天");
+            }
+            List<Itinerary.Item> items = new ArrayList<>(itinerary.days().get(dayIndex).items());
+            if (items.size() >= MAX_ITEMS_PER_DAY) {
+                throw new BizException(ErrorCode.BAD_REQUEST, "这一天的安排太多了，先删掉几项");
+            }
+            String type = place.type() == null ? "SPOT" : place.type();
+            String[] slot = slot(items, type);
+            int next = items.stream().map(i -> i.id().replaceAll(".*-", "")).filter(s -> s.matches("\\d+"))
+                    .mapToInt(Integer::parseInt).max().orElse(0) + 1;
+            items.add(new Itinerary.Item("d" + (dayIndex + 1) + "-" + next, slot[0], slot[1], type, place.name(),
+                    place.address(), place.note(), place.cost(), null, null, place.poiId(), place.lng(), place.lat(), place.photo(),
+                    place.rating()));
+            items.sort(Comparator.comparing(i -> i.start() == null ? "99:99" : i.start()));
+            return save(ctx, detail, itinerary, dayIndex, items, "第 " + (dayIndex + 1) + " 天加入「" + place.name() + "」");
+        });
     }
 
     /**
@@ -201,66 +262,93 @@ public class TripEditor {
      * 原来那家放回候选里。关联到原酒店的入住、回酒店等项改关联新酒店，存新版本。
      */
     public TripService.TripDetail switchStay(UserCtx ctx, long tripId, String stayId, String name) {
-        if (name == null || name.isBlank()) {
-            throw new BizException(ErrorCode.BAD_REQUEST, "没选要换成的酒店");
-        }
-        TripService.TripDetail detail = tripService.get(ctx, tripId, null);
-        Itinerary itinerary = itinerary(detail);
-        Itinerary.Stay old = stay(itinerary, stayId);
-        List<Itinerary.StayOption> options = old.options() == null ? List.of() : old.options();
-        Itinerary.StayOption picked = options.stream().filter(o -> o.name().equals(name)).findFirst()
-                .orElse(new Itinerary.StayOption(name.trim(), null, null, null, null));
-        List<Itinerary.StayOption> rest = new ArrayList<>();
-        rest.add(new Itinerary.StayOption(old.name(), old.price(), old.platform(), old.url(), old.quotes()));
-        options.stream().filter(o -> o != picked && !o.name().equals(picked.name())).forEach(rest::add);
-        Itinerary.Stay fresh = geo.locate(new Itinerary.Stay(old.id(), picked.name(), old.checkIn(), old.checkOut(), null,
-                picked.price(), picked.platform(), picked.url(), picked.price() == null ? null : old.queriedAt(),
-                picked.quotes(), rest, null, null, null, null, null), detail.trip().getDestination());
-        List<Itinerary.Stay> stays = replaceStay(itinerary, fresh);
-        // 关联到原酒店的项去掉坐标，重新关联到新酒店
-        List<Itinerary.Day> days = new ArrayList<>();
-        for (Itinerary.Day day : itinerary.days()) {
-            if (!old.covers(day.date())) {
-                days.add(day);
-                continue;
+        return locked(tripId, () -> {
+            if (name == null || name.isBlank()) {
+                throw new BizException(ErrorCode.BAD_REQUEST, "没选要换成的酒店");
             }
-            List<Itinerary.Item> items = day.items().stream().map(i -> "HOTEL".equals(i.type()) && old.poiId() != null
-                    && old.poiId().equals(i.poiId()) ? new Itinerary.Item(i.id(), i.start(), i.end(), i.type(),
-                    i.name().replace(old.name(), picked.name()), null, i.note(), i.cost(), null, i.locked()) : i).toList();
-            days.add(geo.relink(new Itinerary.Day(day.date(), day.theme(), items), detail.trip().getDestination(), stays));
-        }
-        Itinerary updated = itinerary.withDays(days).withStays(stays);
-        TripService.TripDetail saved = tripService.saveVersion(ctx, tripId,
-                new TripService.TripDraft(null, null, null, null, null, updated.toMarkdown(),
-                        "住宿从「" + old.name() + "」换成「" + picked.name() + "」", json(updated), false), "USER");
-        return saved;
+            TripService.TripDetail detail = tripService.get(ctx, tripId, null);
+            Itinerary itinerary = itinerary(detail);
+            Itinerary.Stay old = stay(itinerary, stayId);
+            List<Itinerary.StayOption> options = old.options() == null ? List.of() : old.options();
+            Itinerary.StayOption picked = options.stream().filter(o -> o.name().equals(name)).findFirst()
+                    .orElse(new Itinerary.StayOption(name.trim(), null, null, null, null));
+            List<Itinerary.StayOption> rest = new ArrayList<>();
+            rest.add(new Itinerary.StayOption(old.name(), old.price(), old.platform(), old.url(), old.quotes()));
+            options.stream().filter(o -> o != picked && !o.name().equals(picked.name())).forEach(rest::add);
+            Itinerary.Stay fresh = geo.locate(new Itinerary.Stay(old.id(), picked.name(), old.checkIn(), old.checkOut(), null,
+                    picked.price(), picked.platform(), picked.url(), picked.price() == null ? null : old.queriedAt(),
+                    picked.quotes(), rest, null, null, null, null, null), detail.trip().getDestination());
+            List<Itinerary.Stay> stays = replaceStay(itinerary, fresh);
+            // 关联到原酒店的项去掉坐标，重新关联到新酒店
+            List<Itinerary.Day> days = new ArrayList<>();
+            for (Itinerary.Day day : itinerary.days()) {
+                if (!old.covers(day.date())) {
+                    days.add(day);
+                    continue;
+                }
+                List<Itinerary.Item> items = day.items().stream().map(i -> "HOTEL".equals(i.type()) && old.poiId() != null
+                        && old.poiId().equals(i.poiId()) ? new Itinerary.Item(i.id(), i.start(), i.end(), i.type(),
+                        i.name().replace(old.name(), picked.name()), null, i.note(), i.cost(), null, i.locked()) : i).toList();
+                days.add(geo.relink(new Itinerary.Day(day.date(), day.theme(), items), detail.trip().getDestination(), stays));
+            }
+            Itinerary updated = unbook(itinerary.withDays(days).withStays(stays), stayId);
+            TripService.TripDetail saved = tripService.saveVersion(ctx, tripId,
+                    new TripService.TripDraft(null, null, null, null, null, updated.toMarkdown(),
+                            "住宿从「" + old.name() + "」换成「" + picked.name() + "」", json(updated), false), "USER",
+                        detail.version().getVersion());
+            return saved;
+        });
     }
 
     /** 重新比价：当前酒店和候选一起查各平台最新价格，只改当前版本的价格，不算新版本。查一次十几秒到一分钟。 */
     public TripService.TripDetail requote(UserCtx ctx, long tripId, String stayId) {
         TripService.TripDetail detail = tripService.get(ctx, tripId, null);
-        Itinerary itinerary = itinerary(detail);
-        Itinerary.Stay old = stay(itinerary, stayId);
+        Itinerary.Stay old = stay(itinerary(detail), stayId);
+        LocalDate checkIn = parseDate(old.checkIn());
+        LocalDate checkOut = parseDate(old.checkOut());
+        if (checkIn == null || checkOut == null || !checkOut.isAfter(checkIn)) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "这段住宿的入住、离店日期不对，请在对话里让助手改一下");
+        }
         List<String> names = new ArrayList<>();
         names.add(old.name());
         if (old.options() != null) {
             old.options().forEach(o -> names.add(o.name()));
         }
-        HotelQuoteBook.Comparison c = hotelPriceTools.quote(names, cityOf(detail.trip().getDestination()),
-                LocalDate.parse(old.checkIn()), LocalDate.parse(old.checkOut()));
+        // 比价要十几秒到一分钟，在锁外面查，查完再在锁里读最新版本写回
+        HotelQuoteBook.Comparison c = hotelPriceTools.quote(names, cityOf(detail.trip().getDestination()), checkIn, checkOut);
         Itinerary.StayOption best = TripTools.option(c.hotels().get(0));
+        if (best.price() == null) {
+            throw new BizException(ErrorCode.EXTERNAL_SERVICE, "这次各平台都没查到价格，原来的价格先保留，稍后再试");
+        }
         List<Itinerary.StayOption> others = c.hotels().stream().skip(1).map(TripTools::option).toList();
-        Itinerary.Stay fresh = new Itinerary.Stay(old.id(), old.name(), old.checkIn(), old.checkOut(), old.address(),
-                best.price(), best.platform(), best.url(), c.queriedAt(), best.quotes(), others, old.poiId(), old.lng(),
-                old.lat(), old.photo(), old.rating());
-        Itinerary updated = itinerary.withStays(replaceStay(itinerary, fresh));
-        String json = json(updated);
-        String content = updated.toMarkdown();
-        tripService.updateItinerary(tripId, detail.version().getVersion(), json, content);
-        detail.version().setItinerary(json);
-        detail.version().setContent(content);
-        return detail;
+        return locked(tripId, () -> {
+            TripService.TripDetail latest = tripService.get(ctx, tripId, null);
+            Itinerary itinerary = itinerary(latest);
+            Itinerary.Stay now = stay(itinerary, stayId);
+            if (!now.name().equals(old.name())) {
+                throw new BizException(ErrorCode.CONFLICT, "比价期间酒店被换掉了，刷新后再试");
+            }
+            Itinerary.Stay fresh = new Itinerary.Stay(now.id(), now.name(), now.checkIn(), now.checkOut(), now.address(),
+                    best.price(), best.platform(), best.url(), c.queriedAt(), best.quotes(), others, now.poiId(),
+                    now.lng(), now.lat(), now.photo(), now.rating());
+            Itinerary updated = itinerary.withStays(replaceStay(itinerary, fresh));
+            String json = json(updated);
+            String content = updated.toMarkdown();
+            tripService.updateItinerary(tripId, latest.version().getVersion(), json, content);
+            latest.version().setItinerary(json);
+            latest.version().setContent(content);
+            return latest;
+        });
     }
+
+    private static LocalDate parseDate(String text) {
+        try {
+            return text == null ? null : LocalDate.parse(text.trim());
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
 
     private static Itinerary.Stay stay(Itinerary itinerary, String stayId) {
         return (itinerary.stays() == null ? List.<Itinerary.Stay>of() : itinerary.stays()).stream()
@@ -277,15 +365,17 @@ public class TripEditor {
     }
 
     /** 给新加的项挑时间：饭点优先，否则接在最后一项后面一小时。 */
-    private static String[] slot(List<Itinerary.Item> items, String type) {
+    static String[] slot(List<Itinerary.Item> items, String type) {
         if ("FOOD".equals(type)) {
-            for (String[] meal : List.of(new String[]{"12:00", "13:00"}, new String[]{"18:00", "19:30"})) {
-                LocalTime s = LocalTime.parse(meal[0]);
-                LocalTime e = LocalTime.parse(meal[1]);
-                boolean taken = items.stream().anyMatch(i -> "FOOD".equals(i.type()) && i.start() != null
-                        && !time(i.start()).isBefore(s.minusHours(1)) && time(i.start()).isBefore(e.plusHours(1)));
-                if (!taken) {
-                    return meal;
+            // 午饭在 11:00–14:00、晚饭在 17:00–20:30 里找一段没被占的时间，已经有饭的那顿跳过
+            for (LocalTime[] meal : List.of(new LocalTime[]{LocalTime.of(11, 0), LocalTime.of(14, 0)},
+                    new LocalTime[]{LocalTime.of(17, 0), LocalTime.of(20, 30)})) {
+                boolean hasMeal = items.stream().anyMatch(i -> "FOOD".equals(i.type()) && i.start() != null
+                        && !time(i.start()).isBefore(meal[0]) && time(i.start()).isBefore(meal[1]));
+                LocalTime[] gap = hasMeal ? null : gap(items, meal[0], meal[1], 45);
+                if (gap != null) {
+                    LocalTime end = gap[1].isAfter(gap[0].plusMinutes(60)) ? gap[0].plusMinutes(60) : gap[1];
+                    return new String[]{gap[0].toString(), end.toString()};
                 }
             }
         }
@@ -293,6 +383,29 @@ public class TripEditor {
                 .map(TripEditor::time).max(Comparator.naturalOrder()).orElse(LocalTime.of(9, 0));
         LocalTime end = last.plusHours(1).isBefore(last) ? LocalTime.of(23, 59) : last.plusHours(1);
         return new String[]{last.toString(), end.toString()};
+    }
+
+    /** 在 from–to 之间找第一段至少 minutes 分钟、不和任何安排重叠的空档；没有返回空。 */
+    private static LocalTime[] gap(List<Itinerary.Item> items, LocalTime from, LocalTime to, int minutes) {
+        List<LocalTime[]> busy = items.stream().filter(i -> i.start() != null)
+                .map(i -> new LocalTime[]{time(i.start()), i.end() == null ? time(i.start()).plusMinutes(30) : time(i.end())})
+                .sorted(Comparator.comparing((LocalTime[] b) -> b[0])).toList();
+        LocalTime cursor = from;
+        for (LocalTime[] b : busy) {
+            if (!b[1].isAfter(cursor)) {
+                continue;
+            }
+            if (b[0].isAfter(cursor) && !cursor.plusMinutes(minutes).isAfter(b[0]) && !cursor.plusMinutes(minutes).isAfter(to)) {
+                return new LocalTime[]{cursor, b[0].isBefore(to) ? b[0] : to};
+            }
+            if (b[1].isAfter(cursor)) {
+                cursor = b[1];
+            }
+            if (!cursor.isBefore(to)) {
+                return null;
+            }
+        }
+        return !cursor.plusMinutes(minutes).isAfter(to) ? new LocalTime[]{cursor, to} : null;
     }
 
     private static LocalTime time(String hhmm) {
@@ -309,7 +422,7 @@ public class TripEditor {
         Trip trip = detail.trip();
         TripService.TripDetail saved = tripService.saveVersion(ctx, trip.getId(),
                 new TripService.TripDraft(null, null, null, null, null, updated.toMarkdown(), note, json(updated), false),
-                "USER");
+                "USER", detail.version().getVersion());
         if (!Boolean.TRUE.equals(updated.geo())) {
             ensureGeoLater(trip.getId(), saved.version().getVersion());
         }
@@ -317,7 +430,7 @@ public class TripEditor {
     }
 
     private TripService.TripDetail enrich(long tripId, int version, TripService.TripDetail known) {
-        synchronized (locks.computeIfAbsent(tripId, k -> new Object())) {
+        return locked(tripId, () -> {
             TripService.TripDetail detail = tripService.getInternal(tripId, version);
             if (detail == null) {
                 return known;
@@ -330,7 +443,51 @@ public class TripEditor {
             tripService.updateItinerary(tripId, version, json);
             detail.version().setItinerary(json);
             return detail;
+        });
+    }
+
+    /** 在这个行程的锁里执行；锁是可重入的，里面再调别的加锁方法没问题。用 ReentrantLock 而不是 synchronized，免得卡住虚拟线程。 */
+    private <T> T locked(long tripId, Supplier<T> body) {
+        ReentrantLock lock = stripes[Math.floorMod(Long.hashCode(tripId), LOCK_STRIPES)];
+        lock.lock();
+        try {
+            return body.get();
+        } finally {
+            lock.unlock();
         }
+    }
+
+    /**
+     * 清理页面传来的地点：名称必填、长度有上限，类型只认那几种，照片只收高德图床的 https 地址
+     * （导出 PDF 时服务器会去下载照片，不能让人借此访问任意地址）。
+     */
+    static PlacePick clean(PlacePick pick) {
+        if (pick == null || pick.name() == null || pick.name().isBlank()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "没选地点");
+        }
+        String type = pick.type() == null ? null : pick.type().trim().toUpperCase();
+        return new PlacePick(cut(pick.name().trim(), MAX_NAME), cut(pick.poiId(), 40), cut(pick.address(), MAX_TEXT),
+                pick.lng(), pick.lat(), safePhoto(pick.photo()), pick.rating(), pick.cost(),
+                type == null || !Itinerary.TYPES.contains(type) ? null : type, cut(pick.note(), MAX_TEXT));
+    }
+
+    /** 只收高德图床（*.autonavi.com、*.amap.com）的 https 照片地址，其余当没有照片。 */
+    public static String safePhoto(String url) {
+        if (url == null) {
+            return null;
+        }
+        try {
+            java.net.URI uri = java.net.URI.create(url.trim());
+            String host = uri.getHost();
+            return "https".equals(uri.getScheme()) && host != null
+                    && (host.endsWith(".autonavi.com") || host.endsWith(".amap.com")) ? uri.toString() : null;
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    private static String cut(String s, int max) {
+        return s == null ? null : s.length() > max ? s.substring(0, max) : s;
     }
 
     /** 去过的、不感兴趣的记进偏好记忆，规划时会读到。 */

@@ -10,6 +10,11 @@
         <input id="city-input" v-model="text" class="input" placeholder="输入城市名，例如：大理" confirm-type="done" @confirm="pick(text)" />
         <button class="btn small" @click="pick(text)">确定</button>
       </view>
+      <view class="locate" @click="useLocation">
+        <Icon name="nav" :size="15" color="var(--accent)" />
+        <text>{{ locating ? "定位中…" : "定位当前城市" }}</text>
+        <text v-if="error" class="locate-err">{{ error }}</text>
+      </view>
       <view class="label">常用城市</view>
       <view class="cities">
         <text v-for="c in CITIES" :key="c" class="city" :class="{ on: c === current }" @click="pick(c)">{{ c }}</text>
@@ -21,6 +26,7 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import Icon from "./Icon.vue";
+import { locate } from "../utils/location";
 
 /** 选城市的弹层：常用城市一键选，或者输入城市名。选中后发 pick 事件，由外壳保存并刷新页面。 */
 defineProps<{ current: string }>();
@@ -28,6 +34,22 @@ const emit = defineEmits<{ (e: "close"): void; (e: "pick", city: string): void }
 
 const CITIES = ["北京", "上海", "广州", "深圳", "成都", "重庆", "杭州", "西安", "南京", "武汉", "长沙", "厦门", "青岛", "昆明", "大理", "三亚"];
 const text = ref("");
+const locating = ref(false);
+const error = ref("");
+
+/** 定位后选中所在城市 */
+async function useLocation() {
+  if (locating.value) return;
+  locating.value = true;
+  error.value = "";
+  try {
+    pick((await locate(true)).city);
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    locating.value = false;
+  }
+}
 
 function pick(city: string) {
   const c = city.trim().replace(/市$/, "");
@@ -49,4 +71,6 @@ function pick(city: string) {
 .city { text-align: center; padding: 8px 0; border-radius: 10px; border: 1px solid var(--line); font-size: 14px; cursor: pointer; }
 .city:hover { border-color: var(--accent); }
 .city.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.locate { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 14px; color: var(--accent); cursor: pointer; padding: 8px 0 2px; }
+.locate-err { width: 100%; font-size: 12px; color: var(--price); }
 </style>

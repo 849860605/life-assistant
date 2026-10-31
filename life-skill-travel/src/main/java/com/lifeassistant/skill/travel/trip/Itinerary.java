@@ -14,27 +14,38 @@ import java.util.Set;
 /**
  * 结构化行程，存在 t_trip_version.itinerary：逐日的安排、住宿和一段注意事项。行程正文（Markdown）由它生成。
  * geo 为 true 表示已经用高德补过坐标、照片和路程（补不上的项也算补过，不再重试）。
+ * booked 是用户标记"已预约"的安排和住宿的 id（如 d1-3、s1）：用户自己在平台上订好后在页面上标记，不经过我们下单。
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public record Itinerary(List<Day> days, String tips, Boolean geo, List<Stay> stays) {
+public record Itinerary(List<Day> days, String tips, Boolean geo, List<Stay> stays, List<String> booked) {
 
     public Itinerary(List<Day> days, String tips) {
-        this(days, tips, null, null);
+        this(days, tips, null, null, null);
     }
 
     /** 换掉逐日安排，其余不变。 */
     public Itinerary withDays(List<Day> newDays) {
-        return new Itinerary(newDays, tips, geo, stays);
+        return new Itinerary(newDays, tips, geo, stays, booked);
     }
 
     /** 换掉住宿，其余不变。 */
     public Itinerary withStays(List<Stay> newStays) {
-        return new Itinerary(days, tips, geo, newStays);
+        return new Itinerary(days, tips, geo, newStays, booked);
+    }
+
+    /** 换掉已预约的 id 列表，其余不变；空列表存成 null。 */
+    public Itinerary withBooked(List<String> newBooked) {
+        return new Itinerary(days, tips, geo, stays, newBooked == null || newBooked.isEmpty() ? null : List.copyOf(newBooked));
     }
 
     /** 标记已补过地理信息。 */
     public Itinerary located(List<Day> newDays, List<Stay> newStays) {
-        return new Itinerary(newDays, tips, true, newStays);
+        return new Itinerary(newDays, tips, true, newStays, booked);
+    }
+
+    /** 这一项（安排或住宿的 id）是不是已预约。 */
+    public boolean isBooked(String id) {
+        return booked != null && booked.contains(id);
     }
 
     /**
@@ -188,6 +199,9 @@ public record Itinerary(List<Day> days, String tips, Boolean geo, List<Stay> sta
                 if (item.cost() != null && item.cost() > 0) {
                     out.append(" · 人均 ¥").append(item.cost());
                 }
+                if (isBooked(item.id())) {
+                    out.append(" · 已预约");
+                }
                 out.append("\n");
             }
             out.append("\n");
@@ -200,6 +214,9 @@ public record Itinerary(List<Day> days, String tips, Boolean geo, List<Stay> sta
                         .append(stay.url() == null ? "**" + stay.name() + "**" : "[**" + stay.name() + "**](" + stay.url() + ")");
                 if (stay.price() != null) {
                     out.append(" · 约 ¥").append(stay.price()).append("/晚（").append(stay.platform()).append("，以预订页为准）");
+                }
+                if (isBooked(stay.id())) {
+                    out.append(" · 已预约");
                 }
                 out.append("\n");
             }

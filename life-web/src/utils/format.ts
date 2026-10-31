@@ -67,9 +67,10 @@ export const SKILL_NAMES: Record<string, string> = {
   general: "通用",
 };
 
-/** 打开外部链接（点评、预订页）：网页里新开标签页；其他端复制链接让用户自己打开。 */
+/** 打开外部链接（点评、预订页、高德地图）：网页里新开标签页；其他端复制链接让用户自己打开。 */
 export function openUrl(url?: string | null) {
-  if (!url) return;
+  // 只开 http(s) 链接；链接可能来自模型输出，javascript: 之类的一律不开
+  if (!url || !/^https?:\/\//i.test(url)) return;
   // #ifdef H5
   window.open(url, "_blank", "noopener");
   // #endif

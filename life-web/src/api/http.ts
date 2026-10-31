@@ -16,6 +16,8 @@ export function setToken(token: string) {
 /** 清掉登录态并回到登录页；已经在登录页就不再跳，避免重建页面把输入框清空。 */
 export function toLogin() {
   uni.removeStorageSync(TOKEN_KEY);
+  // 下载票据也一起清掉（utils/media.ts 里的 key）
+  uni.removeStorageSync("life_media_ticket");
   const pages = getCurrentPages();
   if (pages.length && pages[pages.length - 1].route === "pages/login/login") return;
   uni.reLaunch({ url: "/pages/login/login" });

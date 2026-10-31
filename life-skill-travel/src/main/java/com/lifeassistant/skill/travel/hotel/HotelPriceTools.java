@@ -175,7 +175,10 @@ public class HotelPriceTools {
                 (List<HotelPriceSource.Quote>) r.get("quotes"))).toList();
     }
 
-    /** 不经过对话直接比价（行程页上"重新比价"用），返回每家酒店的各平台报价，不发卡片也不记报价簿。 */
+    /**
+     * 不经过对话直接比价（行程页上"重新比价"用），返回每家酒店的各平台报价。
+     * 在页面请求里调用时没有会话，所以不会发卡片、也不会记进报价簿。
+     */
     public HotelQuoteBook.Comparison quote(List<String> hotels, String city, LocalDate checkIn, LocalDate checkOut) {
         Map<String, Object> response = quoteAll(hotels.stream().limit(MAX_HOTELS).toList(), city, checkIn, checkOut, List.of());
         @SuppressWarnings("unchecked")

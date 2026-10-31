@@ -1,4 +1,5 @@
-import { API_BASE, getToken } from "../api/http";
+import { API_BASE } from "../api/http";
+import { ensureMediaTicket, mediaTicket } from "./media";
 import type { ItineraryDay, ItineraryItem, ItineraryLeg } from "../api/types";
 
 const CITY_KEY = "life_city";
@@ -19,19 +20,28 @@ export function cityOf(destination?: string | null): string {
   return (destination || "").split(/[·・\s,，]/)[0] || "";
 }
 
+/** 地图上最多标的点数，和后端一致 */
+const MAX_MAP_POINTS = 10;
+
 /**
  * 地图图片地址（后端代理高德静态地图）。stops 按顺序标 1、2、3，route 为 true 时画驾车路线；
- * others 是橙色候选点。<image> 带不了请求头，token 放在查询参数里。
+ * others 是橙色候选点，各最多 10 个。<image> 带不了请求头，用下载票据证明身份；
+ * 票据还没拿到时返回空串，拿到后用到它的计算属性会自动重算。
  */
 export function mapUrl(opts: { stops?: number[][]; others?: number[][]; route?: boolean; w?: number; h?: number }): string {
-  const join = (pts?: number[][]) => (pts || []).map((p) => `${p[0].toFixed(6)},${p[1].toFixed(6)}`).join(";");
+  const ticket = mediaTicket.value;
+  if (!ticket) {
+    ensureMediaTicket();
+    return "";
+  }
+  const join = (pts?: number[][]) => (pts || []).slice(0, MAX_MAP_POINTS).map((p) => `${p[0].toFixed(6)},${p[1].toFixed(6)}`).join(";");
   const params = [
     opts.stops?.length ? `stops=${encodeURIComponent(join(opts.stops))}` : "",
     opts.others?.length ? `others=${encodeURIComponent(join(opts.others))}` : "",
     opts.route ? "route=true" : "",
     `w=${opts.w || 600}`,
     `h=${opts.h || 400}`,
-    `Authorization=${encodeURIComponent("Bearer " + getToken())}`,
+    `mt=${encodeURIComponent(ticket)}`,
   ].filter(Boolean);
   return `${API_BASE}/api/v1/maps/static?${params.join("&")}`;
 }
@@ -79,4 +89,22 @@ export function duration(minutes: number): string {
 export function distanceText(meters?: number | null): string {
   if (meters == null) return "";
   return meters < 1000 ? `${meters}m` : `${(meters / 1000).toFixed(1)}km`;
+}
+
+/**
+ * 在高德地图里打开一个地点（高德官方的跳转链接，不需要 Key）：手机上装了高德 App 会直接打开 App，
+ * 没装或在电脑上打开高德网页版。有坐标时标出这个点，没有坐标时按名称在城市里搜。
+ */
+export function amapUrl(p: { name: string; lng?: number | null; lat?: number | null }, city?: string): string {
+  const name = encodeURIComponent(p.name);
+  if (p.lng != null && p.lat != null) {
+    return `https://uri.amap.com/marker?position=${p.lng},${p.lat}&name=${name}&coordinate=gaode&callnative=1&src=life-assistant`;
+  }
+  return `https://uri.amap.com/search?keyword=${name}${city ? `&city=${encodeURIComponent(city)}` : ""}&callnative=1&src=life-assistant`;
+}
+
+/** 用高德导航到这个地点（从当前位置出发，默认驾车）；没有坐标时退回按名称搜。 */
+export function amapNavUrl(p: { name: string; lng?: number | null; lat?: number | null }, city?: string): string {
+  if (p.lng == null || p.lat == null) return amapUrl(p, city);
+  return `https://uri.amap.com/navigation?to=${p.lng},${p.lat},${encodeURIComponent(p.name)}&mode=car&coordinate=gaode&callnative=1&src=life-assistant`;
 }

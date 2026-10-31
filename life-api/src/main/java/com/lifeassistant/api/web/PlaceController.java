@@ -1,5 +1,6 @@
 package com.lifeassistant.api.web;
 
+import com.lifeassistant.api.auth.MediaAuth;
 import com.lifeassistant.common.api.ApiResponse;
 import com.lifeassistant.common.error.BizException;
 import com.lifeassistant.common.error.ErrorCode;
@@ -27,6 +28,10 @@ import java.util.List;
 public class PlaceController {
 
     private final AmapPlaceService places;
+    private final MediaAuth mediaAuth;
+
+    /** 地图上最多标这么多个点，多了既看不清又会大量调用高德路线接口 */
+    private static final int MAX_POINTS = 10;
 
     /**
      * GET /api/v1/places?kind=spot|food|hotel&city=西安：城市里的热门景点、美食或酒店；
@@ -72,15 +77,18 @@ public class PlaceController {
     }
 
     /**
-     * GET /api/v1/maps/static?stops=经度,纬度;经度,纬度&route=true&others=…&w=600&h=400：地图图片。
-     * stops 按顺序标 1、2、3，route 为 true 时画驾车路线；others 是橙色的候选点。图片缓存一天。
+     * GET /api/v1/maps/static?stops=经度,纬度;经度,纬度&route=true&others=…&w=600&h=400&mt=票据：地图图片。
+     * stops 按顺序标 1、2、3，route 为 true 时画驾车路线；others 是橙色的候选点，各最多 10 个。图片缓存一天。
+     * &lt;image&gt; 带不了请求头，用 mt（下载票据）证明身份，也接受请求头里的登录 token。
      */
     @GetMapping("/maps/static")
     public ResponseEntity<byte[]> map(@RequestParam(required = false) String stops,
                                       @RequestParam(defaultValue = "false") boolean route,
                                       @RequestParam(required = false) String others,
                                       @RequestParam(defaultValue = "600") int w,
-                                      @RequestParam(defaultValue = "400") int h) {
+                                      @RequestParam(defaultValue = "400") int h,
+                                      @RequestParam(required = false) String mt) {
+        mediaAuth.user(mt);
         byte[] png = places.staticMap(points(stops), route, points(others), w, h);
         return ResponseEntity.ok().contentType(MediaType.IMAGE_PNG)
                 .cacheControl(CacheControl.maxAge(Duration.ofDays(1)).cachePrivate()).body(png);
@@ -92,7 +100,11 @@ public class PlaceController {
         if (text == null || text.isBlank()) {
             return out;
         }
-        for (String pair : text.split(";")) {
+        String[] pairs = text.split(";");
+        if (pairs.length > MAX_POINTS) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "地图上最多 " + MAX_POINTS + " 个点");
+        }
+        for (String pair : pairs) {
             String[] xy = pair.split(",");
             try {
                 out.add(new double[]{Double.parseDouble(xy[0].trim()), Double.parseDouble(xy[1].trim())});

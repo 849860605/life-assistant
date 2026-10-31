@@ -77,6 +77,7 @@
               <view v-if="r.distance != null" class="cand-meta">距原地点 {{ distanceText(r.distance) }}</view>
               <view class="cand-meta"><text v-if="r.rating" class="star">★ {{ r.rating }}</text><text v-if="r.rating"> 高德评分</text><text v-if="r.cost"> · 人均 ¥{{ r.cost }}</text></view>
               <view v-if="r.address" class="cand-desc">{{ r.address }}</view>
+              <text class="amap" @click.stop="openUrl(amapUrl(r))">在高德地图里看 ›</text>
             </view>
             <button class="btn small pick" :class="{ ghost: picked?.id !== r.id }">{{ picked?.id === r.id ? "✓ 已选择" : "选择替换" }}</button>
           </view>
@@ -121,7 +122,8 @@ import { api } from "../api";
 import { showError } from "../api/http";
 import type { ChangeReason, ItineraryItem, Place, TripDetail } from "../api/types";
 import Icon from "./Icon.vue";
-import { distanceText, mapUrl } from "../utils/place";
+import { amapUrl, distanceText, mapUrl } from "../utils/place";
+import { openUrl } from "../utils/format";
 
 /**
  * 替换弹窗（电脑行程编辑页）：左边当前项、原因和筛选，中间高德候选，右边替换前后对比。
@@ -287,4 +289,5 @@ async function removeIt() {
 .im-k { font-weight: 600; }
 .confirm { width: 100%; margin: 12px 0 8px; height: 44px; }
 .cancel { width: 100%; margin: 0 0 8px; }
+.amap { display: inline-block; margin-top: 4px; font-size: 12px; color: var(--accent); cursor: pointer; }
 </style>

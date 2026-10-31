@@ -20,6 +20,7 @@
 import { ref } from "vue";
 import { api } from "../../api";
 import { setToken } from "../../api/http";
+import { clearMediaTicket } from "../../utils/media";
 
 const username = ref("");
 const password = ref("");
@@ -34,6 +35,8 @@ async function submit() {
   try {
     const result = await api.login(username.value.trim(), password.value);
     setToken(result.token);
+    // 换了账号，旧的下载票据不能再用
+    clearMediaTicket();
     uni.switchTab({ url: "/pages/home/home" });
   } catch (e) {
     error.value = e instanceof Error ? e.message : "登录失败";

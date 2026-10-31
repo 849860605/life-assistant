@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.lifeassistant.common.auth.UserCtx;
 import com.lifeassistant.common.error.BizException;
+import com.lifeassistant.common.error.ErrorCode;
 import com.lifeassistant.core.schedule.ScheduleEvent;
 import com.lifeassistant.core.schedule.ScheduleService;
 import lombok.RequiredArgsConstructor;
@@ -54,7 +55,17 @@ public class TripService {
      */
     @Transactional
     public TripDetail saveVersion(UserCtx ctx, Long tripId, TripDraft draft, String createdBy) {
+        return saveVersion(ctx, tripId, draft, createdBy, null);
+    }
+
+    /**
+     * 同上；baseVersion 是这次修改基于的版本号，不为空时要求它还是当前版本，否则说明别处（另一个页面或助手）刚改过，
+     * 抛 CONFLICT 让用户刷新，而不是悄悄覆盖。两个修改同时提交时，后提交的也会因为版本号对不上而失败。
+     */
+    @Transactional
+    public TripDetail saveVersion(UserCtx ctx, Long tripId, TripDraft draft, String createdBy, Integer baseVersion) {
         Trip trip;
+        int oldVer;
         if (tripId == null) {
             trip = new Trip();
             trip.setUserId(ctx.userId());
@@ -63,11 +74,25 @@ public class TripService {
             trip.setStatus(draft.draft() ? "DRAFT" : "CONFIRMED");
             apply(trip, draft);
             tripMapper.insert(trip);
+            oldVer = 0;
         } else {
             trip = getOwned(ctx, tripId);
+            oldVer = trip.getCurrentVer();
+            if (baseVersion != null && baseVersion != oldVer) {
+                throw new BizException(ErrorCode.CONFLICT, "行程刚被修改过（现在是第 " + oldVer + " 版），请刷新后再改");
+            }
             apply(trip, draft);
         }
-        int version = trip.getCurrentVer() + 1;
+        int version = oldVer + 1;
+        trip.setCurrentVer(version);
+        trip.setUpdatedAt(OffsetDateTime.now());
+        // 先按旧版本号条件更新主记录占住新版本号：并发的另一次保存会在这里更新不到行而失败
+        int updated = tripMapper.update(trip, new LambdaUpdateWrapper<Trip>()
+                .eq(Trip::getId, trip.getId())
+                .eq(Trip::getCurrentVer, oldVer));
+        if (updated == 0) {
+            throw new BizException(ErrorCode.CONFLICT, "行程刚被修改过，请刷新后再改");
+        }
         TripVersion tripVersion = new TripVersion();
         tripVersion.setTripId(trip.getId());
         tripVersion.setVersion(version);
@@ -76,12 +101,9 @@ public class TripService {
         tripVersion.setChangeNote(draft.changeNote());
         tripVersion.setCreatedBy(createdBy);
         versionMapper.insert(tripVersion);
-
-        trip.setCurrentVer(version);
-        trip.setUpdatedAt(OffsetDateTime.now());
-        tripMapper.updateById(trip);
         return new TripDetail(trip, tripVersion);
     }
+
 
     /** 用户认可草稿：状态改成已确认。 */
     public Trip confirm(UserCtx ctx, long tripId) {

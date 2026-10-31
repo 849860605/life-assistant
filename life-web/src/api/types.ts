@@ -137,6 +137,8 @@ export interface Stay {
 export interface Itinerary {
   days: ItineraryDay[];
   stays?: Stay[];
+  /** 用户标记"已预约"的安排和住宿的 id */
+  booked?: string[];
   tips?: string;
   /** 已经补过坐标和路程 */
   geo?: boolean;

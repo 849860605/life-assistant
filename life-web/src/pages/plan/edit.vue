@@ -148,7 +148,9 @@ onUnmounted(end);
 function remove(item: ItineraryItem) {
   uni.showModal({
     title: "删掉这一项",
-    content: `从第${dayNo.value}天删掉「${item.name}」？`,
+    content: (detail.value?.version.itinerary?.booked || []).includes(item.id)
+      ? `「${item.name}」已标记为已预约，删掉前记得去原平台取消预约。确定从第${dayNo.value}天删掉？`
+      : `从第${dayNo.value}天删掉「${item.name}」？`,
     confirmText: "删除",
     success: async (res) => {
       if (!res.confirm) return;

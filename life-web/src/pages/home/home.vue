@@ -104,7 +104,7 @@
           </view>
 
           <view class="panel">
-            <view class="panel-head"><text class="panel-title">{{ city }}美食推荐</text><text class="more" @click="go('/pages/search/food')">查看更多 ›</text></view>
+            <view class="panel-head"><text class="panel-title">{{ foodsNearMe ? "你附近的美食" : `${city}美食推荐` }}</text><text class="more" @click="go('/pages/search/food')">查看更多 ›</text></view>
             <view v-if="foods.length" class="foods">
               <view v-for="f in foods.slice(0, 4)" :key="f.id" class="food" @click="go('/pages/search/food')">
                 <image v-if="f.photo" class="food-img" :src="f.photo" mode="aspectFill" />
@@ -248,6 +248,7 @@
 import { computed, onMounted, ref } from "vue";
 import { api } from "../../api";
 import { getToken } from "../../api/http";
+import { locate, locationAllowed } from "../../utils/location";
 import type { ItineraryDay, Place, Trip } from "../../api/types";
 import CityPicker from "../../components/CityPicker.vue";
 import Icon from "../../components/Icon.vue";
@@ -272,6 +273,30 @@ const spots = ref<Place[]>([]);
 const spotsLoaded = ref(false);
 const foods = ref<Place[]>([]);
 const foodsLoaded = ref(false);
+/** 美食区是不是按"我的位置"找的 */
+const foodsNearMe = ref(false);
+
+/**
+ * 首页美食：以前允许过定位、而且人就在当前城市时，显示你附近 1.5 公里的；否则显示城市中心周边的。
+ * 不主动弹定位授权，授权在美食页的"我附近"里点。
+ */
+async function loadFoods(city: string) {
+  try {
+    if (await locationAllowed()) {
+      const loc = await locate().catch(() => null);
+      if (loc && loc.city === city) {
+        foods.value = await api.places({ kind: "food", lng: loc.lng, lat: loc.lat, radius: 1500, size: 8 });
+        foodsNearMe.value = true;
+        return;
+      }
+    }
+    foods.value = await api.places({ kind: "food", city, size: 8 });
+  } catch {
+    // 美食区加载失败不打断首页
+  } finally {
+    foodsLoaded.value = true;
+  }
+}
 const trip = ref<Trip | null>(null);
 const tripLoaded = ref(false);
 const tripCover = ref("");
@@ -354,7 +379,7 @@ const entries = [
 onMounted(() => {
   if (!getToken()) return;
   citySpots(city, 6).then((list) => (spots.value = list)).finally(() => (spotsLoaded.value = true));
-  api.places({ kind: "food", city, size: 8 }).then((list) => (foods.value = list)).catch(() => {}).finally(() => (foodsLoaded.value = true));
+  loadFoods(city);
   loadTrip();
 });
 

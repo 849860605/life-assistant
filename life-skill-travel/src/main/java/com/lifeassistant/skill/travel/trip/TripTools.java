@@ -47,7 +47,8 @@ public class TripTools {
             @ToolParam(description = "开始时间 HH:mm") String start,
             @ToolParam(description = "结束时间 HH:mm", required = false) String end,
             @ToolParam(description = "类型：SPOT 景点 / FOOD 吃饭 / HOTEL 住宿 / TRANSPORT 交通 / FREE 自由活动") String type,
-            @ToolParam(description = "地点或活动名，例如：成都大熊猫繁育研究基地") String name,
+            @ToolParam(description = "一个地点的正式名称，例如：成都大熊猫繁育研究基地。一项只写一个地点，"
+                    + "顺路的几个地方（如断桥、白堤、平湖秋月）拆成几项；不要写成\"A → B\"或\"A + 活动\"") String name,
             @ToolParam(description = "地址或所在区域", required = false) String address,
             @ToolParam(description = "一句说明：玩什么、怎么去、注意什么", required = false) String note,
             @ToolParam(description = "人均花费（元），不知道不填", required = false) Integer cost,
@@ -198,7 +199,16 @@ public class TripTools {
         }
         CallRecorder.Scope scope = CallRecorder.current();
         itinerary = itinerary.withStays(toStays(stays, scope == null ? null : scope.conversationId(), previous));
+        itinerary = carryBooked(itinerary, previous);
         List<String> problems = new ArrayList<>(itinerary.problems(start, end));
+        for (Itinerary.Stay st : itinerary.stays()) {
+            if (st.nights() == 0) {
+                problems.add("住宿 " + st.name() + "：入住、离店日期要写成 yyyy-MM-dd，离店晚于入住");
+            } else if ((start != null && st.checkIn().compareTo(start.toString()) < 0)
+                    || (end != null && st.checkOut().compareTo(end.toString()) > 0)) {
+                problems.add("住宿 " + st.name() + "：日期不在行程 " + start + " 到 " + end + " 之内");
+            }
+        }
         if (itinerary.days().size() > 1 && itinerary.stays().isEmpty()) {
             problems.add("过夜行程要填 stays（住哪家酒店、入住和离店日期），酒店名用比价结果里的");
         }
@@ -278,7 +288,7 @@ public class TripTools {
                     String type = p.type() == null ? "SPOT" : p.type().trim().toUpperCase();
                     items.add(new Itinerary.Item("d" + (d + 1) + "-" + (i + 1), blankToNull(p.start()),
                             blankToNull(p.end()), Itinerary.TYPES.contains(type) ? type : "SPOT", p.name(),
-                            blankToNull(p.address()), blankToNull(p.note()), p.cost(), blankToNull(p.url()), null));
+                            blankToNull(p.address()), blankToNull(p.note()), p.cost(), webUrl(p.url()), null));
                 }
                 out.add(new Itinerary.Day(day.date(), blankToNull(day.theme()), items));
             }
@@ -320,6 +330,24 @@ public class TripTools {
                     old.lat(), old.photo(), old.rating()));
         }
         return out;
+    }
+
+    /** 模型改版时 id 会重新编号，按名称把上一版"已预约"的安排和住宿对到新版本上。 */
+    static Itinerary carryBooked(Itinerary itinerary, Itinerary previous) {
+        if (previous == null || previous.booked() == null) {
+            return itinerary;
+        }
+        java.util.Set<String> names = new java.util.HashSet<>();
+        previous.days().forEach(d -> d.items().stream().filter(i -> previous.isBooked(i.id())).forEach(i -> names.add(i.name())));
+        if (previous.stays() != null) {
+            previous.stays().stream().filter(st -> previous.isBooked(st.id())).forEach(st -> names.add(st.name()));
+        }
+        List<String> ids = new ArrayList<>();
+        itinerary.days().forEach(d -> d.items().stream().filter(i -> names.contains(i.name())).forEach(i -> ids.add(i.id())));
+        if (itinerary.stays() != null) {
+            itinerary.stays().stream().filter(st -> names.contains(st.name())).forEach(st -> ids.add(st.id()));
+        }
+        return itinerary.withBooked(ids);
     }
 
     /** 一家酒店的比价结果：有价格的各平台报价，最低价和平台。 */
@@ -408,6 +436,12 @@ public class TripTools {
         } catch (JsonProcessingException e) {
             return json;
         }
+    }
+
+    /** 只留 http(s) 链接，别的（比如 javascript:）当没有，免得页面上点出问题。 */
+    static String webUrl(String url) {
+        String u = blankToNull(url);
+        return u != null && u.matches("(?i)^https?://\\S+$") ? u : null;
     }
 
     private static String blankToNull(String s) {

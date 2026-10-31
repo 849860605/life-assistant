@@ -58,6 +58,8 @@ sa-token:
   is-concurrent: true
   is-share: false
   token-style: uuid
+  # 只从请求头读 token，不读链接参数：链接会进访问日志和浏览器历史。要放进链接的地方用下载票据（/auth/media-ticket）
+  is-read-body: false
   is-log: false
   is-print: false
 

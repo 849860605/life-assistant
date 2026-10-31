@@ -4,12 +4,16 @@
       <image v-if="stay.photo && !broken" class="stay-img" :src="stay.photo" mode="aspectFill" @error="broken = true" />
       <view v-else class="stay-img ph"><Icon name="bed" :size="22" color="#fff" /></view>
       <view class="stay-body">
-        <view class="stay-name" :class="{ link: stay.url }" @click="openUrl(stay.url)">{{ stay.name }}</view>
+        <view class="stay-name" :class="{ link: stay.url }" @click="openUrl(stay.url)">{{ stay.name }}<text v-if="booked" class="booked-tag">已预约</text></view>
         <view class="stay-meta">
           <text v-if="stay.rating" class="star">★ {{ stay.rating }}</text>
           <text class="muted">{{ shortDate(stay.checkIn) }} 入住 · {{ nights }} 晚</text>
         </view>
         <view v-if="stay.address" class="muted small">{{ stay.address }}</view>
+        <view class="amap-links">
+          <text class="amap" @click="openUrl(amapUrl(stay))">高德地图</text>
+          <text class="amap" @click="openUrl(amapNavUrl(stay))">导航</text>
+        </view>
       </view>
       <view class="stay-side">
         <template v-if="stay.price">
@@ -32,6 +36,7 @@
     </view>
 
     <view v-if="editable" class="acts">
+      <button class="btn ghost small" :class="{ bookedBtn: booked }" @click="toggleBooked">{{ booked ? "✓ 已预约" : "标记已预约" }}</button>
       <button v-if="stay.options?.length" class="btn ghost small" @click="showOptions = !showOptions">{{ showOptions ? "收起" : "换一家" }}</button>
       <button class="btn ghost small" :disabled="quoting" @click="requote">{{ quoting ? "比价中，约 15–60 秒…" : "重新比价" }}</button>
     </view>
@@ -59,9 +64,10 @@ import { showError } from "../api/http";
 import type { Stay, TripDetail } from "../api/types";
 import Icon from "./Icon.vue";
 import { openUrl, queriedAt, shortDate } from "../utils/format";
+import { amapNavUrl, amapUrl } from "../utils/place";
 
 /** 行程里的一段住宿：酒店照片评分、各平台每晚价格和预订链接；可以从比价候选里换一家，或重新比价。 */
-const props = defineProps<{ stay: Stay; tripId: number; editable: boolean }>();
+const props = defineProps<{ stay: Stay; tripId: number; editable: boolean; booked?: boolean }>();
 const emit = defineEmits<{ (e: "saved", detail: TripDetail, note: string): void; (e: "updated", detail: TripDetail): void }>();
 
 const broken = ref(false);
@@ -75,8 +81,32 @@ const nights = computed(() => {
   return a && b && b > a ? Math.round((b - a) / 86400000) : 0;
 });
 
+/** 标记或取消已预约：只是记录，不会去平台下单或取消 */
+async function toggleBooked() {
+  try {
+    emit("updated", await api.markBooked(props.tripId, props.stay.id, !props.booked));
+    uni.showToast({ title: props.booked ? "已取消预约标记" : "已标记为已预约", icon: "none" });
+  } catch (e) {
+    showError(e);
+  }
+}
+
+/** 换一家：已预约的先提醒去平台取消 */
+function pick(name: string) {
+  if (!props.booked) {
+    doPick(name);
+    return;
+  }
+  uni.showModal({
+    title: "这家酒店已预约",
+    content: "换酒店前记得去原平台取消预订，避免扣费。继续换吗？",
+    confirmText: "继续",
+    success: (res) => res.confirm && doPick(name),
+  });
+}
+
 /** 换一家：存成新版本 */
-async function pick(name: string) {
+async function doPick(name: string) {
   switching.value = true;
   try {
     const detail = await api.switchStay(props.tripId, props.stay.id, name);
@@ -117,6 +147,8 @@ async function requote() {
 .price { font-size: 18px; font-weight: 800; color: var(--price); font-variant-numeric: tabular-nums; }
 .muted { color: var(--muted); }
 .small { font-size: 12px; }
+.amap-links { display: flex; gap: 12px; margin-top: 2px; }
+.amap { font-size: 12px; color: var(--accent); cursor: pointer; }
 .quotes { display: flex; flex-wrap: wrap; gap: 6px; }
 .quote {
   display: flex;
@@ -140,5 +172,7 @@ async function requote() {
 .option-name { font-size: 13px; font-weight: 600; }
 .option .btn { margin: 0; }
 .cheaper { color: var(--ok); }
+.booked-tag { margin-left: 6px; font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 999px; background: var(--ok-soft); color: var(--ok); }
+.bookedBtn { color: var(--ok) !important; border-color: var(--ok) !important; background: var(--ok-soft) !important; }
 .dearer { color: var(--price); }
 </style>

@@ -2,7 +2,7 @@
   <Shell active="food">
   <view class="page">
     <view class="head">
-      <text class="title">{{ city }} · {{ nearName ? nearName + "附近" : "" }}美食</text>
+      <text class="title">{{ nearMe ? "你附近的美食" : `${city} · ${nearName ? nearName + "附近" : ""}美食` }}</text>
       <text class="tag">高德</text>
     </view>
     <scroll-view scroll-x class="cats">
@@ -11,6 +11,7 @@
       </view>
     </scroll-view>
     <view class="filters">
+      <view class="filter mine" :class="{ on: nearMe }" @click="useMyLocation"><Icon name="nav" :size="12" :color="nearMe ? '#fff' : 'var(--accent)'" />{{ locating ? "定位中…" : "我附近" }}</view>
       <view class="near">
         <Icon name="pin" :size="14" color="var(--muted)" />
         <input id="food-near" v-model="nearInput" class="near-input" placeholder="附近：输入景点、商圈或酒店" @confirm="applyNear" />
@@ -42,10 +43,14 @@
           <view class="meta muted">
             <text v-if="f.cost">¥{{ f.cost }}/人</text>
             <text v-if="f.cost && (f.distance != null || f.area)"> · </text>
-            <text v-if="f.distance != null">距{{ nearName || "市中心" }} {{ distanceText(f.distance) }}</text>
+            <text v-if="f.distance != null">{{ nearMe ? "离你" : "距" + (nearName || "市中心") }} {{ distanceText(f.distance) }}</text>
             <text v-else-if="f.area">{{ f.area }}</text>
           </view>
           <view class="tags"><text v-if="f.category" class="tag-chip">{{ f.category }}</text></view>
+          <view class="amap-links">
+            <text class="amap" @click="openUrl(amapUrl(f))">高德地图</text>
+            <text class="amap" @click="openUrl(amapNavUrl(f))">导航</text>
+          </view>
         </view>
         <view v-if="trip" class="side">
           <button class="btn small add" :class="{ added: added[f.name] }" :disabled="added[f.name]" @click="add(f)">{{ added[f.name] ? "已加入" : "加入行程" }}</button>
@@ -68,7 +73,9 @@ import RestaurantCard from "../../components/cards/RestaurantCard.vue";
 import { api } from "../../api";
 import { showError } from "../../api/http";
 import type { Itinerary, Place } from "../../api/types";
-import { currentCity, distanceText } from "../../utils/place";
+import { openUrl } from "../../utils/format";
+import { amapNavUrl, amapUrl, currentCity, distanceText } from "../../utils/place";
+import { locate, locationAllowed } from "../../utils/location";
 import { shortDate } from "../../utils/format";
 
 /** 美食推荐（原型⑦）：高德的城市或某地附近餐厅，可按分类筛选、查点评口碑、加入行程。 */
@@ -79,6 +86,9 @@ const city = ref(currentCity());
 const nearInput = ref("");
 const nearName = ref("");
 const center = ref<{ lng: number; lat: number } | null>(null);
+/** 是不是按"我的位置"找 */
+const nearMe = ref(false);
+const locating = ref(false);
 const places = ref<Place[]>([]);
 const loading = ref(false);
 const error = ref("");
@@ -104,11 +114,34 @@ onLoad(async (query) => {
   } else if (query?.near) {
     nearInput.value = decodeURIComponent(query.near);
     applyNear();
+  } else if (await locationAllowed()) {
+    // 以前允许过定位，直接按当前位置找，不会弹窗
+    await useMyLocation();
   } else {
     load();
   }
   findTrip();
 });
+
+/** 按当前位置找附近的餐厅；第一次会弹浏览器的授权提示，失败就提示原因、保持原来的列表。 */
+async function useMyLocation() {
+  if (locating.value) return;
+  locating.value = true;
+  try {
+    const loc = await locate(nearMe.value);
+    center.value = { lng: loc.lng, lat: loc.lat };
+    city.value = loc.city || city.value;
+    nearName.value = "";
+    nearInput.value = "";
+    nearMe.value = true;
+    await load();
+  } catch (e) {
+    showError(e);
+    if (!places.value.length) load();
+  } finally {
+    locating.value = false;
+  }
+}
 
 /** 按当前城市或中心点、分类关键字查高德。 */
 async function load() {
@@ -117,7 +150,7 @@ async function load() {
   const keyword = cat.value === "全部" ? undefined : cat.value === "本地菜" ? `${city.value}菜` : cat.value;
   try {
     places.value = center.value
-      ? await api.places({ kind: "food", lng: center.value.lng, lat: center.value.lat, keyword: keyword || "美食", radius: 2000, size: 20 })
+      ? await api.places({ kind: "food", lng: center.value.lng, lat: center.value.lat, keyword: keyword || "美食", radius: nearMe.value ? 1500 : 2000, size: 20 })
       : await api.places({ kind: "food", city: city.value, keyword, size: 20 });
   } catch (e) {
     places.value = [];
@@ -145,6 +178,7 @@ async function applyNear() {
       return;
     }
     center.value = { lng: spot.lng, lat: spot.lat };
+    nearMe.value = false;
     nearName.value = spot.name;
     load();
   } catch (e) {
@@ -153,6 +187,7 @@ async function applyNear() {
 }
 
 function clearNear() {
+  nearMe.value = false;
   nearInput.value = "";
   nearName.value = "";
   center.value = null;
@@ -264,4 +299,8 @@ function ask() {
   .page, .container { max-width: 1180px; padding: 24px 28px; }
   .list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 }
+.amap-links { display: flex; gap: 12px; margin-top: 4px; }
+.amap { font-size: 12px; color: var(--accent); cursor: pointer; }
+.filter.mine { gap: 4px; color: var(--accent); border: 1px solid var(--accent); padding: 3px 10px; border-radius: 999px; font-weight: 600; }
+.filter.mine.on { background: var(--accent); color: #fff; }
 </style>

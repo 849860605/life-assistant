@@ -40,16 +40,21 @@ import java.util.concurrent.TimeUnit;
 public class TripPdf {
 
     private static final String FONT = "Noto Sans SC";
+    private static final java.util.Set<String> PLACE_TYPES = java.util.Set.of("SPOT", "FOOD", "HOTEL");
     private static final Map<String, String> TYPE_NAMES = Map.of("SPOT", "景点", "FOOD", "餐饮", "HOTEL", "住宿",
             "TRANSPORT", "交通", "FREE", "自由活动");
     /** 照片下载慢的就不等了，没有照片也能导出 */
     private static final Duration PHOTO_TIMEOUT = Duration.ofSeconds(5);
+    /** 单张照片最大字节数、最多下载几张 */
+    private static final int MAX_PHOTO_BYTES = 2 * 1024 * 1024;
+    private static final int MAX_PHOTOS = 80;
 
     private final AmapPlaceService places;
     private final ObjectMapper objectMapper;
     private final File fontDir;
+    /** 不跟随跳转：照片地址已经限定在高德图床，跳去别处的不要 */
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(4))
-            .followRedirects(HttpClient.Redirect.NORMAL).build();
+            .followRedirects(HttpClient.Redirect.NEVER).build();
 
     public TripPdf(AmapPlaceService places, ObjectMapper objectMapper, LifeProperties properties) {
         this.places = places;
@@ -78,12 +83,16 @@ public class TripPdf {
             builder.useFont(regular, FONT, 400, BaseRendererBuilder.FontStyle.NORMAL, true);
             builder.useFont(bold.isFile() ? bold : regular, FONT, 700, BaseRendererBuilder.FontStyle.NORMAL, true);
             builder.withHtmlContent(html, null);
+            // 图片都已内嵌成 data URI，不让排版引擎再去加载任何外部地址
+            builder.useProtocolsStreamImplementation(url -> {
+                throw new IllegalStateException("PDF 里不加载外部资源：" + url);
+            }, "http", "https", "file", "ftp", "jar");
             builder.toStream(out);
             builder.run();
             return out.toByteArray();
         } catch (Exception e) {
             log.warn("行程 {} 导出 PDF 失败", detail.trip().getId(), e);
-            throw new BizException(ErrorCode.INTERNAL, "PDF 生成失败：" + e.getMessage(), e);
+            throw new BizException(ErrorCode.INTERNAL, "PDF 生成失败，请稍后再试", e);
         }
     }
 
@@ -109,6 +118,7 @@ public class TripPdf {
         }
 
         Map<String, String> photos = photos(it);
+        String city = trip.getDestination() == null ? "" : trip.getDestination().split("[·・\\s,，]")[0];
         int food = 0;
         for (Itinerary.Day d : it.days()) {
             for (Itinerary.Item i : d.items()) {
@@ -128,7 +138,9 @@ public class TripPdf {
         if (it.stays() != null && !it.stays().isEmpty()) {
             h.append("<h2>住宿</h2><table class=\"stays\"><tr><th>酒店</th><th>日期</th><th>各平台每晚价格</th><th class=\"r\">合计</th></tr>");
             for (Itinerary.Stay s : it.stays()) {
-                h.append("<tr><td><div class=\"b\">").append(link(s.name(), s.url())).append("</div>");
+                h.append("<tr><td><div class=\"b\">").append(link(s.name(), s.url())).append(" <a class=\"amap\" href=\"")
+                        .append(esc(amapUrl(s.name(), s.lng(), s.lat(), city))).append("\">高德地图</a>")
+                        .append(it.isBooked(s.id()) ? " <span class=\"booked\">已预约</span>" : "").append("</div>");
                 if (s.rating() != null) {
                     h.append("<div class=\"muted\">高德评分 ").append(s.rating()).append("</div>");
                 }
@@ -195,7 +207,15 @@ public class TripPdf {
                     h.append("<span class=\"no\">").append(stop == 10 ? 0 : stop).append("</span> ");
                 }
                 h.append(link(i.name(), i.url())).append(" <span class=\"tag\">")
-                        .append(TYPE_NAMES.getOrDefault(i.type(), i.type())).append("</span></div>");
+                        .append(esc(TYPE_NAMES.getOrDefault(i.type(), i.type()))).append("</span>");
+                if (it.isBooked(i.id())) {
+                    h.append(" <span class=\"booked\">已预约</span>");
+                }
+                if (PLACE_TYPES.contains(i.type())) {
+                    h.append(" <a class=\"amap\" href=\"").append(esc(amapUrl(i.name(), i.lng(), i.lat(), city)))
+                            .append("\">高德地图</a>");
+                }
+                h.append("</div>");
                 List<String> facts = new ArrayList<>();
                 if (i.rating() != null) {
                     facts.add("评分 " + i.rating());
@@ -251,16 +271,23 @@ public class TripPdf {
     private Map<String, String> photos(Itinerary it) {
         Map<String, String> out = new ConcurrentHashMap<>();
         List<String> urls = it.days().stream().flatMap(d -> d.items().stream()).map(Itinerary.Item::photo)
-                .filter(p -> p != null && !p.isBlank()).distinct().toList();
+                .map(TripEditor::safePhoto).filter(java.util.Objects::nonNull).distinct().limit(MAX_PHOTOS).toList();
         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             for (String url : urls) {
                 executor.submit(() -> {
                     try {
-                        HttpResponse<byte[]> res = http.send(HttpRequest.newBuilder(URI.create(url))
-                                .timeout(PHOTO_TIMEOUT).build(), HttpResponse.BodyHandlers.ofByteArray());
-                        String type = res.headers().firstValue("content-type").orElse("image/jpeg");
-                        if (res.statusCode() == 200 && type.startsWith("image/") && res.body().length > 0) {
-                            out.put(url, "data:" + type + ";base64," + Base64.getEncoder().encodeToString(res.body()));
+                        HttpResponse<java.io.InputStream> res = http.send(HttpRequest.newBuilder(URI.create(url))
+                                .timeout(PHOTO_TIMEOUT).build(), HttpResponse.BodyHandlers.ofInputStream());
+                        try (java.io.InputStream in = res.body()) {
+                            String type = res.headers().firstValue("content-type").orElse("");
+                            if (res.statusCode() != 200 || !type.matches("image/(jpeg|png|webp|gif)")) {
+                                return;
+                            }
+                            // 多读一个字节判断是否超限，超了就不要
+                            byte[] body = in.readNBytes(MAX_PHOTO_BYTES + 1);
+                            if (body.length > 0 && body.length <= MAX_PHOTO_BYTES) {
+                                out.put(url, "data:" + type + ";base64," + Base64.getEncoder().encodeToString(body));
+                            }
                         }
                     } catch (Exception e) {
                         log.debug("照片 {} 下载失败：{}", url, e.getMessage());
@@ -268,7 +295,10 @@ public class TripPdf {
                 });
             }
             executor.shutdown();
-            executor.awaitTermination(PHOTO_TIMEOUT.toSeconds() + 3, TimeUnit.SECONDS);
+            if (!executor.awaitTermination(PHOTO_TIMEOUT.toSeconds() + 3, TimeUnit.SECONDS)) {
+                // 还没下完的不等了，中断掉，免得慢的连接拖住整个导出
+                executor.shutdownNow();
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
@@ -285,7 +315,8 @@ public class TripPdf {
     }
 
     private static String link(String text, String url) {
-        return url == null || url.isBlank() ? esc(text) : "<a href=\"" + esc(url) + "\">" + esc(text) + "</a>";
+        return url == null || !url.matches("(?i)^https?://.*") ? esc(text)
+                : "<a href=\"" + esc(url) + "\">" + esc(text) + "</a>";
     }
 
     /** 注意事项是简单的 Markdown：标题、列表、粗体，转成 HTML，其余按段落。 */
@@ -327,6 +358,15 @@ public class TripPdf {
     private static String inline(String text) {
         return esc(text).replaceAll("\\*\\*(.+?)\\*\\*", "<b>$1</b>")
                 .replaceAll("\\[([^\\]]+)\\]\\((https?://[^)\\s]+)\\)", "<a href=\"$2\">$1</a>");
+    }
+
+    /** 高德地图里打开这个地点的链接，规则和网页上的一样：有坐标标点，没坐标按名称在城市里搜。 */
+    private static String amapUrl(String name, Double lng, Double lat, String city) {
+        String n = java.net.URLEncoder.encode(name, java.nio.charset.StandardCharsets.UTF_8);
+        return lng != null && lat != null
+                ? "https://uri.amap.com/marker?position=" + lng + "," + lat + "&name=" + n + "&coordinate=gaode&callnative=1&src=life-assistant"
+                : "https://uri.amap.com/search?keyword=" + n + "&city="
+                + java.net.URLEncoder.encode(city, java.nio.charset.StandardCharsets.UTF_8) + "&callnative=1&src=life-assistant";
     }
 
     /** XML 转义，openhtmltopdf 按 XHTML 解析。 */
@@ -406,6 +446,8 @@ public class TripPdf {
             .name { font-weight: 700; font-size: 10pt; }
             .no { display: inline-block; width: 12pt; height: 12pt; line-height: 12pt; text-align: center; border-radius: 6pt;
                   background-color: #2563eb; color: #ffffff; font-size: 7.5pt; }
+            .amap { font-weight: 400; font-size: 7.5pt; }
+            .booked { font-weight: 700; font-size: 7.5pt; color: #ffffff; background-color: #16a34a; padding: 0 3pt; border-radius: 3pt; }
             .tag { font-weight: 400; font-size: 7.5pt; color: #2563eb; background-color: #e6eefd; padding: 0 3pt; border-radius: 3pt; }
             .leg td { padding: 0 4pt 2pt 4pt; color: #6b7280; font-size: 8pt; }
             .tips ul { margin: 2pt 0; padding-left: 14pt; }

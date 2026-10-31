@@ -1,5 +1,6 @@
 package com.lifeassistant.api.web;
 
+import com.lifeassistant.api.auth.MediaAuth;
 import com.lifeassistant.common.api.ApiResponse;
 import com.lifeassistant.core.auth.AuthFacade;
 import com.lifeassistant.core.schedule.ScheduleEvent;
@@ -40,6 +41,7 @@ public class TripController {
     private final TripService tripService;
     private final TripEditor tripEditor;
     private final TripPdf tripPdf;
+    private final MediaAuth mediaAuth;
 
     /** 换掉或删掉某项时的请求：换成的地点（删掉时不用）和原因（VISITED 去过了、DISLIKE 不感兴趣，可空）。 */
     public record ItemChange(TripEditor.PlacePick place, TripEditor.Reason reason) {
@@ -115,6 +117,13 @@ public class TripController {
         return ApiResponse.ok(tripEditor.lock(authFacade.current(), id, itemId, locked));
     }
 
+    /** POST /api/v1/trips/{id}/booked/{targetId}?booked=true：把某项安排或某段住宿标记为已预约（或取消标记）。 */
+    @PostMapping("/{id}/booked/{targetId}")
+    public ApiResponse<TripService.TripDetail> booked(@PathVariable long id, @PathVariable String targetId,
+                                                      @RequestParam boolean booked) {
+        return ApiResponse.ok(tripEditor.markBooked(authFacade.current(), id, targetId, booked));
+    }
+
     /** PUT /api/v1/trips/{id}/days/{day}/order：调整第 day 天（从 1 开始）的顺序，存新版本。 */
     @PutMapping("/{id}/days/{day}/order")
     public ApiResponse<TripService.TripDetail> reorder(@PathVariable long id, @PathVariable int day,
@@ -146,10 +155,11 @@ public class TripController {
         return ApiResponse.ok(tripEditor.requote(authFacade.current(), id, stayId));
     }
 
-    /** GET /api/v1/trips/{id}/pdf：导出 PDF（不传 version 时导出当前版本），作为附件下载。 */
+    /** GET /api/v1/trips/{id}/pdf?mt=票据：导出 PDF（不传 version 时导出当前版本），作为附件下载。新标签页带不了请求头，用下载票据。 */
     @GetMapping("/{id}/pdf")
-    public ResponseEntity<byte[]> pdf(@PathVariable long id, @RequestParam(required = false) Integer version) {
-        TripService.TripDetail detail = tripService.get(authFacade.current(), id, version);
+    public ResponseEntity<byte[]> pdf(@PathVariable long id, @RequestParam(required = false) Integer version,
+                                      @RequestParam(required = false) String mt) {
+        TripService.TripDetail detail = tripService.get(mediaAuth.user(mt), id, version);
         String name = (detail.trip().getTitle() == null ? "行程" : detail.trip().getTitle()).replaceAll("[\\\\/:*?\"<>|]", "_") + ".pdf";
         return ResponseEntity.ok().contentType(MediaType.APPLICATION_PDF)
                 .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()

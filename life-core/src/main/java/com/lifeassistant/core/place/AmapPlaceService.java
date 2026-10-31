@@ -37,6 +37,9 @@ public class AmapPlaceService {
     private static final long MIN_INTERVAL_MILLIS = 220;
     /** 静态地图一条折线最多放这么多个点，多了 URL 太长 */
     private static final int MAX_PATH_POINTS = 90;
+    /** 一张地图最多标的点数，超出的不画也不查路线 */
+    private static final int MAX_MARKERS = 10;
+    private static final int MAP_CACHE_SIZE = 80;
 
     /** 高德照片原图几百 KB，列表里用这个参数取 480×360 的缩略图 */
     private static final String THUMB = "?operate=merge&w=480&h=360&position=5";
@@ -47,6 +50,13 @@ public class AmapPlaceService {
         @Override
         protected boolean removeEldestEntry(Map.Entry<String, Cached> eldest) {
             return size() > CACHE_SIZE;
+        }
+    });
+    /** 地图图片单独缓存，按个数限制，免得几百 KB 的图片把上面的缓存撑大 */
+    private final Map<String, byte[]> mapCache = Collections.synchronizedMap(new LinkedHashMap<>(64, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<String, byte[]> eldest) {
+            return size() > MAP_CACHE_SIZE;
         }
     });
     private long lastCall;
@@ -101,6 +111,33 @@ public class AmapPlaceService {
         return search(name, city, null, 3).stream().filter(p -> similarName(name, p.name())).findFirst();
     }
 
+    /**
+     * 一个定位结果：高德坐标系（GCJ-02）下的经纬度，所在城市（去掉"市"字，直辖市用省名）、区县和详细地址。
+     */
+    public record Located(double lng, double lat, String city, String district, String address) {
+    }
+
+    /**
+     * 把浏览器给的 GPS 坐标（WGS-84）转成高德坐标，再查所在城市。浏览器坐标直接用在高德上会偏几百米。
+     * 不缓存，也不记录：位置用完就丢。
+     */
+    public Located locate(double gpsLng, double gpsLat) {
+        String[] xy = get("/v3/assistant/coordinate/convert", "locations", coord(gpsLng, gpsLat), "coordsys", "gps")
+                .path("locations").asText("").split(";")[0].split(",");
+        if (xy.length != 2) {
+            throw new BizException(ErrorCode.EXTERNAL_SERVICE, "坐标转换失败");
+        }
+        double lng = Double.parseDouble(xy[0]);
+        double lat = Double.parseDouble(xy[1]);
+        JsonNode regeo = get("/v3/geocode/regeo", "location", coord(lng, lat)).path("regeocode");
+        JsonNode c = regeo.path("addressComponent");
+        // 直辖市的 city 是空数组，用省名
+        String city = c.path("city").isTextual() && !c.path("city").asText().isBlank()
+                ? c.path("city").asText() : c.path("province").asText("");
+        return new Located(lng, lat, city.replaceFirst("市$", ""), text(c, "district"),
+                text(regeo, "formatted_address"));
+    }
+
     /** 城市（或地名）中心点的坐标，查不到返回空。 */
     public Optional<double[]> center(String place) {
         double[] point = cached("geo|" + place, () -> {
@@ -134,16 +171,18 @@ public class AmapPlaceService {
      * 静态地图 PNG：stops 按顺序标 1、2、3…，route 为 true 时用驾车路线把它们连起来；others 是灰色的小标记
      * （比如候选地点，标 A、B、C…）。宽高是显示尺寸，按两倍清晰度生成。
      */
-    public byte[] staticMap(List<double[]> stops, boolean route, List<double[]> others, int width, int height) {
+    public byte[] staticMap(List<double[]> allStops, boolean route, List<double[]> allOthers, int width, int height) {
+        List<double[]> stops = allStops.subList(0, Math.min(allStops.size(), MAX_MARKERS));
+        List<double[]> others = allOthers.subList(0, Math.min(allOthers.size(), MAX_MARKERS));
         int w = Math.max(100, Math.min(width, 1024));
         int h = Math.max(100, Math.min(height, 1024));
         List<String> params = new ArrayList<>(List.of("size", w + "*" + h, "scale", "2"));
         StringBuilder markers = new StringBuilder();
-        for (int i = 0; i < stops.size() && i < 10; i++) {
+        for (int i = 0; i < stops.size(); i++) {
             markers.append(markers.isEmpty() ? "" : "|").append("mid,0x2563EB,").append(i < 9 ? String.valueOf(i + 1) : "0")
                     .append(":").append(coord(stops.get(i)[0], stops.get(i)[1]));
         }
-        for (int i = 0; i < others.size() && i < 10; i++) {
+        for (int i = 0; i < others.size(); i++) {
             markers.append(markers.isEmpty() ? "" : "|").append("small,0xF97316,").append((char) ('A' + i))
                     .append(":").append(coord(others.get(i)[0], others.get(i)[1]));
         }
@@ -154,8 +193,14 @@ public class AmapPlaceService {
         if (route && stops.size() > 1) {
             List<double[]> line = new ArrayList<>();
             for (int i = 0; i + 1 < stops.size(); i++) {
-                line.addAll(driving(stops.get(i), stops.get(i + 1)).map(Route::path)
-                        .orElse(List.of(stops.get(i), stops.get(i + 1))));
+                List<double[]> segment = List.of(stops.get(i), stops.get(i + 1));
+                try {
+                    segment = driving(stops.get(i), stops.get(i + 1)).map(Route::path).orElse(segment);
+                } catch (RuntimeException e) {
+                    // 某一段路线查不到就画直线，不影响整张图
+                    log.warn("地图路线 {} 段查询失败：{}", i + 1, e.getMessage());
+                }
+                line.addAll(segment);
             }
             params.add("paths");
             params.add("6,0x2563EB,0.9,,:" + String.join(";", sample(line, MAX_PATH_POINTS).stream()
@@ -168,30 +213,42 @@ public class AmapPlaceService {
             double[] only = stops.isEmpty() ? others.get(0) : stops.get(0);
             params.addAll(List.of("location", coord(only[0], only[1]), "zoom", "14"));
         }
-        String cacheKey = "map|" + String.join("|", params);
-        return cached(cacheKey, () -> {
-            throttle();
-            try {
-                return restClient.get().uri(b -> {
-                    b.path("/v3/staticmap").queryParam("key", key);
-                    for (int i = 0; i + 1 < params.size(); i += 2) {
-                        b.queryParam(params.get(i), "{p" + i + "}");
-                    }
-                    Map<String, Object> vars = new LinkedHashMap<>();
-                    for (int i = 0; i + 1 < params.size(); i += 2) {
-                        vars.put("p" + i, params.get(i + 1));
-                    }
-                    return b.build(vars);
-                }).retrieve().body(byte[].class);
-            } catch (RestClientException e) {
-                log.warn("高德静态地图失败：{}", e.getMessage());
-                throw new BizException(ErrorCode.EXTERNAL_SERVICE, "地图暂时生成不了", e);
-            }
-        });
+        String cacheKey = String.join("|", params);
+        byte[] hit = mapCache.get(cacheKey);
+        if (hit != null) {
+            return hit;
+        }
+        byte[] png = loadMap(params);
+        mapCache.put(cacheKey, png);
+        return png;
+    }
+
+    /** 调高德静态地图接口取 PNG。 */
+    private byte[] loadMap(List<String> params) {
+        throttle();
+        try {
+            return restClient.get().uri(b -> {
+                b.path("/v3/staticmap").queryParam("key", key);
+                for (int i = 0; i + 1 < params.size(); i += 2) {
+                    b.queryParam(params.get(i), "{p" + i + "}");
+                }
+                Map<String, Object> vars = new LinkedHashMap<>();
+                for (int i = 0; i + 1 < params.size(); i += 2) {
+                    vars.put("p" + i, params.get(i + 1));
+                }
+                return b.build(vars);
+            }).retrieve().body(byte[].class);
+        } catch (RestClientException e) {
+            log.warn("高德静态地图失败：{}", e.getMessage());
+            throw new BizException(ErrorCode.EXTERNAL_SERVICE, "地图暂时生成不了", e);
+        }
     }
 
     /** 两个地点名是不是同一处：去掉括号里的分店名和标点后，一个包含另一个，或者共有一半以上的两字词。 */
     public static boolean similarName(String wanted, String found) {
+        if (wanted == null || found == null) {
+            return false;
+        }
         String a = core(wanted);
         String b = core(found);
         if (a.length() < 2 || b.length() < 2) {

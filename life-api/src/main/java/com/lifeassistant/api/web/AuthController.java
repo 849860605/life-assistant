@@ -3,6 +3,7 @@ package com.lifeassistant.api.web;
 import cn.dev33.satoken.stp.StpUtil;
 import cn.dev33.satoken.stp.parameter.SaLoginParameter;
 import com.lifeassistant.common.api.ApiResponse;
+import com.lifeassistant.core.auth.MediaTicket;
 import com.lifeassistant.core.user.User;
 import com.lifeassistant.core.user.UserService;
 import jakarta.validation.Valid;
@@ -23,6 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
     private final UserService userService;
+    private final MediaTicket mediaTicket;
 
     /** 登录请求体；device 可空，默认 WEB。 */
     public record LoginRequest(@NotBlank String username, @NotBlank String password, String device) {
@@ -60,5 +62,11 @@ public class AuthController {
     @GetMapping("/me")
     public ApiResponse<UserView> me() {
         return ApiResponse.ok(UserView.of(userService.get(StpUtil.getLoginIdAsLong())));
+    }
+
+    /** GET /api/v1/auth/media-ticket：地图图片、PDF 下载链接用的短期票据（12 小时），代替把登录 token 放进链接。 */
+    @GetMapping("/media-ticket")
+    public ApiResponse<MediaTicket.Issued> mediaTicket() {
+        return ApiResponse.ok(mediaTicket.issue(StpUtil.getLoginIdAsLong()));
     }
 }

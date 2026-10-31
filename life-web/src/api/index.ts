@@ -40,6 +40,8 @@ export const api = {
     request<TripDetail>("POST", `/api/v1/trips/${id}/items/${itemId}/remove`, { reason: reason || null }),
   lockItem: (id: number, itemId: string, locked: boolean) =>
     request<TripDetail>("POST", `/api/v1/trips/${id}/items/${itemId}/lock?locked=${locked}`),
+  markBooked: (id: number, targetId: string, booked: boolean) =>
+    request<TripDetail>("POST", `/api/v1/trips/${id}/booked/${targetId}?booked=${booked}`),
   reorderDay: (id: number, day: number, ids: string[]) =>
     request<TripDetail>("PUT", `/api/v1/trips/${id}/days/${day}/order`, { ids }),
   switchStay: (id: number, stayId: string, name: string) =>
@@ -49,6 +51,9 @@ export const api = {
   addItem: (id: number, day: number, place: PlacePick) =>
     request<TripDetail>("POST", `/api/v1/trips/${id}/days/${day}/items`, place),
 
+  resolveLocation: (lng: number, lat: number) =>
+    request<{ lng: number; lat: number; city: string; district: string | null; address: string | null }>(
+      "GET", "/api/v1/location/resolve" + qs({ lng, lat })),
   places: (p: { kind?: "spot" | "food" | "hotel"; city?: string; keyword?: string; lng?: number; lat?: number; radius?: number; size?: number }) =>
     request<Place[]>("GET", "/api/v1/places" + qs(p)),
   searchFlights: (origin: string, destination: string, date: string) =>

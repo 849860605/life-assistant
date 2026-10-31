@@ -62,6 +62,66 @@ class ItineraryTest {
                 .contains("约 ¥300/晚（携程，以预订页为准）");
     }
 
+    @Test
+    void addedMealGoesIntoAFreeGapInsteadOfOverlapping() {
+        List<Itinerary.Item> day = List.of(
+                new Itinerary.Item("d1-1", "09:00", "11:30", "SPOT", "A", null, null, null, null, null),
+                new Itinerary.Item("d1-2", "12:30", "13:30", "SPOT", "B", null, null, null, null, null));
+
+        // 11:30–12:30 只有一小时空档，午饭放进去；不和 12:30 的安排重叠
+        assertThat(TripEditor.slot(day, "FOOD")).containsExactly("11:30", "12:30");
+
+        List<Itinerary.Item> full = List.of(
+                new Itinerary.Item("d1-1", "09:00", "15:00", "SPOT", "A", null, null, null, null, null));
+        // 中午没空，放晚饭
+        assertThat(TripEditor.slot(full, "FOOD")).containsExactly("17:00", "18:00");
+    }
+
+    @Test
+    void roundTripsThroughJsonWithAllFields() throws Exception {
+        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        Itinerary it = TripTools.toItinerary(List.of(new TripTools.PlanDay("2026-03-10", "主题",
+                List.of(item("09:00", "10:00", "SPOT", "A")))), "注意").withStays(List.of(stay("s1", "酒店", "2026-03-10", "2026-03-11")));
+
+        Itinerary back = mapper.readValue(mapper.writeValueAsString(it), Itinerary.class);
+
+        assertThat(back).isEqualTo(it);
+    }
+
+    @Test
+    void onlyAmapHttpsPhotosAndKnownTypesAreKept() {
+        assertThat(TripEditor.safePhoto("https://store.is.autonavi.com/showpic/abc")).isNotNull();
+        assertThat(TripEditor.safePhoto("http://store.is.autonavi.com/showpic/abc")).isNull();
+        assertThat(TripEditor.safePhoto("https://169.254.169.254/latest/meta-data")).isNull();
+        assertThat(TripEditor.safePhoto("https://evil.com/x.autonavi.com")).isNull();
+        assertThat(TripEditor.safePhoto("https://autonavi.com.evil.com/a")).isNull();
+
+        TripEditor.PlacePick p = TripEditor.clean(new TripEditor.PlacePick(" 店 ", null, null, null, null,
+                "http://127.0.0.1/a.png", null, null, "<img src=x>", null));
+        assertThat(p.name()).isEqualTo("店");
+        assertThat(p.photo()).isNull();
+        assertThat(p.type()).isNull();
+        assertThat(TripTools.webUrl("javascript:alert(1)")).isNull();
+        assertThat(TripTools.webUrl("https://www.dianping.com/shop/1")).isEqualTo("https://www.dianping.com/shop/1");
+    }
+
+    @Test
+    void bookedMarksFollowNamesWhenTheModelRenumbers() {
+        Itinerary before = TripTools.toItinerary(List.of(new TripTools.PlanDay("2026-03-10", null, List.of(
+                item("09:00", "10:00", "SPOT", "A"), item("12:00", "13:00", "FOOD", "饭店")))), null)
+                .withStays(List.of(stay("s1", "酒店", "2026-03-10", "2026-03-11"))).withBooked(List.of("d1-2", "s1"));
+        // 新版本前面插了一项，饭店的 id 从 d1-2 变成 d1-3
+        Itinerary after = TripTools.toItinerary(List.of(new TripTools.PlanDay("2026-03-10", null, List.of(
+                item("08:00", "09:00", "SPOT", "B"), item("09:00", "10:00", "SPOT", "A"),
+                item("12:00", "13:00", "FOOD", "饭店")))), null)
+                .withStays(List.of(stay("s1", "酒店", "2026-03-10", "2026-03-11")));
+
+        Itinerary carried = TripTools.carryBooked(after, before);
+
+        assertThat(carried.booked()).containsExactlyInAnyOrder("d1-3", "s1");
+        assertThat(carried.toMarkdown()).contains("**饭店** · 已预约").contains("以预订页为准） · 已预约");
+    }
+
     private static Itinerary.Stay stay(String id, String name, String in, String out) {
         return new Itinerary.Stay(id, name, in, out, null, 300, "携程", "https://x", null, null, null, null, null,
                 null, null, null);
