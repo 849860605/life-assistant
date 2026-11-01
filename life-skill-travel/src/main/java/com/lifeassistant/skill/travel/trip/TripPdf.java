@@ -237,8 +237,7 @@ public class TripPdf {
                         : d.legs().stream().filter(l -> l.from().equals(i.id())).findFirst().orElse(null);
                 if (leg != null) {
                     h.append("<tr class=\"leg\"><td></td><td></td><td>↓ ")
-                            .append("WALK".equals(leg.mode()) ? "步行 " + leg.minutes() + " 分钟"
-                                    : "打车 " + leg.minutes() + " 分钟 · " + leg.km() + " 公里")
+                            .append(esc(legText(leg)))
                             .append("</td></tr>");
                 }
             }
@@ -403,6 +402,19 @@ public class TripPdf {
 
     private static String nz(String s) {
         return s == null ? "" : s;
+    }
+
+    /** 一段路的说明：步行 x 分钟 / 地铁8号线 → 15号线 x 分钟 · ¥5 / 打车 x 分钟 · x 公里。 */
+    private static String legText(Itinerary.Leg leg) {
+        if (Itinerary.WALK.equals(leg.mode())) {
+            return "步行 " + leg.minutes() + " 分钟";
+        }
+        if (Itinerary.TRANSIT.equals(leg.mode())) {
+            Itinerary.Transit t = leg.transit();
+            return String.join(" → ", t.lines()) + " " + leg.minutes() + " 分钟"
+                    + (t.fee() == null ? "" : " · ¥" + (t.fee() % 1 == 0 ? String.valueOf(t.fee().intValue()) : t.fee()) + "/人");
+        }
+        return "打车 " + leg.minutes() + " 分钟 · " + leg.km() + " 公里";
     }
 
     private Itinerary parse(String json) {

@@ -32,8 +32,8 @@ spring:
   ai:
     mcp:
       client:
-        # 高德官方 MCP：填好 AMAP_KEY 后把 AMAP_MCP_ENABLED 设为 true
-        enabled: ${AMAP_MCP_ENABLED:false}
+        # 高德 MCP 改由 life.mcp.amap 用 Streamable HTTP 连（无会话，服务器休眠、断网后不会卡在失效的会话上），这里关掉
+        enabled: false
         name: life-assistant
         type: SYNC
         request-timeout: 30s
@@ -154,6 +154,13 @@ life:
       command: ${FLYAI_COMMAND:flyai}
   # 远程 MCP 服务，没填 Key 的不会去连。RollingGo：道旅官方酒店数据，实时房型和价格，个人免费
   mcp:
+    # 高德官方 MCP（路线、距离、周边）：Key 放在地址参数里；AMAP_MCP_ENABLED 不是 true 时不连
+    amap:
+      url: https://mcp.amap.com
+      endpoint: /mcp?key=${AMAP_KEY:}
+      api-key: ${AMAP_MCP_ENABLED:false}
+      auth-header: X-Life-Unused
+      auth-prefix: ""
     rollinggo:
       url: https://mcp.rollinggo.cn
       endpoint: /mcp

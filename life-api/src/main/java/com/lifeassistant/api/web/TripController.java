@@ -142,6 +142,19 @@ public class TripController {
         return ApiResponse.ok(tripEditor.setDone(authFacade.current(), id, itemId, done));
     }
 
+    /** POST /api/v1/trips/{id}/transport?mode=TRANSIT|DRIVE：整个行程默认坐地铁公交还是打车。只改当前版本。 */
+    @PostMapping("/{id}/transport")
+    public ApiResponse<TripService.TripDetail> transport(@PathVariable long id, @RequestParam String mode) {
+        return ApiResponse.ok(tripEditor.setTransport(authFacade.current(), id, mode));
+    }
+
+    /** POST /api/v1/trips/{id}/legs/{from}/{to}?mode=TRANSIT|DRIVE：单独改一段路怎么走。只改当前版本。 */
+    @PostMapping("/{id}/legs/{from}/{to}")
+    public ApiResponse<TripService.TripDetail> legMode(@PathVariable long id, @PathVariable String from,
+                                                       @PathVariable String to, @RequestParam String mode) {
+        return ApiResponse.ok(tripEditor.setLegMode(authFacade.current(), id, from, to, mode));
+    }
+
     /**
      * POST /api/v1/trips/{id}/booking/{targetId}?status=PLANNED|OPENED|CONFIRMED：设置预订状态。
      * OPENED 只表示点过预订链接，不算订好；用户自己确认订好才是 CONFIRMED。只改当前版本。

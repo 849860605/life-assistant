@@ -64,8 +64,7 @@
               </view>
               <image v-if="it.photo && !broken[it.id]" class="it-img" :src="it.photo" mode="aspectFill" @error="broken[it.id] = true" />
               <view v-if="legFrom(day, it.id)" class="it-leg">
-                <Icon :name="legFrom(day, it.id)!.mode === 'WALK' ? 'users' : 'car'" :size="12" color="var(--muted)" />
-                <text>{{ legText(legFrom(day, it.id)) }}<text v-if="legFrom(day, it.id)!.taxi"> · 约 ¥{{ legFrom(day, it.id)!.taxi }}</text></text>
+                <LegRow class="it-leg-row" :leg="legFrom(day, it.id)!" :day="day" :stays="detail?.version.itinerary?.stays" :editable="true" :busy="modeBusy" @mode="setLegMode(legFrom(day, it.id)!, $event)" />
                 <text class="nav-link" @click.stop="navigate(it, legFrom(day, it.id)!)">导航</text>
               </view>
             </view>
@@ -78,9 +77,9 @@
             <view class="stats">
               <view class="stat"><text class="stat-k">路上</text><text class="stat-v">{{ travel.minutes ? duration(travel.minutes) : "—" }}</text></view>
               <view class="stat"><text class="stat-k">里程</text><text class="stat-v">{{ travel.km }} 公里</text></view>
-              <view class="stat"><text class="stat-k">打车费</text><text class="stat-v">{{ travel.taxi != null ? "约 ¥" + travel.taxi : "—" }}</text></view>
+              <view class="stat"><text class="stat-k">交通费</text><text class="stat-v">{{ fareText }}</text></view>
             </view>
-            <view class="muted small">打车费是高德对驾车段的估算；1 公里内按步行算。</view>
+            <view class="muted small">地铁公交是高德查的线路和每人票价，打车费是高德的估算；1 公里内按步行算。</view>
           </view>
 
           <view class="panel">
@@ -145,7 +144,8 @@ import { showError } from "../../api/http";
 import type { DayPreview, ItineraryItem, ItineraryLeg, OptimizeGoal, TripDetail } from "../../api/types";
 import Icon from "../../components/Icon.vue";
 import { openUrl, shortDate } from "../../utils/format";
-import { compareTotals, dayTravel, duration, legFrom, legText, type MapLine, type MapStop } from "../../utils/place";
+import { compareTotals, dayTravel, duration, legFrom, needsGeo, type MapLine, type MapStop } from "../../utils/place";
+import LegRow from "../../components/LegRow.vue";
 import { useWide } from "../../utils/screen";
 
 /**
@@ -182,6 +182,15 @@ const days = computed(() => detail.value?.version.itinerary?.days || []);
 const day = computed(() => days.value[dayIndex.value]);
 const booked = computed(() => new Set(detail.value?.version.itinerary?.booked || []));
 const travel = computed(() => dayTravel(day.value));
+/** 当天交通费：地铁公交每人票价加打车费 */
+const fareText = computed(() => {
+  const parts = [];
+  if (travel.value.fare != null) parts.push(`¥${travel.value.fare}/人`);
+  if (travel.value.taxi != null) parts.push(`打车 ¥${travel.value.taxi}`);
+  return parts.length ? parts.join(" + ") : "—";
+});
+/** 正在切换某段路的出行方式，避免连点 */
+const modeBusy = ref(false);
 const mapW = computed(() => (wide.value ? 640 : 600));
 const mapH = computed(() => (wide.value ? 560 : 420));
 
@@ -214,9 +223,8 @@ onLoad(async (query) => {
     if (!tripId.value) return;
     detail.value = await api.trip(tripId.value);
     const it = detail.value.version.itinerary;
-    // 没补过坐标，或早先算的驾车路程没有打车费：补一次
-    const noTaxi = it?.days.some((d) => d.legs?.some((l) => l.mode === "DRIVE" && l.taxi == null));
-    if (it && (!it.geo || noTaxi)) detail.value = await api.tripGeo(tripId.value);
+    // 没补过坐标，或早先算的路程缺打车费、地铁公交：补一次
+    if (needsGeo(it)) detail.value = await api.tripGeo(tripId.value);
     dayIndex.value = Math.min(dayIndex.value, Math.max(days.value.length - 1, 0));
   } catch (e) {
     showError(e);
@@ -312,12 +320,25 @@ async function applyOptimize() {
   }
 }
 
+/** 单独改一段路坐地铁公交还是打车（只改当前版本，不算新版本） */
+async function setLegMode(leg: ItineraryLeg, mode: "TRANSIT" | "DRIVE") {
+  modeBusy.value = true;
+  try {
+    detail.value = await api.setLegMode(tripId.value, leg.from, leg.to, mode);
+  } catch (e) {
+    showError(e);
+  } finally {
+    modeBusy.value = false;
+  }
+}
+
 /** 用高德导航到下一站 */
 function navigate(from: ItineraryItem, leg: ItineraryLeg) {
   const to = day.value?.items.find((x) => x.id === leg.to);
   if (!to || !hasGeo(from) || !hasGeo(to)) return;
   const p = (x: ItineraryItem) => `${x.lng},${x.lat},${encodeURIComponent(x.name)}`;
-  openUrl(`https://uri.amap.com/navigation?from=${p(from)}&to=${p(to)}&mode=${leg.mode === "WALK" ? "walk" : "car"}&coordinate=gaode&callnative=1`);
+  const mode = leg.mode === "WALK" ? "walk" : leg.mode === "TRANSIT" ? "bus" : "car";
+  openUrl(`https://uri.amap.com/navigation?from=${p(from)}&to=${p(to)}&mode=${mode}&coordinate=gaode&callnative=1`);
 }
 
 function toDetail() {
@@ -389,7 +410,8 @@ function toChat() {
 .badge { font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--accent-soft); color: var(--accent); }
 .badge.ok { background: var(--ok-soft); color: var(--ok); }
 .it-img { width: 72px; height: 54px; border-radius: 8px; }
-.it-leg { grid-column: 2 / 4; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); background: var(--surface-2); border-radius: 8px; padding: 5px 8px; }
+.it-leg { grid-column: 2 / 4; display: flex; align-items: flex-start; gap: 6px; font-size: 12px; color: var(--muted); background: var(--surface-2); border-radius: 8px; padding: 5px 8px; }
+.it-leg-row { flex: 1; min-width: 0; }
 .nav-link { color: var(--accent); margin-left: auto; cursor: pointer; white-space: nowrap; }
 
 .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }

@@ -18,55 +18,93 @@ import java.util.Set;
  * bookingStatus 记"已跳转平台"（值 OPENED）：用户点过预订链接，但还没确认订好，不能当成预订成功；
  * 已确认的只看 booked，两边不会对不上。
  * done 是用户标记"去过了 / 吃过了"的安排 id：出行中或回来后在页面上勾，不算新版本。
+ * transport 是整个行程默认怎么走：TRANSIT 地铁公交（空也按它）或 DRIVE 打车/自驾；
+ * legModes 是用户单独改过的路段，键是"起点 id>终点 id"，值是 TRANSIT 或 DRIVE。近的路段始终步行，不受它们影响。
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record Itinerary(List<Day> days, String tips, Boolean geo, List<Stay> stays, List<String> booked,
-                        java.util.Map<String, String> bookingStatus, List<String> done) {
+                        java.util.Map<String, String> bookingStatus, List<String> done, String transport,
+                        java.util.Map<String, String> legModes) {
 
     /** 预订状态：计划预订、已跳转平台、已确认订单 */
     public static final String PLANNED = "PLANNED";
     public static final String OPENED = "OPENED";
     public static final String CONFIRMED = "CONFIRMED";
 
+    /** 路段方式：步行、地铁公交、打车/自驾 */
+    public static final String WALK = "WALK";
+    public static final String TRANSIT = "TRANSIT";
+    public static final String DRIVE = "DRIVE";
+
+    public Itinerary(List<Day> days, String tips, Boolean geo, List<Stay> stays, List<String> booked,
+                     java.util.Map<String, String> bookingStatus, List<String> done) {
+        this(days, tips, geo, stays, booked, bookingStatus, done, null, null);
+    }
+
     public Itinerary(List<Day> days, String tips, Boolean geo, List<Stay> stays, List<String> booked,
                      java.util.Map<String, String> bookingStatus) {
-        this(days, tips, geo, stays, booked, bookingStatus, null);
+        this(days, tips, geo, stays, booked, bookingStatus, null, null, null);
     }
 
     public Itinerary(List<Day> days, String tips, Boolean geo, List<Stay> stays, List<String> booked) {
-        this(days, tips, geo, stays, booked, null, null);
+        this(days, tips, geo, stays, booked, null, null, null, null);
     }
 
     public Itinerary(List<Day> days, String tips) {
-        this(days, tips, null, null, null, null, null);
+        this(days, tips, null, null, null, null, null, null, null);
     }
 
     /** 换掉逐日安排，其余不变。 */
     public Itinerary withDays(List<Day> newDays) {
-        return new Itinerary(newDays, tips, geo, stays, booked, bookingStatus, done);
+        return new Itinerary(newDays, tips, geo, stays, booked, bookingStatus, done, transport, legModes);
     }
 
     /** 换掉住宿，其余不变。 */
     public Itinerary withStays(List<Stay> newStays) {
-        return new Itinerary(days, tips, geo, newStays, booked, bookingStatus, done);
+        return new Itinerary(days, tips, geo, newStays, booked, bookingStatus, done, transport, legModes);
     }
 
     /** 换掉已预约的 id 列表，其余不变；空列表存成 null。 */
     public Itinerary withBooked(List<String> newBooked) {
         return new Itinerary(days, tips, geo, stays, newBooked == null || newBooked.isEmpty() ? null : List.copyOf(newBooked),
-                bookingStatus, done);
+                bookingStatus, done, transport, legModes);
     }
 
     /** 换掉"已跳转平台"的记录，其余不变；空的存成 null。 */
     public Itinerary withBookingStatus(java.util.Map<String, String> status) {
         return new Itinerary(days, tips, geo, stays, booked,
-                status == null || status.isEmpty() ? null : java.util.Map.copyOf(status), done);
+                status == null || status.isEmpty() ? null : java.util.Map.copyOf(status), done, transport, legModes);
     }
 
     /** 换掉"去过了 / 吃过了"的 id 列表，其余不变；空列表存成 null。 */
     public Itinerary withDone(List<String> newDone) {
         return new Itinerary(days, tips, geo, stays, booked, bookingStatus,
-                newDone == null || newDone.isEmpty() ? null : List.copyOf(newDone));
+                newDone == null || newDone.isEmpty() ? null : List.copyOf(newDone), transport, legModes);
+    }
+
+    /** 换掉默认出行方式和单独改过的路段，并按新的选择重排每段路；空的存成 null。 */
+    public Itinerary withTransport(String newTransport, java.util.Map<String, String> newLegModes) {
+        return new Itinerary(days, tips, geo, stays, booked, bookingStatus, done, newTransport,
+                newLegModes == null || newLegModes.isEmpty() ? null : java.util.Map.copyOf(newLegModes)).resolveLegs();
+    }
+
+    /** 这段路该用哪种方式：单独改过的优先，否则用行程默认（默认地铁公交）。 */
+    public String modeFor(String from, String to) {
+        String own = legModes == null ? null : legModes.get(from + ">" + to);
+        if (own != null) {
+            return own;
+        }
+        return DRIVE.equals(transport) ? DRIVE : TRANSIT;
+    }
+
+    /** 按 modeFor 给每段路选好方式（路程分钟、公里跟着换）。保存前都过一遍，算路程的地方不用管偏好。 */
+    public Itinerary resolveLegs() {
+        if (days == null) {
+            return this;
+        }
+        List<Day> resolved = days.stream().map(d -> d.legs() == null ? d : new Day(d.date(), d.theme(), d.items(),
+                d.legs().stream().map(l -> l.choose(modeFor(l.from(), l.to()))).toList())).toList();
+        return new Itinerary(resolved, tips, geo, stays, booked, bookingStatus, done, transport, legModes);
     }
 
     /** 这一项是不是已经去过 / 吃过。 */
@@ -76,7 +114,7 @@ public record Itinerary(List<Day> days, String tips, Boolean geo, List<Stay> sta
 
     /** 标记已补过地理信息。 */
     public Itinerary located(List<Day> newDays, List<Stay> newStays) {
-        return new Itinerary(newDays, tips, true, newStays, booked, bookingStatus, done);
+        return new Itinerary(newDays, tips, true, newStays, booked, bookingStatus, done, transport, legModes);
     }
 
     /** 某项的预订状态：在 booked 里是已确认，点过预订链接是已跳转平台，否则是计划预订。 */
@@ -165,13 +203,49 @@ public record Itinerary(List<Day> days, String tips, Boolean geo, List<Stay> sta
         }
     }
 
-    /** 相邻两项之间怎么走：mode 是 WALK 步行或 DRIVE 打车/自驾，minutes 分钟，km 公里，taxi 是高德估的打车费（元）。 */
+    /**
+     * 相邻两项之间怎么走：mode 是 WALK 步行、TRANSIT 地铁公交或 DRIVE 打车/自驾，minutes、km 是所选方式的分钟和公里。
+     * 远的路段两种方式都查：driveMinutes、driveKm、taxi 是高德的驾车时间、里程和打车费（元），transit 是公交方案
+     * （minutes 为 0 表示查过、没有公交方案）。km 一律用驾车里程，地铁公交也一样，方便按天比较。
+     */
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record Leg(String from, String to, String mode, int minutes, double km, Integer taxi) {
+    public record Leg(String from, String to, String mode, int minutes, double km, Integer taxi, Integer driveMinutes,
+                      Double driveKm, Transit transit) {
+
+        public Leg(String from, String to, String mode, int minutes, double km, Integer taxi) {
+            this(from, to, mode, minutes, km, taxi, null, null, null);
+        }
 
         public Leg(String from, String to, String mode, int minutes, double km) {
             this(from, to, mode, minutes, km, null);
         }
+
+        /** 有没有可用的公交方案。 */
+        public boolean hasTransit() {
+            return transit != null && transit.minutes() > 0;
+        }
+
+        /** 换成想要的方式；步行段不变，想要的方式查不到时用另一种。早先只存了驾车的路段，驾车数据就在 minutes、km 里。 */
+        public Leg choose(String wanted) {
+            if (WALK.equals(mode)) {
+                return this;
+            }
+            int dm = driveMinutes != null ? driveMinutes : DRIVE.equals(mode) ? minutes : 0;
+            double dk = driveKm != null ? driveKm : km;
+            boolean canDrive = driveMinutes != null || DRIVE.equals(mode);
+            boolean useTransit = hasTransit() && (TRANSIT.equals(wanted) || !canDrive);
+            if (!useTransit && !canDrive) {
+                return this;
+            }
+            return useTransit
+                    ? new Leg(from, to, TRANSIT, transit.minutes(), dk, taxi, canDrive ? dm : null, canDrive ? dk : null, transit)
+                    : new Leg(from, to, DRIVE, Math.max(1, dm), dk, taxi, dm, dk, transit);
+        }
+    }
+
+    /** 一段公交方案：分钟（含步行、等车）、票价（元/人，可能为空）、步行公里、依次乘坐的线路（如"地铁8号线"）。 */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record Transit(int minutes, Double fee, Double walkKm, List<String> lines) {
     }
 
     /**

@@ -22,7 +22,7 @@ import java.util.Set;
 import java.util.function.Supplier;
 
 /**
- * 高德 Web 服务：搜地点（带照片、评分、人均）、驾车路线、静态地图。页面上的景点、美食、行程地图都从这里取。
+ * 高德 Web 服务：搜地点（带照片、评分、人均）、驾车和公交路线、静态地图。页面上的景点、美食、行程地图都从这里取。
  * 结果在内存里缓存一天，调用之间留间隔，免得超过个人 Key 的每秒次数。
  */
 @Slf4j
@@ -174,6 +174,60 @@ public class AmapPlaceService {
                     taxi == null ? null : (int) Math.round(taxi), points);
         });
         return Optional.ofNullable(route);
+    }
+
+    /**
+     * 一段公交路线（地铁优先）：分钟（含步行和等车）、票价（元，每人，可能为空）、步行公里、依次乘坐的线路（如"地铁8号线"）。
+     */
+    public record Transit(int minutes, Double fee, double walkKm, List<String> lines) {
+    }
+
+    /** 城市的 citycode（如北京 010），查公交路线要用；查不到返回空。 */
+    public Optional<String> cityCode(String city) {
+        if (!StringUtils.hasText(city)) {
+            return Optional.empty();
+        }
+        String code = cached("citycode|" + city, () -> text(get("/v3/geocode/geo", "address", city)
+                .path("geocodes").path(0), "citycode"));
+        return Optional.ofNullable(code);
+    }
+
+    /** 某个坐标所在城市的 citycode，行程目的地写得不规范（"新疆巴音郭楞（库尔勒·轮台）"）时用；查不到返回空。 */
+    public Optional<String> cityCodeAt(double lng, double lat) {
+        String location = coord(lng, lat);
+        String code = cached("citycode-at|" + location, () -> text(get("/v3/geocode/regeo", "location", location)
+                .path("regeocode").path("addressComponent"), "citycode"));
+        return Optional.ofNullable(code);
+    }
+
+    /** 两点间公交路线，按"地铁优先"取第一条；cityCode 是所在城市。没有公交方案（太近、跨城、没数据）返回空。 */
+    public Optional<Transit> transit(double[] from, double[] to, String cityCode) {
+        String origin = coord(from[0], from[1]);
+        String destination = coord(to[0], to[1]);
+        Transit transit = cached("transit|" + origin + "|" + destination + "|" + cityCode, () -> {
+            JsonNode t = get("/v5/direction/transit/integrated", "origin", origin, "destination", destination,
+                    "city1", cityCode, "city2", cityCode, "strategy", "7", "show_fields", "cost")
+                    .path("route").path("transits").path(0);
+            if (t.isMissingNode()) {
+                return null;
+            }
+            List<String> lines = new ArrayList<>();
+            for (JsonNode segment : t.path("segments")) {
+                String name = text(segment.path("bus").path("buslines").path(0), "name");
+                if (name != null) {
+                    // "地铁8号线(瀛海--朱辛庄)" 只留线路名
+                    lines.add(name.replaceFirst("\\(.*$", ""));
+                }
+            }
+            if (lines.isEmpty()) {
+                return null;
+            }
+            Double duration = number(t.path("cost"), "duration");
+            Double walk = number(t, "walking_distance");
+            return new Transit((int) Math.round((duration == null ? 0 : duration) / 60), number(t.path("cost"), "transit_fee"),
+                    Math.round((walk == null ? 0 : walk) / 100) / 10.0, lines);
+        });
+        return Optional.ofNullable(transit);
     }
 
     /** 地图上额外画的一条线（比如其他几天的路线）：颜色是 6 位十六进制，点按顺序连。 */

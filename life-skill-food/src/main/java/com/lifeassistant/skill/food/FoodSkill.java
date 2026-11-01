@@ -1,14 +1,12 @@
 package com.lifeassistant.skill.food;
 
 import com.lifeassistant.core.food.FoodTools;
+import com.lifeassistant.core.mcp.McpServerRegistry;
 import com.lifeassistant.core.schedule.ScheduleTools;
 import com.lifeassistant.core.skill.LifeSkill;
 import org.springframework.ai.tool.ToolCallback;
-import org.springframework.ai.tool.ToolCallbackProvider;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
-import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -19,13 +17,12 @@ public class FoodSkill implements LifeSkill {
 
     private final FoodTools foodTools;
     private final ScheduleTools scheduleTools;
-    private final ObjectProvider<ToolCallbackProvider> mcpToolProviders;
+    private final McpServerRegistry mcpServers;
 
-    public FoodSkill(FoodTools foodTools, ScheduleTools scheduleTools,
-                     ObjectProvider<ToolCallbackProvider> mcpToolProviders) {
+    public FoodSkill(FoodTools foodTools, ScheduleTools scheduleTools, McpServerRegistry mcpServers) {
         this.foodTools = foodTools;
         this.scheduleTools = scheduleTools;
-        this.mcpToolProviders = mcpToolProviders;
+        this.mcpServers = mcpServers;
     }
 
     /** 技能 id，路由结果用它定位技能。 */
@@ -81,6 +78,6 @@ public class FoodSkill implements LifeSkill {
     /** 高德地图 MCP（路线和距离），没配置时为空。 */
     @Override
     public List<ToolCallback> toolCallbacks() {
-        return mcpToolProviders.orderedStream().flatMap(provider -> Arrays.stream(provider.getToolCallbacks())).toList();
+        return mcpServers.tools("amap");
     }
 }

@@ -4,7 +4,7 @@
     <view v-if="js" :id="domId" class="rmap-js" />
     <template v-else>
     <image v-if="url" class="rmap-img" :src="url" mode="scaleToFill" @load="loading = false" @error="loading = false" />
-    <view v-if="!url || loading" class="rmap-state"><text>{{ stops.length ? "地图加载中…" : "这一天的地点还没有坐标" }}</text></view>
+    <view v-if="!url || loading" class="rmap-state"><text>{{ stops.length || pois?.length ? "地图加载中…" : emptyText }}</text></view>
     <view
       v-for="m in markers"
       :key="m.id"
@@ -48,7 +48,8 @@ import { fitView, mapUrl, projectPct, type MapLine, type MapStop } from "../util
  * 所以能点。点标记发 pick；父组件调 focus(id) 让地图以那一项为中心放大。放大、缩小、看全部都会换一张图。
  * pois 是另外叠加的候选地点（如餐厅），用字母标、点了发 poi，不连进路线。
  */
-const props = withDefaults(defineProps<{ stops: MapStop[]; color?: string; lines?: MapLine[]; activeId?: string | null; pois?: (MapStop & { label: string })[]; activePoi?: string | null; route?: boolean; w?: number; h?: number }>(), {
+const props = withDefaults(defineProps<{ stops: MapStop[]; color?: string; lines?: MapLine[]; activeId?: string | null; pois?: (MapStop & { label: string })[]; activePoi?: string | null; route?: boolean; w?: number; h?: number; emptyText?: string }>(), {
+  emptyText: "这一天的地点还没有坐标",
   route: true,
   color: "2563EB",
   lines: () => [],

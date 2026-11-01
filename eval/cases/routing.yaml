@@ -211,3 +211,72 @@ cases:
     input: 那后天呢
     lastSkill: general
     expectSkill: general
+
+  # ---------- 真实使用里出现过的说法（2026-11 走查补充） ----------
+  - id: real-recommend-trip
+    input: 想去新疆看胡杨林大概5天时间你来推荐
+    expectSkill: travel
+  - id: real-far-flight
+    input: 明年国庆深圳飞西安的机票有吗
+    expectSkill: travel
+  - id: real-regen-day-button
+    input: 帮我重新安排行程「西安4天3晚省钱经典（回民街+地铁）」（tripId=13）的第1天，保留我标了保留的地方
+    lastSkill: general
+    expectSkill: travel
+  - id: real-change-needs-button
+    input: 我想修改行程「西安4天3晚省钱经典（回民街+地铁）」（tripId=13）的需求
+    lastSkill: food
+    expectSkill: travel
+  - id: real-nearest-follow
+    input: 离得最近的呢?
+    lastSkill: travel
+    expectSkill: travel
+  - id: real-hotel-name-follow
+    input: 丽恩酒店呢
+    lastSkill: travel
+    expectSkill: travel
+  - id: real-location-detail
+    input: 我是到西工大友谊校区的管理学院的
+    lastSkill: travel
+    expectSkill: travel
+  - id: real-tweak-plan
+    input: 中午不用回去休息,就来回就可以
+    lastSkill: travel
+    expectSkill: travel
+  - id: real-campus-hotel
+    input: 12月31日要去西工大友谊校区上课，推荐下酒店，安静卫生，预算300以内一晚，1月4号回来
+    expectSkill: travel
+  - id: real-food-near-spot-in-trip
+    input: 钟楼附近有什么好吃的
+    lastSkill: travel
+    expectSkill: travel
+  - id: real-ticket-price
+    input: 兵马俑门票多少钱，要提前预约吗
+    expectSkill: travel
+  - id: real-metro-route
+    input: 从酒店到大雁塔坐地铁怎么走
+    lastSkill: general
+    expectSkill: travel
+  - id: real-best-season
+    input: 胡杨林几月份去最好
+    expectSkill: travel
+  - id: real-trip-lighter
+    input: 刚才那个行程第二天太赶了，能不能轻松点
+    lastSkill: general
+    expectSkill: travel
+  - id: real-pack-reminder
+    input: 提醒我12月30号晚上收拾行李
+    lastSkill: travel
+    expectSkill: schedule
+  - id: real-allergy
+    input: 我对海鲜过敏，以后推荐吃的别带海鲜
+    lastSkill: food
+    expectSkill: general
+  - id: real-dinner
+    input: 今晚吃什么好
+    lastSkill: travel
+    expectSkill: food
+  - id: real-rain-tomorrow
+    input: 明天深圳会下雨吗
+    lastSkill: travel
+    expectSkill: general

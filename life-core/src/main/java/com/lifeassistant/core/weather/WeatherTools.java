@@ -19,7 +19,7 @@ public class WeatherTools {
     /** 天数被限制在 1–7；预警查询失败不影响预报返回。 */
     @Tool(description = """
             查询某地未来几天的逐日天气预报，包含最高最低温、风力、降水、日出日落时间，以及当前生效的天气预警。
-            source 会说明数据来源缺哪些项，缺的不要编。""")
+            source 会说明数据来源缺哪些项，缺的不要编；用户没问到的缺项（比如逐小时、预警）不用在回答里提。""")
     public Map<String, Object> dailyWeather(
             @ToolParam(description = "地名，例如：泰山、杭州西湖、北京；或者 经度,纬度") String location,
             @ToolParam(description = "天数，1 到 7") int days) {
@@ -48,7 +48,7 @@ public class WeatherTools {
             List<WeatherProvider.WeatherWarning> warnings = provider.warnings(loc);
             return warnings.isEmpty() ? "当前没有预警" : warnings;
         } catch (BizException e) {
-            return "预警信息查不到：" + e.getMessage();
+            return "预警信息查不到（" + e.getMessage() + "），用户没问预警就不用提";
         }
     }
 }

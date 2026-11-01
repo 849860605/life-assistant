@@ -18,38 +18,54 @@ export function renderMarkdown(text: string): string {
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
-/** 本地日期 yyyy-MM-dd。 */
-export function ymd(date: Date): string {
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+/**
+ * 日期和时间一律按北京时间（账号默认时区 Asia/Shanghai，+8，没有夏令时）显示和计算，
+ * 不跟着电脑或手机的时区走：行程、日程都是国内的时间，电脑时区设成别处时也不能显示错。
+ */
+const ZONE_MINUTES = 480;
+
+/** 换成北京时间的"墙上时间"：返回的 Date 用 getUTC* 读出来就是北京时间的年月日时分。 */
+function wall(date: Date): Date {
+  return new Date(date.getTime() + ZONE_MINUTES * 60000);
 }
 
-/** "yyyy-MM-dd" 往后（负数往前）挪几天，按本地日期算，不受时区影响。 */
+/** 北京时间的日期 yyyy-MM-dd。 */
+export function ymd(date: Date): string {
+  const w = wall(date);
+  return `${w.getUTCFullYear()}-${pad(w.getUTCMonth() + 1)}-${pad(w.getUTCDate())}`;
+}
+
+/** "yyyy-MM-dd" 往后（负数往前）挪几天，只做日期加减，不受时区影响。 */
 export function addDays(date: string, days: number): string {
   const [y, m, d] = date.split("-").map(Number);
-  return ymd(new Date(y, m - 1, d + days));
+  const t = new Date(Date.UTC(y, m - 1, d + days));
+  return `${t.getUTCFullYear()}-${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())}`;
 }
 
-/** 本地时间 HH:mm。 */
+/** 北京时间 HH:mm。 */
 export function hm(date: Date): string {
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  const w = wall(date);
+  return `${pad(w.getUTCHours())}:${pad(w.getUTCMinutes())}`;
 }
 
-/** 本地日期和时间拼成带时区偏移的 ISO 字符串，例如 2026-11-07T04:00:00+08:00。 */
+/** 北京时间的月、日、星期几（0 是周日）。 */
+export function mdw(date: Date): { month: number; day: number; week: number } {
+  const w = wall(date);
+  return { month: w.getUTCMonth() + 1, day: w.getUTCDate(), week: w.getUTCDay() };
+}
+
+/** 北京时间的日期和时间拼成 ISO 字符串，例如 2026-11-07T04:00:00+08:00。 */
 export function toOffsetIso(dateText: string, timeText: string): string {
-  const local = new Date(`${dateText}T${timeText}:00`);
-  const offset = -local.getTimezoneOffset();
-  const sign = offset >= 0 ? "+" : "-";
-  const abs = Math.abs(offset);
-  return `${dateText}T${timeText}:00${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
+  return `${dateText}T${timeText}:00+08:00`;
 }
 
 const WEEK = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 
 /** 日程分组标题：今天、明天，其他显示"11月7日 周六"。 */
 export function dayLabel(date: Date): string {
-  const today = new Date();
-  const diff = Math.round((new Date(ymd(date)).getTime() - new Date(ymd(today)).getTime()) / 86400000);
-  const base = `${date.getMonth() + 1}月${date.getDate()}日 ${WEEK[date.getDay()]}`;
+  const diff = Math.round((Date.parse(ymd(date)) - Date.parse(ymd(new Date()))) / 86400000);
+  const d = mdw(date);
+  const base = `${d.month}月${d.day}日 ${WEEK[d.week]}`;
   if (diff === 0) return `今天 · ${base}`;
   if (diff === 1) return `明天 · ${base}`;
   return base;
@@ -62,7 +78,8 @@ export function relativeTime(iso: string): string {
   if (minutes < 1) return "刚刚";
   if (minutes < 60) return `${minutes} 分钟前`;
   if (ymd(date) === ymd(new Date())) return `今天 ${hm(date)}`;
-  return `${date.getMonth() + 1}月${date.getDate()}日`;
+  const d = mdw(date);
+  return `${d.month}月${d.day}日`;
 }
 
 /** 技能 id 对应的中文名，历史会话没有 route 事件时用它显示。 */
@@ -115,9 +132,9 @@ export function queriedAt(value?: string | null): string {
   if (!value) return "";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
-  const today = new Date();
-  const sameDay = d.toDateString() === today.toDateString();
-  return (sameDay ? "" : `${d.getMonth() + 1}/${d.getDate()} `) + hm(d);
+  const sameDay = ymd(d) === ymd(new Date());
+  const w = mdw(d);
+  return (sameDay ? "" : `${w.month}/${w.day} `) + hm(d);
 }
 
 /** 能标记"去过了 / 吃过了"的安排：景点和吃饭 */

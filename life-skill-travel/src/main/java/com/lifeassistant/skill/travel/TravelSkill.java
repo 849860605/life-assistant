@@ -10,14 +10,12 @@ import com.lifeassistant.skill.travel.flight.FlightTools;
 import com.lifeassistant.skill.travel.hiking.HikingTools;
 import com.lifeassistant.skill.travel.hotel.HotelLinkTools;
 import com.lifeassistant.skill.travel.hotel.HotelPriceTools;
+import com.lifeassistant.skill.travel.trip.RouteTools;
 import com.lifeassistant.skill.travel.trip.TripTools;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.tool.ToolCallback;
-import org.springframework.ai.tool.ToolCallbackProvider;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
-import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Stream;
 
@@ -37,13 +35,13 @@ public class TravelSkill implements LifeSkill {
     private final HotelPriceTools hotelPriceTools;
     private final FlightTools flightTools;
     private final FoodTools foodTools;
-    private final ObjectProvider<ToolCallbackProvider> mcpToolProviders;
+    private final RouteTools routeTools;
     private final McpServerRegistry mcpServers;
 
     public TravelSkill(WeatherTools weatherTools, HikingTools hikingTools, TripTools tripTools,
                        ScheduleTools scheduleTools, HotelLinkTools hotelLinkTools, WebSearchTools webSearchTools,
-                       HotelPriceTools hotelPriceTools, FlightTools flightTools, FoodTools foodTools,
-                       ObjectProvider<ToolCallbackProvider> mcpToolProviders, McpServerRegistry mcpServers) {
+                       HotelPriceTools hotelPriceTools, FlightTools flightTools, FoodTools foodTools, RouteTools routeTools,
+                       McpServerRegistry mcpServers) {
         this.weatherTools = weatherTools;
         this.hikingTools = hikingTools;
         this.tripTools = tripTools;
@@ -53,7 +51,7 @@ public class TravelSkill implements LifeSkill {
         this.hotelPriceTools = hotelPriceTools;
         this.flightTools = flightTools;
         this.foodTools = foodTools;
-        this.mcpToolProviders = mcpToolProviders;
+        this.routeTools = routeTools;
         this.mcpServers = mcpServers;
     }
 
@@ -95,15 +93,19 @@ public class TravelSkill implements LifeSkill {
                 不要再用表格或列表重复一遍，只用一两句话点评、给出首选；没有 card 字段时才用表格列出。
                 1. 收集需求：完整规划时先调用 askTripRequirements，把已知的信息（目的地、日期、出发地、人数、预算、偏好，
                    记忆里的常住城市和去过的地方）预先填上，然后这一轮只说一句请用户确认需求就结束。
+                   用户没说的日期、人数、预算不要自己编一个填上，留空让用户在卡片上填；只说了"5天"这种时长时，日期也留空。
                    用户已经说齐了目的地、日期、人数和预算，或者说"跳过""直接生成"，就不弹需求卡，缺的按常识补。
                    用户提交的需求里有去过的地方时，用 rememberFact 记下（PREFERENCE，key 如 visited_chengdu），以后规划时避开。
                    有老人小孩时，景点、强度、餐厅都要照顾到。
                 1.5 出方案：需求确认后，先调用 proposeTripPlans 给出三套风格不同的方案概要（省钱、舒适、深度体验，
                    预算从低到高，地名要真实），这一轮只用一两句说区别和推荐哪套就结束，不查机票酒店。
                    用户选定一套（"就按XX方案"）后，再按下面的步骤展开成完整行程，按选定方案的风格、预算和每日概要来排。
+                   需求里日期未定时，展开前先问出发日期（可以按季节给一个建议日期让用户选），不要自己默认成明天或最近几天，
+                   日期不定机票、酒店、天气都查不准。
                    用户说"直接生成""不用方案"，或者是修改已有行程、一日游这类简单安排时，跳过这一步。
                 2. 查天气（dailyWeather，爬山当天再看 hourlyWeather）。
-                3. 用地图工具查景点位置、路线和交通耗时；地图工具不可用时，说明是凭经验估计。
+                3. 用地图工具查景点位置；两地之间怎么走、要多久、打车多少钱用 compareRoutes（同时给地铁公交和打车），
+                   市内默认推荐地铁公交，打车明显省时间或人多平摊划算时再提打车；地图工具不可用时，说明是凭经验估计。
                    想了解玩法、路线怎么排、避坑时，用 searchGuides 搜攻略，综合多篇的共识来安排；
                    攻略里的门票和开放时间可能过时，要提醒用户核实。
                    吃饭：用户问附近吃的，或行程里要安排正餐时，用 findRestaurants 按景点或酒店位置查，
@@ -121,13 +123,16 @@ public class TravelSkill implements LifeSkill {
                 6. 机票：用 compareFlights 查（往返就去程、回程各查一次），它会同时比飞猪、携程、美团并按航班号合并。
                    点评时按用户在意的（价格或时间）挑一两班，提醒早班机算好去机场的时间、价格可能不含机建燃油。
                    没有卡片要列表格时，列：航班 | 起飞→到达 | 飞猪 | 携程 | 美团 | 最低，每格价格做成预订链接。
+                   一班都没查到时，按返回的 notice 跟用户说原因（日期太远多半是还没开售、额度用完要晚点再试），
+                   不要把各平台的报错原样念给用户，也不要编航班和价格。
                 7. 生成行程：调用 saveTripPlan，days 写完整的逐日安排（每项写开始结束时间、类型、地点名、地址、一句说明、
                    人均花费；餐厅的 url 填 dianpingUrl）。过夜行程必须填 stays：从酒店比价结果里按用户的预算和偏好选定一家
                    （酒店名原样用比价结果里的），写入住和离店日期；入住、回酒店、退房这些项写 HOTEL 类型。
                    每项的 name 只写一个地点的正式名称（能在地图上搜到的那种），顺路的几个地方拆成几项，
                    玩法、怎么走写进 note；不然地图上找不到，路线和路程都算不出来。tips 写简短的注意事项、装备清单、天气提醒和预算估算，
                    不要重复机票酒店的比价分析（卡片上已经有了）。
-                   安排要留出交通和休息时间，同一天的时间不要重叠。它会保存成草稿并以行程卡展示，
+                   安排要留出交通和休息时间，同一天的时间不要重叠。市内交通默认坐地铁公交（行程页会按高德算好每段坐哪条线、
+                   多久），note 里不要写成"打车前往"；用户说要打车、自驾或带老人小孩不方便挤地铁时才按打车写。它会保存成草稿并以行程卡展示，
                    回答里不要再写逐日行程，只用两三句说整体思路和亮点，问用户确认还是要调整。返回 error 时按 problems 改好再调一次。
                 8. 用户认可（"可以""好""保存""就这个"）时：
                    - 调用 confirmTrip 确认行程；
@@ -135,9 +140,11 @@ public class TravelSkill implements LifeSkill {
                    - 不要用 rememberFact 记录行程或提醒，记忆只放长期不变的个人信息；
                    - 做完告诉用户：行程名、建了哪几条提醒（时间），在"行程"页和"日程"页能看到；不要编造链接或地址。
                 修改已保存的行程时，先 getTrip 读出当前内容，只改需要改的部分，再用 saveTripPlan 带上 tripId 和完整的 days 保存。
-                locked 为 true 的项是用户要保留的，地点和时间都不要动。
+                用户已经说清楚改哪天、往哪个方向改（比如"太赶了，安排轻松点""直接按这个改好保存"），就直接改好保存，不要再反问；
+                说不清楚时才问，一次问完。
+                status 里有"用户要保留"的项，地点和时间都不要动。
                 标着"已去过""已吃过"的项用户已经完成了，不要删、不要换；重新安排时只动还没去的。
-                booked 里的 id 是用户已经在平台上预约好的安排或住宿，地点、时间、酒店都不要改；
+                status 里有"已预约"的安排和住宿，是用户已经在平台上订好的，地点、时间、酒店都不要改；
                 用户坚持要改时，先提醒他去原平台取消预约，避免扣费或爽约。
                 用户记忆里"去过""不感兴趣"的地方，规划和推荐时都避开。""";
     }
@@ -146,24 +153,13 @@ public class TravelSkill implements LifeSkill {
     @Override
     public List<Object> tools() {
         return List.of(weatherTools, hikingTools, tripTools, scheduleTools, hotelLinkTools, hotelPriceTools,
-                flightTools, foodTools, webSearchTools);
+                flightTools, foodTools, webSearchTools, routeTools);
     }
 
-    /** MCP 工具：高德地图（Spring AI 自动配置的连接）加 RollingGo 酒店（按需连接）；没配置的返回空。 */
+    /** MCP 工具：高德地图和 RollingGo 酒店（都是用到才连，出错自动重连）；没配置的返回空。 */
     @Override
     public List<ToolCallback> toolCallbacks() {
-        return Stream.concat(
-                mcpToolProviders.orderedStream().flatMap(TravelSkill::safeTools),
-                mcpServers.tools("rollinggo").stream()).toList();
+        return Stream.concat(mcpServers.tools("amap").stream(), mcpServers.tools("rollinggo").stream()).toList();
     }
 
-    /** 远程 MCP 连不上（服务端 502、休眠后会话失效）时跳过它的工具，不让整轮对话失败。 */
-    private static Stream<ToolCallback> safeTools(ToolCallbackProvider provider) {
-        try {
-            return Arrays.stream(provider.getToolCallbacks());
-        } catch (RuntimeException e) {
-            log.warn("MCP 工具加载失败，这轮对话先不用它：{}", e.getMessage() == null ? e.toString() : e.getMessage().lines().findFirst().orElse(""));
-            return Stream.empty();
-        }
-    }
 }

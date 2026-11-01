@@ -11,7 +11,7 @@ import java.util.Set;
 
 /**
  * 给行程补地理信息：每个景点、餐厅、酒店按名称在高德找到对应地点，补上坐标、照片和评分；
- * 再算每天相邻两项之间的路程（1 公里内按步行估，远的查驾车）。高德没配或出错时原样返回，不影响行程本身。
+ * 再算每天相邻两项之间的路程（1 公里内按步行估，远的驾车、公交都查，默认选地铁公交，按用户偏好再换见 Itinerary.resolveLegs）。高德没配或出错时原样返回，不影响行程本身。
  */
 @Slf4j
 @Component
@@ -51,7 +51,7 @@ public class TripGeo {
             items.add(locate(item, city, day.date(), stays));
         }
         items = dropOutliers(day.items(), items, city);
-        return new Itinerary.Day(day.date(), day.theme(), items, legs(items));
+        return new Itinerary.Day(day.date(), day.theme(), items, legs(items, cityCode(city, items)));
     }
 
     /** 新找到的地点离当天其他地点的中位位置超过这么远，多半是同名的别处（比如别的区县的"龙井村"） */
@@ -158,7 +158,7 @@ public class TripGeo {
     }
 
     /** 相邻两项（都有坐标）之间的路程；中间隔着没坐标的项就跳过它，接着连下一项。 */
-    private List<Itinerary.Leg> legs(List<Itinerary.Item> items) {
+    private List<Itinerary.Leg> legs(List<Itinerary.Item> items, String cityCode) {
         List<Itinerary.Leg> legs = new ArrayList<>();
         Itinerary.Item prev = null;
         for (Itinerary.Item item : items) {
@@ -166,7 +166,7 @@ public class TripGeo {
                 continue;
             }
             if (prev != null) {
-                Itinerary.Leg leg = leg(prev, item);
+                Itinerary.Leg leg = leg(prev, item, cityCode);
                 if (leg != null) {
                     legs.add(leg);
                 }
@@ -176,21 +176,62 @@ public class TripGeo {
         return legs;
     }
 
-    private Itinerary.Leg leg(Itinerary.Item a, Itinerary.Item b) {
+    /**
+     * 当天所在城市的 citycode，查公交用：先按目的地名（去掉括号里的补充）查，查不到用当天第一个有坐标的地点反查；
+     * 都查不到为空，公交就不查了。
+     */
+    private String cityCode(String city, List<Itinerary.Item> items) {
+        try {
+            String name = city == null ? null : city.replaceAll("[(（].*?[)）]", "").split("[·・,，、\\s]")[0];
+            String code = places.cityCode(name).orElse(null);
+            if (code != null) {
+                return code;
+            }
+            Itinerary.Item first = items.stream().filter(Itinerary.Item::located).findFirst().orElse(null);
+            return first == null ? null : places.cityCodeAt(first.lng(), first.lat()).orElse(null);
+        } catch (RuntimeException e) {
+            log.warn("城市 {} 的 citycode 查询失败：{}", city, e.getMessage());
+            return null;
+        }
+    }
+
+    private Itinerary.Leg leg(Itinerary.Item a, Itinerary.Item b, String cityCode) {
         double km = distanceKm(a.lat(), a.lng(), b.lat(), b.lng());
         if (km <= WALK_KM) {
             // 步行按每小时 4.5 公里，绕路系数 1.3
             return new Itinerary.Leg(a.id(), b.id(), "WALK", Math.max(1, (int) Math.round(km * 1.3 / 4.5 * 60)),
                     Math.round(km * 1.3 * 10) / 10.0);
         }
+        double[] from = {a.lng(), a.lat()};
+        double[] to = {b.lng(), b.lat()};
+        AmapPlaceService.Route drive = null;
         try {
-            return places.driving(new double[]{a.lng(), a.lat()}, new double[]{b.lng(), b.lat()})
-                    .map(r -> new Itinerary.Leg(a.id(), b.id(), "DRIVE", Math.max(1, r.minutes()), r.km(), r.taxi()))
-                    .orElse(null);
+            drive = places.driving(from, to).orElse(null);
         } catch (RuntimeException e) {
-            log.warn("路线 {} → {} 查询失败：{}", a.name(), b.name(), e.getMessage());
-            return null;
+            log.warn("驾车路线 {} → {} 查询失败：{}", a.name(), b.name(), e.getMessage());
         }
+        // 查过没有公交方案（或者不知道在哪个城市、没法查）记成 minutes=0，免得每次打开行程都重查；
+        // 查询出错（比如超额度）记空，下次再试
+        Itinerary.Transit transit = new Itinerary.Transit(0, null, null, null);
+        if (cityCode != null) {
+            try {
+                transit = places.transit(from, to, cityCode)
+                        .map(t -> new Itinerary.Transit(t.minutes(), t.fee(), t.walkKm(), t.lines()))
+                        .orElse(new Itinerary.Transit(0, null, null, null));
+            } catch (RuntimeException e) {
+                log.warn("公交路线 {} → {} 查询失败：{}", a.name(), b.name(), e.getMessage());
+                transit = null;
+            }
+        }
+        if (drive == null) {
+            return transit != null && transit.minutes() > 0
+                    ? new Itinerary.Leg(a.id(), b.id(), Itinerary.TRANSIT, transit.minutes(),
+                    Math.round(km * 1.4 * 10) / 10.0, null, null, null, transit)
+                    : null;
+        }
+        int minutes = Math.max(1, drive.minutes());
+        return new Itinerary.Leg(a.id(), b.id(), Itinerary.DRIVE, minutes, drive.km(), drive.taxi(), minutes, drive.km(),
+                transit).choose(Itinerary.TRANSIT);
     }
 
     /** 球面距离（公里）。 */

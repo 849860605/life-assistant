@@ -106,7 +106,7 @@
       <view class="mid">
         <view class="panel">
           <view class="panel-title">酒店位置与行程</view>
-          <RouteMap ref="mapRef" :stops="mapStops" :pois="mapPois" :route="false" :active-poi="selected ? selected.id || selected.name : null" color="7C3AED" :w="mapW" :h="mapH" @poi="onPickPoi" />
+          <RouteMap ref="mapRef" :stops="mapStops" :pois="mapPois" :route="false" :active-poi="selected ? selected.id || selected.name : null" color="7C3AED" :w="mapW" :h="mapH" empty-text="查到酒店后在这里标出位置" @poi="onPickPoi" />
           <view class="legend">
             <text class="lg"><text class="lg-dot orange" />候选酒店</text>
             <text v-if="mapStops.length" class="lg"><text class="lg-dot purple" />行程景点</text>
@@ -140,9 +140,9 @@
             <view class="d-sub">多平台价格对比</view>
             <view class="pf">
               <text class="pf-name">飞猪</text>
-              <text class="pf-price">{{ selected.price != null ? "¥" + selected.price : "—" }}</text>
-              <text class="muted small pf-basis">候选列表里的每晚最低价</text>
-              <text v-if="selected.url" class="pf-go" @click="openUrl(selected.url!)">去预订 ›</text>
+              <text class="pf-price" :class="{ best: fliggy.price != null && fliggy.price === lowestQuote && otherQuotes.length > 0 }">{{ fliggy.price != null ? "¥" + fliggy.price : "—" }}</text>
+              <text class="muted small pf-basis">{{ fliggy.basis }}</text>
+              <text v-if="fliggy.url" class="pf-go" @click="openUrl(fliggy.url!)">去预订 ›</text>
             </view>
             <template v-if="quoteOf(selected)?.data">
               <view v-for="q in otherQuotes" :key="q.platform" class="pf">
@@ -306,10 +306,16 @@ const mapPois = computed(() =>
     .filter((h) => h.lng != null && h.lat != null)
     .map((h) => ({ id: h.id || h.name, name: h.name, lng: h.lng!, lat: h.lat!, label: letterOf(h) })),
 );
-const otherQuotes = computed(() => (selected.value ? quoteOf(selected.value)?.data?.hotels[0]?.quotes.filter((q) => q.platform !== "飞猪" || q.price !== selected.value!.price) || [] : []));
+/** 候选列表本身来自飞猪，比价结果里的飞猪报价并进同一行：重新查到了用新价，没查到就用候选列表的价 */
+const fliggy = computed(() => {
+  const q = selected.value ? quoteOf(selected.value)?.data?.hotels[0]?.quotes.find((x) => x.platform === "飞猪") : undefined;
+  if (q?.status === "OK" && q.price != null) return { price: q.price, basis: q.basis, url: q.url || selected.value?.url };
+  return { price: selected.value?.price ?? null, basis: "候选列表里的每晚最低价", url: selected.value?.url };
+});
+const otherQuotes = computed(() => (selected.value ? quoteOf(selected.value)?.data?.hotels[0]?.quotes.filter((q) => q.platform !== "飞猪") || [] : []));
 const lowestQuote = computed(() => {
   const ps = otherQuotes.value.map((q) => q.price).filter((p): p is number => p != null);
-  if (selected.value?.price != null) ps.push(selected.value.price);
+  if (fliggy.value.price != null) ps.push(fliggy.value.price);
   return ps.length ? Math.min(...ps) : null;
 });
 /** 第一天落地的航班（行程里带航班号的交通项） */

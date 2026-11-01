@@ -286,7 +286,7 @@ const mapStops = computed<MapStop[]>(() => (day.value?.items || []).filter((i) =
 function rowOf(t: Trip): Row {
   const city = cityOf(t.destination || t.title);
   const base = { id: t.id, title: t.title, destination: t.destination || "", city, dates: t.startDate ? `${t.startDate} 至 ${t.endDate || t.startDate}` : "日期待定" };
-  if (t.status === "DRAFT") return { ...base, label: "草稿", tone: "draft", group: "草稿" };
+  if (t.status === "DRAFT") return { ...base, label: t.endDate && t.endDate < today ? "草稿 · 日期已过" : "草稿", tone: "draft", group: "草稿" };
   if (t.status === "FINISHED" || (t.endDate && t.endDate < today)) return { ...base, label: "已完成", tone: "done", group: "已完成" };
   if (t.startDate && t.startDate <= today) return { ...base, label: "进行中", tone: "ok", group: "进行中" };
   if (!t.startDate) return { ...base, label: "日期待定", tone: "draft", group: "即将出行" };

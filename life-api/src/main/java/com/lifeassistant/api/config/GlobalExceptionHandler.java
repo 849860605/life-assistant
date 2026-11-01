@@ -86,6 +86,12 @@ public class GlobalExceptionHandler {
     }
 
     /** 兜底：记录错误日志，对外只返回通用的 500 文案，不暴露异常细节。 */
+    /** 用户中途关了页面或断网，回答写不出去了：不是程序出错，记一行就好，也没法再回响应。 */
+    @ExceptionHandler(org.springframework.web.context.request.async.AsyncRequestNotUsableException.class)
+    public void handleClientGone(Exception e) {
+        log.debug("客户端已断开：{}", e.getMessage());
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleOther(Exception e) {
         log.error("未处理的异常", e);

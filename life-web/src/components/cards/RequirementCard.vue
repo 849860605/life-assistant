@@ -10,7 +10,7 @@
         <Icon name="calendar" :size="16" color="var(--accent)" />
         <text class="label">出发时间</text>
         <view class="value dates">
-          <picker mode="date" :value="form.startDate" :disabled="locked" @change="form.startDate = $event.detail.value">
+          <picker mode="date" :value="form.startDate" :disabled="locked" @change="pickStart($event.detail.value)">
             <text :class="{ ph: !form.startDate }">{{ form.startDate ? md(form.startDate) : "开始" }}</text>
           </picker>
           <text class="muted">–</text>
@@ -18,6 +18,7 @@
             <text :class="{ ph: !form.endDate }">{{ form.endDate ? md(form.endDate) : "结束" }}</text>
           </picker>
           <text v-if="nights" class="muted">（{{ nights + 1 }}天{{ nights }}晚）</text>
+          <text v-else-if="days && !form.startDate" class="muted">（玩 {{ days }} 天，选好开始日期自动算结束）</text>
         </view>
       </view>
       <view class="row">
@@ -108,6 +109,17 @@ const form = reactive({
   visited: [...(props.data.visited || [])] as string[],
 });
 const visitedInput = ref("");
+/** 用户只说了玩几天、没说日期时的天数 */
+const days = props.data.days || 0;
+
+/** 选开始日期；只知道玩几天、结束日期还没填时顺手算出结束日期 */
+function pickStart(date: string) {
+  form.startDate = date;
+  if (days > 0 && !form.endDate) {
+    const end = new Date(Date.parse(date) + (days - 1) * 86400000);
+    form.endDate = end.toISOString().slice(0, 10);
+  }
+}
 /** 住几晚，日期没填全时为 0 */
 const nights = computed(() => {
   if (!form.startDate || !form.endDate) return 0;
@@ -150,6 +162,7 @@ function submit() {
   const parts = [`目的地 ${form.destination.trim()}`];
   if (form.origin.trim()) parts.push(`出发地 ${form.origin.trim()}`);
   if (form.startDate) parts.push(`日期 ${form.startDate}${form.endDate ? " 至 " + form.endDate : ""}`);
+  else parts.push(days ? `日期未定，玩 ${days} 天` : "日期未定");
   parts.push(`同行 ${people.join("、")}`);
   if (form.budget) parts.push(`预算 每人 ${form.budget} 元`);
   if (form.interests.length) parts.push(`偏好 ${form.interests.join("、")}`);

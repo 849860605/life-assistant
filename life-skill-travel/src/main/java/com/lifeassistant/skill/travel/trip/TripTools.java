@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 给模型用的行程工具：弹需求卡、保存行程草稿（含改版）、确认、列出、读取行程，用户身份从 ToolContext 取。
@@ -138,6 +139,7 @@ public class TripTools {
             @ToolParam(description = "出发城市，没说就用记忆里的常住城市", required = false) String origin,
             @ToolParam(description = "开始日期 yyyy-MM-dd", required = false) String startDate,
             @ToolParam(description = "结束日期 yyyy-MM-dd", required = false) String endDate,
+            @ToolParam(description = "用户只说了玩几天、没说具体日期时填天数，日期留空", required = false) Integer days,
             @ToolParam(description = "成人数", required = false) Integer adults,
             @ToolParam(description = "小孩数", required = false) Integer children,
             @ToolParam(description = "老人数", required = false) Integer elders,
@@ -150,6 +152,7 @@ public class TripTools {
         data.put("origin", origin);
         data.put("startDate", startDate);
         data.put("endDate", endDate);
+        data.put("days", days);
         data.put("adults", adults);
         data.put("children", children);
         data.put("elders", elders);
@@ -183,6 +186,8 @@ public class TripTools {
             @ToolParam(description = "住宿，过夜行程必填，每段一家酒店；中途换酒店就分几段", required = false) List<PlanStay> stays,
             @ToolParam(description = "注意事项、装备清单、天气提醒、预算估算，Markdown", required = false) String tips,
             @ToolParam(description = "这次改了什么，例如：第二天下雨改成室内", required = false) String changeNote,
+            @ToolParam(description = "市内主要怎么走：TRANSIT 地铁公交（默认）/ DRIVE 打车、包车或自驾；方案是包车、自驾或用户说要打车时填 DRIVE",
+                    required = false) String transport,
             ToolContext toolContext) {
         LocalDate start;
         LocalDate end;
@@ -201,6 +206,10 @@ public class TripTools {
         itinerary = itinerary.withStays(toStays(stays, scope == null ? null : scope.conversationId(), previous));
         itinerary = carryBooked(itinerary, previous);
         itinerary = carryDone(itinerary, previous);
+        itinerary = carryTransport(itinerary, previous);
+        if (transport != null && Set.of(Itinerary.TRANSIT, Itinerary.DRIVE).contains(transport.trim().toUpperCase())) {
+            itinerary = itinerary.withTransport(transport.trim().toUpperCase(), itinerary.legModes());
+        }
         List<String> problems = new ArrayList<>(itinerary.problems(start, end));
         for (Itinerary.Stay st : itinerary.stays()) {
             if (st.nights() == 0) {
@@ -259,7 +268,7 @@ public class TripTools {
     }
 
     /** 读取行程当前版本：有结构化行程时返回 itinerary，早期的行程只有 Markdown 正文。 */
-    @Tool(description = "读取一个已保存行程的当前内容，修改行程前先读。")
+    @Tool(description = "读取一个已保存行程的当前内容，修改行程前先读。status 标着用户要保留、已预约、已去过的项不要动。")
     public Map<String, Object> getTrip(@ToolParam(description = "行程 id") long tripId, ToolContext toolContext) {
         TripService.TripDetail detail = tripService.get(ToolContexts.user(toolContext), tripId, null);
         Map<String, Object> out = new LinkedHashMap<>();
@@ -268,12 +277,84 @@ public class TripTools {
         out.put("startDate", String.valueOf(detail.trip().getStartDate()));
         out.put("endDate", String.valueOf(detail.trip().getEndDate()));
         out.put("version", detail.version().getVersion());
-        if (detail.version().getItinerary() != null) {
-            out.put("itinerary", parse(detail.version().getItinerary()));
+        Object parsed = detail.version().getItinerary() == null ? null : parse(detail.version().getItinerary());
+        if (parsed instanceof Itinerary itinerary) {
+            out.put("itinerary", forModel(itinerary));
+        } else if (parsed != null) {
+            out.put("itinerary", parsed);
         } else {
             out.put("content", detail.version().getContent());
         }
         return out;
+    }
+
+    /**
+     * 给模型看的精简行程：每项只留时间、类型、名称、地址、说明、人均、链接和状态（保留 / 已预约 / 已去过），
+     * 每天附上路上的合计；照片、坐标、各平台报价这些模型用不上，去掉省 token。
+     */
+    static Map<String, Object> forModel(Itinerary it) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        List<Map<String, Object>> days = new ArrayList<>();
+        for (Itinerary.Day d : it.days() == null ? List.<Itinerary.Day>of() : it.days()) {
+            Map<String, Object> day = new LinkedHashMap<>();
+            day.put("date", d.date());
+            putIf(day, "theme", d.theme());
+            List<Map<String, Object>> items = new ArrayList<>();
+            for (Itinerary.Item i : d.items()) {
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("id", i.id());
+                putIf(item, "start", i.start());
+                putIf(item, "end", i.end());
+                item.put("type", i.type());
+                item.put("name", i.name());
+                putIf(item, "address", i.address());
+                putIf(item, "note", i.note());
+                putIf(item, "cost", i.cost());
+                putIf(item, "url", i.url());
+                List<String> flags = new ArrayList<>();
+                if (Boolean.TRUE.equals(i.locked())) {
+                    flags.add("用户要保留");
+                }
+                if (it.isBooked(i.id())) {
+                    flags.add("已预约");
+                }
+                if (it.isDone(i.id())) {
+                    flags.add("FOOD".equals(i.type()) ? "已吃过" : "已去过");
+                }
+                if (!flags.isEmpty()) {
+                    item.put("status", String.join("、", flags));
+                }
+                items.add(item);
+            }
+            day.put("items", items);
+            if (d.legs() != null && !d.legs().isEmpty()) {
+                day.put("travelMinutes", d.legs().stream().mapToInt(Itinerary.Leg::minutes).sum());
+            }
+            days.add(day);
+        }
+        out.put("days", days);
+        if (it.stays() != null && !it.stays().isEmpty()) {
+            out.put("stays", it.stays().stream().map(st -> {
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("hotel", st.name());
+                m.put("checkIn", st.checkIn());
+                m.put("checkOut", st.checkOut());
+                putIf(m, "pricePerNight", st.price());
+                if (it.isBooked(st.id())) {
+                    m.put("status", "已预约");
+                }
+                return m;
+            }).toList());
+        }
+        putIf(out, "tips", it.tips());
+        out.put("transport", Itinerary.DRIVE.equals(it.transport()) ? "用户选了打车" : "地铁公交为主");
+        return out;
+    }
+
+    private static void putIf(Map<String, Object> map, String key, Object value) {
+        if (value != null && !(value instanceof String str && str.isBlank())) {
+            map.put(key, value);
+        }
     }
 
     /** 模型填的逐日安排转成存储结构，给每项编号 d{第几天}-{第几项}。 */
@@ -343,6 +424,36 @@ public class TripTools {
         List<String> ids = new ArrayList<>();
         itinerary.days().forEach(d -> d.items().stream().filter(i -> names.contains(i.name())).forEach(i -> ids.add(i.id())));
         return itinerary.withDone(ids);
+    }
+
+    /** 沿用上一版的默认出行方式；单独改过的路段按起终点名称对到新版本上（id 会重新编号）。 */
+    static Itinerary carryTransport(Itinerary itinerary, Itinerary previous) {
+        if (previous == null || previous.transport() == null && previous.legModes() == null) {
+            return itinerary;
+        }
+        java.util.Map<String, String> names = new java.util.HashMap<>();
+        java.util.Map<String, String> byName = new java.util.HashMap<>();
+        previous.days().forEach(d -> d.items().forEach(i -> names.put(i.id(), i.name())));
+        if (previous.legModes() != null) {
+            previous.legModes().forEach((k, v) -> {
+                String[] ids = k.split(">", 2);
+                if (ids.length == 2 && names.containsKey(ids[0]) && names.containsKey(ids[1])) {
+                    byName.put(names.get(ids[0]) + ">" + names.get(ids[1]), v);
+                }
+            });
+        }
+        java.util.Map<String, String> modes = new java.util.HashMap<>();
+        for (Itinerary.Day d : itinerary.days()) {
+            for (int i = 0; i + 1 < d.items().size(); i++) {
+                for (int j = i + 1; j < d.items().size(); j++) {
+                    String mode = byName.get(d.items().get(i).name() + ">" + d.items().get(j).name());
+                    if (mode != null) {
+                        modes.put(d.items().get(i).id() + ">" + d.items().get(j).id(), mode);
+                    }
+                }
+            }
+        }
+        return itinerary.withTransport(previous.transport(), modes);
     }
 
     /** 模型改版时 id 会重新编号，按名称把上一版"已预约"的安排和住宿对到新版本上。 */
@@ -437,7 +548,7 @@ public class TripTools {
 
     private String json(Itinerary itinerary) {
         try {
-            return objectMapper.writeValueAsString(itinerary);
+            return objectMapper.writeValueAsString(itinerary.resolveLegs());
         } catch (JsonProcessingException e) {
             throw new IllegalStateException(e);
         }

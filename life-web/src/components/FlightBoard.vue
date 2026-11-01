@@ -467,8 +467,12 @@ onBeforeUnmount(() => {
 
 init();
 
+/** 上次查机票用的出发城市，下次打开预先填上（大多数人总从同一个城市出发） */
+const LAST_ORIGIN = "flight_last_origin";
+
 async function init() {
   const q = props.query;
+  form.origin = uni.getStorageSync(LAST_ORIGIN) || "";
   if (q.origin) form.origin = decodeURIComponent(q.origin);
   if (q.destination) form.destination = decodeURIComponent(q.destination);
   if (q.date) form.date = q.date;
@@ -536,6 +540,7 @@ function search() {
     uni.showToast({ title: "填一下出发和到达城市", icon: "none" });
     return;
   }
+  uni.setStorageSync(LAST_ORIGIN, from);
   legs.value = [{ key: "out", origin: from, destination: to, date: form.date, dayIndex: dayOf(form.date), loading: true, error: "", result: null }];
   if (mode.value === "round" && form.back) legs.value.push({ key: "back", origin: to, destination: from, date: form.back, dayIndex: dayOf(form.back), loading: true, error: "", result: null });
   active.value = "out";
@@ -554,7 +559,7 @@ async function runLeg(l: Leg, refresh = false) {
     const t = target();
     if (!t) return;
     if (data.error) t.error = data.error;
-    else if (!data.flights.length) t.error = "这天没查到航班：" + Object.entries(data.platforms || {}).map(([k, v]) => `${k}（${v}）`).join("、");
+    else if (!data.flights.length) t.error = data.notice || "这天各平台都没查到航班，换个日期试试";
     else {
       t.error = "";
       t.result = data;

@@ -37,20 +37,20 @@
             </view>
           </view>
           <view class="facts">
-            <view class="fact"><text class="fk">体感温度</text><text class="fv">{{ board.now?.feelsLike != null ? board.now.feelsLike + "°C" : "—" }}</text></view>
+            <view v-if="board.now?.feelsLike != null" class="fact"><text class="fk">体感温度</text><text class="fv">{{ board.now?.feelsLike != null ? board.now.feelsLike + "°C" : "—" }}</text></view>
             <view class="fact"><text class="fk">湿度</text><text class="fv">{{ board.now?.humidity != null ? board.now.humidity + "%" : "—" }}</text></view>
             <view class="fact"><text class="fk">{{ board.now?.windDir || "风力" }}</text><text class="fv">{{ board.now?.windScale ? board.now.windScale + "级" : "—" }}</text></view>
-            <view class="fact"><text class="fk">空气质量</text><text class="fv">{{ board.air?.aqi != null ? `${board.air.category || ""}（AQI ${board.air.aqi}）` : "—" }}</text></view>
-            <view class="fact"><text class="fk">紫外线</text><text class="fv">{{ uvText(today?.uvIndex) }}</text></view>
+            <view v-if="board.air?.aqi != null" class="fact"><text class="fk">空气质量</text><text class="fv">{{ board.air?.aqi != null ? `${board.air.category || ""}（AQI ${board.air.aqi}）` : "—" }}</text></view>
+            <view v-if="uvText(today?.uvIndex) !== '—'" class="fact"><text class="fk">紫外线</text><text class="fv">{{ uvText(today?.uvIndex) }}</text></view>
           </view>
         </view>
 
         <view v-for="w in board.warnings" :key="w.title" class="warning"><Icon name="bell" :size="14" color="#c2410c" /><text><text class="strong">{{ w.title }}</text> {{ w.text }}</text></view>
 
-        <!-- 逐小时 -->
-        <view class="panel">
+        <!-- 逐小时：数据源没有时整块不显示 -->
+        <view v-if="board.hourly.length" class="panel">
           <view class="panel-title">逐小时预报</view>
-          <scroll-view v-if="board.hourly.length" scroll-x class="hours">
+          <scroll-view scroll-x class="hours">
             <view class="hours-inner">
               <view v-for="(h, i) in board.hourly" :key="h.time" class="hour" :class="{ on: i === 0 }">
                 <text class="small muted">{{ i === 0 ? "现在" : clock(h.time) }}</text>
@@ -60,12 +60,11 @@
               </view>
             </view>
           </scroll-view>
-          <view v-else class="muted small">{{ sourceName }}没有逐小时预报，配置和风天气 Key 后才有。</view>
         </view>
 
         <!-- 多日 -->
         <view class="panel">
-          <view class="panel-title">{{ board.daily.length }} 日天气预报<text v-if="board.daily.length < 7" class="muted small">（{{ sourceName }}只给 {{ board.daily.length }} 天）</text></view>
+          <view class="panel-title">{{ board.daily.length }} 日天气预报<text v-if="board.daily.length < 7" class="muted small">（目前只能查到 {{ board.daily.length }} 天）</text></view>
           <view class="days" :style="{ gridTemplateColumns: `repeat(${Math.max(board.daily.length, 1)}, minmax(0, 1fr))` }">
             <view v-for="(d, i) in board.daily" :key="d.date" class="dcell" :class="{ on: i === 0, weekend: isWeekend(d.date) }">
               <text class="strong">{{ dayLabel(d.date, i) }}</text>
@@ -115,12 +114,11 @@
           <view class="muted small">按气温、温差、降水、紫外线和空气质量算出来，不是 AI 写的。</view>
         </view>
 
-        <view class="panel">
+        <view v-if="board.air" class="panel">
           <view class="ph"><text class="panel-title">空气质量详情</text><text v-if="board.air?.aqi != null" class="aqi">{{ board.air.category }} AQI {{ board.air.aqi }}</text></view>
-          <view v-if="board.air" class="air">
+          <view class="air">
             <view v-for="p in airItems" :key="p.k" class="air-cell"><text class="small muted">{{ p.k }}</text><text class="strong">{{ p.v ?? "—" }}</text></view>
           </view>
-          <view v-else class="muted small">{{ sourceName }}没有空气质量数据，配置和风天气 Key 后才有。</view>
         </view>
 
         <view class="panel">

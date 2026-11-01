@@ -113,7 +113,7 @@
       <view class="mid">
         <view class="panel">
           <view class="panel-title">景点分布<text v-if="trip"> 与行程（D{{ dayIndex + 1 }}）</text></view>
-          <RouteMap ref="mapRef" :stops="dayStops" :pois="mapPois" :active-poi="selected ? selected.id || selected.name : null" color="2563EB" :w="mapW" :h="mapH" @poi="onPickPoi" />
+          <RouteMap ref="mapRef" :stops="dayStops" :pois="mapPois" :active-poi="selected ? selected.id || selected.name : null" color="2563EB" :w="mapW" :h="mapH" empty-text="搜到景点后在这里标出位置" @poi="onPickPoi" />
           <view class="legend">
             <text v-if="dayStops.length" class="lg"><text class="lg-dot blue" />D{{ dayIndex + 1 }} 游览顺序</text>
             <text class="lg"><text class="lg-dot orange" />搜到的景点</text>

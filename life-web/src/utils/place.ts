@@ -1,6 +1,6 @@
 import { API_BASE } from "../api/http";
 import { ensureMediaTicket, mediaTicket } from "./media";
-import type { DayTotals, ItineraryDay, ItineraryItem, ItineraryLeg } from "../api/types";
+import type { DayTotals, ItineraryDay, ItineraryItem, ItineraryLeg, Stay } from "../api/types";
 
 const CITY_KEY = "life_city";
 /** 还没选过城市时的默认城市 */
@@ -127,20 +127,85 @@ export function legFrom(day: ItineraryDay | null | undefined, fromId: string): I
   return day?.legs?.find((l) => l.from === fromId);
 }
 
-/** 路程的文字："打车 25 分钟 · 12 公里" / "步行 8 分钟"。 */
-export function legText(leg?: ItineraryLeg): string {
-  if (!leg) return "";
-  return leg.mode === "WALK" ? `步行 ${leg.minutes} 分钟` : `打车 ${leg.minutes} 分钟 · ${leg.km} 公里`;
+/** 坐的线路连起来："地铁 8号线 → 15号线"，混着公交时原样连："101路 → 地铁4号线"。 */
+export function linesText(lines?: string[]): string {
+  if (!lines?.length) return "地铁公交";
+  if (lines.every((l) => l.startsWith("地铁"))) return "地铁 " + lines.map((l) => l.replace(/^地铁/, "")).join(" → ");
+  return lines.join(" → ");
 }
 
-/** 一天的路程汇总：总分钟、总公里、打车费（驾车段都没查到打车费时为空）。 */
-export function dayTravel(day?: ItineraryDay | null): { minutes: number; km: number; taxi: number | null } {
+/** 票价："¥5"，没查到为空。 */
+export function fareText(fee?: number | null): string {
+  return fee == null ? "" : `¥${Number.isInteger(fee) ? fee : fee.toFixed(1)}`;
+}
+
+/** 有没有可用的地铁公交方案。 */
+export function hasTransit(leg?: ItineraryLeg | null): boolean {
+  return !!leg?.transit && leg.transit.minutes > 0;
+}
+
+/** 有没有打车（驾车）数据；早先只存了驾车的路段，数据在 minutes、km 里。 */
+export function hasDrive(leg?: ItineraryLeg | null): boolean {
+  return !!leg && (leg.driveMinutes != null || leg.mode === "DRIVE");
+}
+
+/** 路程的文字："地铁 8号线 → 15号线 · 35 分钟 · ¥5/人" / "打车 25 分钟 · 12 公里" / "步行 8 分钟"。 */
+export function legText(leg?: ItineraryLeg): string {
+  if (!leg) return "";
+  if (leg.mode === "WALK") return `步行 ${leg.minutes} 分钟`;
+  if (leg.mode === "TRANSIT") {
+    const fee = fareText(leg.transit?.fee);
+    return `${linesText(leg.transit?.lines)} · ${leg.minutes} 分钟${fee ? ` · ${fee}/人` : ""}`;
+  }
+  return `打车 ${leg.minutes} 分钟 · ${leg.km} 公里${leg.taxi ? ` · 约 ¥${leg.taxi}` : ""}`;
+}
+
+/** 另一种方式的文字（地铁公交段给打车的，打车段给地铁公交的），没有另一种时为空。 */
+export function legAltText(leg?: ItineraryLeg): string {
+  if (!leg || leg.mode === "WALK") return "";
+  if (leg.mode === "TRANSIT") {
+    if (!hasDrive(leg)) return "";
+    return `打车约 ${leg.driveMinutes} 分钟${leg.taxi ? ` · ¥${leg.taxi}` : ""}`;
+  }
+  if (!hasTransit(leg)) return "";
+  const fee = fareText(leg.transit!.fee);
+  return `${linesText(leg.transit!.lines)} 约 ${leg.transit!.minutes} 分钟${fee ? ` · ${fee}/人` : ""}`;
+}
+
+/**
+ * 坐地铁公交不太合适时给一句提醒（只提醒，不替用户改）：比打车慢太多、出发太晚可能停运、退房那天拖着行李。
+ * 打车和步行段不提醒。
+ */
+export function legHint(leg: ItineraryLeg | undefined, day: ItineraryDay | null | undefined, stays?: Stay[]): string {
+  if (!leg || leg.mode !== "TRANSIT" || !day) return "";
+  const from = day.items.find((i) => i.id === leg.from);
+  const leave = from?.end || from?.start || "";
+  if (leave >= "22:00") return "出发较晚，地铁可能已停运，建议打车";
+  if (from?.type === "HOTEL" && stays?.some((s) => s.checkOut === day.date)) return "退房拖着行李，建议打车";
+  if (hasDrive(leg) && leg.driveMinutes) {
+    const saved = leg.minutes - leg.driveMinutes;
+    if (saved >= 30 && leg.minutes >= leg.driveMinutes * 1.8) return `打车能省 ${saved} 分钟`;
+  }
+  return "";
+}
+
+/** 要不要让后端补一次地理信息：没补过坐标，或早先算的路程缺打车费、远的路段还没查地铁公交。 */
+export function needsGeo(it?: { geo?: boolean; days: ItineraryDay[] } | null): boolean {
+  if (!it) return false;
+  if (!it.geo) return true;
+  return it.days.some((d) => d.legs?.some((l) => l.mode !== "WALK" && (!l.transit || (l.mode === "DRIVE" && l.taxi == null))));
+}
+
+/** 一天的路程汇总：总分钟、总公里、打车费（选了打车的段，都没查到时为空）、地铁公交票价（每人，没有时为空）。 */
+export function dayTravel(day?: ItineraryDay | null): { minutes: number; km: number; taxi: number | null; fare: number | null } {
   const legs = day?.legs || [];
-  const taxis = legs.filter((l) => l.taxi != null);
+  const taxis = legs.filter((l) => l.mode === "DRIVE" && l.taxi != null);
+  const fares = legs.filter((l) => l.mode === "TRANSIT" && l.transit?.fee != null);
   return {
     minutes: legs.reduce((s, l) => s + l.minutes, 0),
     km: Math.round(legs.reduce((s, l) => s + l.km, 0) * 10) / 10,
     taxi: taxis.length ? taxis.reduce((s, l) => s + (l.taxi || 0), 0) : null,
+    fare: fares.length ? Math.round(fares.reduce((s, l) => s + (l.transit!.fee || 0), 0) * 10) / 10 : null,
   };
 }
 

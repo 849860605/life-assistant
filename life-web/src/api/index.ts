@@ -40,6 +40,10 @@ export const api = {
     request<TripDetail>("POST", `/api/v1/trips/${id}/booking/${targetId}` + qs({ status })),
   setDone: (id: number, itemId: string, done: boolean) =>
     request<TripDetail>("POST", `/api/v1/trips/${id}/done/${itemId}?done=${done}`),
+  setTransport: (id: number, mode: "TRANSIT" | "DRIVE") =>
+    request<TripDetail>("POST", `/api/v1/trips/${id}/transport?mode=${mode}`),
+  setLegMode: (id: number, from: string, to: string, mode: "TRANSIT" | "DRIVE") =>
+    request<TripDetail>("POST", `/api/v1/trips/${id}/legs/${from}/${to}?mode=${mode}`),
   tripGeo: (id: number) => request<TripDetail>("POST", `/api/v1/trips/${id}/geo`),
   alternatives: (id: number, itemId: string, keyword?: string) =>
     request<Place[]>("GET", `/api/v1/trips/${id}/items/${itemId}/alternatives` + qs({ keyword })),

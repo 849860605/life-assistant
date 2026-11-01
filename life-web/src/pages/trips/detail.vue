@@ -21,6 +21,10 @@
         <text class="muted">版本</text>
         <text v-for="v in versions" :key="v.version" class="ver" :class="{ on: v.version === detail?.version.version }" @click="load(v.version)">{{ v.version }}</text>
       </view>
+      <view v-if="isCurrent" class="ed-chip mode-chip">
+        <text class="muted">出行</text>
+        <text v-for="m in MODES" :key="m.v" class="ver" :class="{ on: transport === m.v }" @click="setTransport(m.v)">{{ m.label }}</text>
+      </view>
       <text v-if="geoLoading" class="ed-tag">正在补地图信息…</text>
     </view>
     <view v-if="saved" class="saved">
@@ -88,7 +92,7 @@
                 </view>
               </view>
             </view>
-            <view v-if="legFrom(day, item.id)" class="tl-leg"><Icon :name="legFrom(day, item.id)!.mode === 'WALK' ? 'users' : 'car'" :size="13" color="var(--muted)" />{{ legText(legFrom(day, item.id)) }}</view>
+            <view v-if="legFrom(day, item.id)" class="tl-leg"><LegRow :leg="legFrom(day, item.id)!" :day="day" :stays="stays" :editable="isCurrent" :busy="modeBusy" @mode="setLegMode(legFrom(day, item.id)!, $event)" /></view>
           </template>
         </view>
         <view class="tl-add" @click="addStop"><Icon name="plus" :size="16" color="var(--accent)" />添加景点 / 活动</view>
@@ -177,7 +181,7 @@
               <view class="ri-grid">
                 <view class="ri"><Icon name="route" :size="18" color="var(--accent)" /><view><view class="ov-k">总距离</view><view class="ov-v">{{ travel.km ? `约 ${travel.km} 公里` : "—" }}</view></view></view>
                 <view class="ri"><Icon name="car" :size="18" color="var(--accent)" /><view><view class="ov-k">路上</view><view class="ov-v">{{ travel.minutes ? duration2(travel.minutes) : "—" }}</view></view></view>
-                <view class="ri"><Icon name="users" :size="18" color="var(--accent)" /><view><view class="ov-k">步行段</view><view class="ov-v">{{ walkLegs }} / {{ day?.legs?.length || 0 }} 段</view></view></view>
+                <view class="ri"><Icon name="wallet" :size="18" color="var(--accent)" /><view><view class="ov-k">交通费</view><view class="ov-v">{{ fareText }}</view></view></view>
               </view>
             </view>
           </template>
@@ -242,6 +246,10 @@
       </scroll-view>
 
       <view v-if="tab === '行程总览' && day" class="timeline">
+        <view v-if="isCurrent" class="m-mode">
+          <text class="muted small">出行方式</text>
+          <view class="m-mode-seg"><text v-for="m in MODES" :key="m.v" class="m-mode-item" :class="{ on: transport === m.v }" @click="setTransport(m.v)">{{ m.label }}</text></view>
+        </view>
         <view v-if="day.theme" class="day-theme">{{ day.theme }}</view>
         <view v-for="(item, i) in day.items" :key="item.id" class="stop">
           <view class="rail">
@@ -283,7 +291,7 @@
               </view>
               <view class="grip" @click="edit"><Icon name="grip" :size="16" color="var(--muted)" /></view>
             </view>
-            <view v-if="legFrom(day, item.id)" class="stop-leg"><Icon name="car" :size="12" color="var(--muted)" />到下一站 {{ legText(legFrom(day, item.id)) }}</view>
+            <view v-if="legFrom(day, item.id)" class="stop-leg"><LegRow :leg="legFrom(day, item.id)!" :day="day" :stays="stays" :editable="isCurrent" :busy="modeBusy" prefix="到下一站 " @mode="setLegMode(legFrom(day, item.id)!, $event)" /></view>
           </view>
         </view>
         <view class="add" @click="addStop"><Icon name="plus" :size="16" color="var(--accent)" /><text>添加景点/活动</text></view>
@@ -347,15 +355,16 @@ import { onLoad, onShow } from "@dcloudio/uni-app";
 import { api } from "../../api";
 import { API_BASE, showError } from "../../api/http";
 import { ensureMediaTicket } from "../../utils/media";
-import type { ChangeReason, ItineraryDay, ItineraryItem, Place, ScheduleEvent, Stay, TripDetail, TripVersion } from "../../api/types";
+import type { ChangeReason, ItineraryDay, ItineraryItem, ItineraryLeg, Place, ScheduleEvent, Stay, TripDetail, TripVersion } from "../../api/types";
 import Icon from "../../components/Icon.vue";
 import MarkdownView from "../../components/MarkdownView.vue";
 import ReplaceModal from "../../components/ReplaceModal.vue";
 import StayCard from "../../components/StayCard.vue";
+import LegRow from "../../components/LegRow.vue";
 import Shell from "../../components/Shell.vue";
 import { useWide } from "../../utils/screen";
-import { doneable, doneText, hm, openUrl, shortDate } from "../../utils/format";
-import { amapNavUrl, amapUrl, cityOf, dayMapUrl, dayTravel, distanceText, duration as duration2, legFrom, legText, located } from "../../utils/place";
+import { doneable, doneText, hm, mdw, openUrl, shortDate } from "../../utils/format";
+import { amapNavUrl, amapUrl, cityOf, dayMapUrl, dayTravel, distanceText, duration as duration2, legFrom, located, needsGeo } from "../../utils/place";
 
 /**
  * 行程详情（原型④）：按天切换的时间线，每项可以保留、换一个、不感兴趣，改完存成新版本。
@@ -367,6 +376,8 @@ const TYPE_ICON: Record<string, string> = { SPOT: "pin", FOOD: "food", HOTEL: "b
 const EDITABLE = ["SPOT", "FOOD", "HOTEL"];
 /** 这些类型能标记已预约（交通是机票、火车票这类） */
 const BOOKABLE = ["SPOT", "FOOD", "HOTEL", "TRANSPORT"];
+/** 整个行程默认的出行方式 */
+const MODES = [{ v: "TRANSIT", label: "地铁公交" }, { v: "DRIVE", label: "打车" }] as const;
 
 const tripId = ref(0);
 const detail = ref<TripDetail | null>(null);
@@ -402,6 +413,17 @@ const tips = computed(() => detail.value?.version.itinerary?.tips);
 const totalCost = computed(() => days.value.reduce((s, d) => s + dayCost(d), 0));
 const travel = computed(() => dayTravel(day.value));
 const walkLegs = computed(() => (day.value?.legs || []).filter((l) => l.mode === "WALK").length);
+/** 当天交通费：地铁公交每人票价加打车费，都没有时显示步行段数 */
+const fareText = computed(() => {
+  const parts = [];
+  if (travel.value.fare != null) parts.push(`地铁公交 ¥${travel.value.fare}/人`);
+  if (travel.value.taxi != null) parts.push(`打车 ¥${travel.value.taxi}`);
+  return parts.length ? parts.join(" + ") : walkLegs.value ? "全程步行" : "—";
+});
+/** 行程默认怎么走，没设过按地铁公交 */
+const transport = computed(() => (detail.value?.version.itinerary?.transport === "DRIVE" ? "DRIVE" : "TRANSIT"));
+/** 正在切换出行方式，避免连点 */
+const modeBusy = ref(false);
 const dayMap = computed(() => dayMapUrl(day.value, 380, 270));
 /** 当天大图：第一张有照片的景点，没有就用任意有照片的项 */
 const dayHero = computed(() => {
@@ -547,8 +569,23 @@ function changeNeeds() {
   go("/pages/chat/chat?q=" + encodeURIComponent(`我想修改行程「${trip.value?.title}」（tripId=${tripId.value}）的需求`));
 }
 
+/** 让助手重排当天时可选的方向 */
+const REGEN = ["太赶了，安排轻松点", "路线更顺，少走回头路", "换几个别的景点", "多安排点当地好吃的"];
+
+/** 先选想怎么改，再带上要保留的项（标了保留、已预约、已去过的）交给助手，免得助手再反问 */
 function regenerate() {
-  go("/pages/chat/chat?q=" + encodeURIComponent(`帮我重新安排行程「${trip.value?.title}」（tripId=${tripId.value}）的第${dayIndex.value + 1}天，保留我标了保留的地方`));
+  uni.showActionSheet({
+    itemList: REGEN,
+    success: (r) => {
+      const d = day.value;
+      if (!d) return;
+      const keep = d.items.filter((x) => x.locked || isBooked(x.id) || isDone(x.id)).map((x) => x.name);
+      const text = `帮我重新安排行程「${trip.value?.title}」（tripId=${tripId.value}）的第${dayIndex.value + 1}天：${REGEN[r.tapIndex]}。`
+        + (keep.length ? `这些保留不动：${keep.join("、")}。` : "没有必须保留的地方。")
+        + "直接按这个改好保存。";
+      go("/pages/chat/chat?q=" + encodeURIComponent(text));
+    },
+  });
 }
 
 function openFood() {
@@ -577,6 +614,32 @@ async function toggleDone(item: ItineraryItem) {
     detail.value = await api.setDone(tripId.value, item.id, done);
   } catch (e) {
     showError(e);
+  }
+}
+
+/** 整个行程改成坐地铁公交或打车，单独改过的路段一起恢复成默认 */
+async function setTransport(mode: "TRANSIT" | "DRIVE") {
+  if (mode === transport.value || modeBusy.value) return;
+  modeBusy.value = true;
+  try {
+    detail.value = await api.setTransport(tripId.value, mode);
+    uni.showToast({ title: mode === "DRIVE" ? "已改成打车" : "已改成坐地铁公交", icon: "none" });
+  } catch (e) {
+    showError(e);
+  } finally {
+    modeBusy.value = false;
+  }
+}
+
+/** 单独改一段路怎么走 */
+async function setLegMode(leg: ItineraryLeg, mode: "TRANSIT" | "DRIVE") {
+  modeBusy.value = true;
+  try {
+    detail.value = await api.setLegMode(tripId.value, leg.from, leg.to, mode);
+  } catch (e) {
+    showError(e);
+  } finally {
+    modeBusy.value = false;
   }
 }
 
@@ -759,7 +822,8 @@ async function loadEvents() {
 
 function eventTime(iso: string) {
   const d = new Date(iso);
-  return `${d.getMonth() + 1}月${d.getDate()}日 ${hm(d)}`;
+  const w = mdw(d);
+  return `${w.month}月${w.day}日 ${hm(d)}`;
 }
 
 async function confirmTrip() {
@@ -797,7 +861,7 @@ async function load(version?: number) {
     detail.value = d;
     uni.setNavigationBarTitle({ title: d.trip.title });
     const it = d.version.itinerary;
-    if (it && !it.geo && d.version.version === d.trip.currentVer) {
+    if (needsGeo(it) && d.version.version === d.trip.currentVer) {
       geoLoading.value = true;
       try {
         const g = await api.tripGeo(tripId.value);
@@ -867,7 +931,7 @@ async function loadVersions() {
 .tl-card.locked { border-color: var(--ok); }
 .kept-tag { font-size: 11px; font-weight: 600; color: var(--ok); background: var(--ok-soft); padding: 1px 6px; border-radius: 4px; }
 .tl-facts .star { color: var(--price); font-weight: 700; }
-.ver-chip { gap: 4px; }
+.ver-chip, .mode-chip { gap: 4px; }
 .ver { min-width: 22px; text-align: center; font-size: 12px; padding: 1px 6px; border-radius: 6px; cursor: pointer; }
 .ver.on { background: var(--accent); color: #fff; }
 .saved { display: flex; align-items: center; gap: 8px; padding: 10px 14px; margin-bottom: 14px; border-radius: 12px; background: var(--ok-soft); font-size: 14px; }
@@ -878,13 +942,17 @@ async function loadVersions() {
 .ph.FOOD { background: linear-gradient(135deg, #fdba74, #f97316); }
 .pad { padding: 12px 0; }
 .near-btn.done { color: var(--ok); background: var(--ok-soft); cursor: default; }
-.stop-leg { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--line); }
+.stop-leg { margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--line); }
+.m-mode { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.m-mode-seg { display: flex; background: var(--surface-2); border-radius: 8px; padding: 2px; }
+.m-mode-item { font-size: 13px; padding: 4px 12px; border-radius: 6px; color: var(--muted); cursor: pointer; }
+.m-mode-item.on { background: var(--surface); color: var(--accent); font-weight: 700; }
 .tl-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .a { display: flex; align-items: center; gap: 3px; font-size: 12px; padding: 5px 8px; border-radius: 8px; border: 1px solid var(--line); cursor: pointer; white-space: nowrap; }
 .a.keep { color: var(--ok); background: var(--ok-soft); border-color: transparent; }
 .a.keep.on { border-color: var(--ok); }
 .a.swap { color: var(--accent); border-color: var(--accent); }
-.tl-leg { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); padding: 10px 0 10px 74px; }
+.tl-leg { padding: 10px 0 10px 74px; }
 .tl-add { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 12px; border: 1.5px dashed var(--line); border-radius: 12px; color: var(--accent); cursor: pointer; }
 .day-hero { position: relative; border-radius: 16px; overflow: hidden; height: 300px; }
 .day-hero-img { width: 100%; height: 100%; }

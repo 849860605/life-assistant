@@ -154,6 +154,9 @@ public class FlightTools {
         } catch (RuntimeException e) {
             return new LinkedHashMap<>(Map.of("error", "日期格式不对，要 yyyy-MM-dd"));
         }
+        if (day.isBefore(LocalDate.now())) {
+            return new LinkedHashMap<>(Map.of("error", day + " 已经过去了，换一个今天以后的日期再查"));
+        }
         List<FlightPriceSource> active = sources.stream().filter(FlightPriceSource::available).toList();
         List<FlightPriceSource.Result> results = new ArrayList<>();
         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
@@ -177,7 +180,30 @@ public class FlightTools {
         out.put("date", day.toString());
         out.put("platforms", platforms);
         out.put("flights", flights);
+        if (flights.isEmpty()) {
+            out.put("notice", emptyNotice(day, results));
+        }
         return out;
+    }
+
+    /** 离出发超过这么多天还一班都查不到，多半是航司还没放出这天的航班 */
+    private static final int FAR_DAYS = 300;
+
+    /**
+     * 一班都没查到时给用户看的一句话：日期太远多半是还没开售；额度用完、平台出错单独说明；其余是这条航线这天没有直飞或平台都没有数据。
+     */
+    static String emptyNotice(LocalDate day, List<FlightPriceSource.Result> results) {
+        long ahead = java.time.temporal.ChronoUnit.DAYS.between(LocalDate.now(), day);
+        if (ahead > FAR_DAYS) {
+            return day.getMonthValue() + "月" + day.getDayOfMonth() + "日离现在还有 " + ahead
+                    + " 天，各平台都还查不到这天的航班，多半是航司还没开售。建议出发前两三个月再来比价。";
+        }
+        boolean quota = results.stream().anyMatch(r -> r.note() != null && r.note().contains("额度"));
+        boolean failed = results.stream().allMatch(r -> "FAILED".equals(r.status()));
+        if (failed) {
+            return quota ? "这会儿各平台的查询额度用完或暂时出错了，过一会儿或明天再试。" : "各平台这会儿都查询出错了，稍后再试一次。";
+        }
+        return "各平台都没查到这天的航班，可能这条航线没有直飞，或者这天已经售完。可以换个日期，或者查附近城市的机场。";
     }
 
     /** 卡片的文字版：序号、航班号、起降时间、最低价和平台。 */

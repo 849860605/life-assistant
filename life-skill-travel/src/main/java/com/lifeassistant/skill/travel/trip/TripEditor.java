@@ -153,20 +153,27 @@ public class TripEditor {
                 place.rating());
     }
 
-    /** 一天路上的合计：分钟、公里、打车费（驾车段高德估的，都查不到为空）、步行段数、驾车段数、最后一项结束时间。 */
-    public record DayTotals(int minutes, double km, Integer taxi, int walks, int drives, String endsAt) {
+    /**
+     * 一天路上的合计：分钟、公里、打车费（选了打车的路段，高德估的，都查不到为空）、步行段数、打车段数、最后一项结束时间，
+     * 地铁公交段数和票价（元/人，都查不到为空）。
+     */
+    public record DayTotals(int minutes, double km, Integer taxi, int walks, int drives, String endsAt, int transits,
+                            Double fare) {
 
         static DayTotals of(Itinerary.Day day) {
             List<Itinerary.Leg> legs = day.legs() == null ? List.of() : day.legs();
             int minutes = legs.stream().mapToInt(Itinerary.Leg::minutes).sum();
             double km = Math.round(legs.stream().mapToDouble(Itinerary.Leg::km).sum() * 10) / 10.0;
-            boolean anyTaxi = legs.stream().anyMatch(l -> l.taxi() != null);
-            Integer taxi = anyTaxi ? legs.stream().map(Itinerary.Leg::taxi).filter(Objects::nonNull)
-                    .mapToInt(Integer::intValue).sum() : null;
-            int walks = (int) legs.stream().filter(l -> "WALK".equals(l.mode())).count();
+            List<Itinerary.Leg> drives = legs.stream().filter(l -> Itinerary.DRIVE.equals(l.mode())).toList();
+            List<Itinerary.Leg> rides = legs.stream().filter(l -> Itinerary.TRANSIT.equals(l.mode())).toList();
+            Integer taxi = drives.stream().anyMatch(l -> l.taxi() != null) ? drives.stream().map(Itinerary.Leg::taxi)
+                    .filter(Objects::nonNull).mapToInt(Integer::intValue).sum() : null;
+            Double fare = rides.stream().anyMatch(l -> l.transit().fee() != null) ? rides.stream()
+                    .map(l -> l.transit().fee()).filter(Objects::nonNull).mapToDouble(Double::doubleValue).sum() : null;
+            int walks = (int) legs.stream().filter(l -> Itinerary.WALK.equals(l.mode())).count();
             String endsAt = day.items().stream().map(i -> i.end() != null ? i.end() : i.start()).filter(Objects::nonNull)
                     .max(Comparator.naturalOrder()).orElse(null);
-            return new DayTotals(minutes, km, taxi, walks, legs.size() - walks, endsAt);
+            return new DayTotals(minutes, km, taxi, walks, drives.size(), endsAt, rides.size(), fare);
         }
     }
 
@@ -504,6 +511,52 @@ public class TripEditor {
         });
     }
 
+    /** 改整个行程默认怎么走（TRANSIT 地铁公交 / DRIVE 打车），单独改过的路段一起清掉。只改当前版本，不算新版本。 */
+    public TripService.TripDetail setTransport(UserCtx ctx, long tripId, String transport) {
+        String mode = checkMode(transport);
+        return saveTransport(ctx, tripId, it -> it.withTransport(mode, null));
+    }
+
+    /** 单独改一段路怎么走；和行程默认一样就不单独记。只改当前版本，不算新版本。 */
+    public TripService.TripDetail setLegMode(UserCtx ctx, long tripId, String from, String to, String mode) {
+        String wanted = checkMode(mode);
+        return saveTransport(ctx, tripId, it -> {
+            boolean exists = it.days().stream().filter(d -> d.legs() != null).flatMap(d -> d.legs().stream())
+                    .anyMatch(l -> l.from().equals(from) && l.to().equals(to));
+            if (!exists) {
+                throw new BizException(ErrorCode.NOT_FOUND, "没找到这段路");
+            }
+            Map<String, String> modes = new HashMap<>(it.legModes() == null ? Map.of() : it.legModes());
+            String key = from + ">" + to;
+            if (wanted.equals(Itinerary.DRIVE.equals(it.transport()) ? Itinerary.DRIVE : Itinerary.TRANSIT)) {
+                modes.remove(key);
+            } else {
+                modes.put(key, wanted);
+            }
+            return it.withTransport(it.transport(), modes);
+        });
+    }
+
+    private static String checkMode(String mode) {
+        if (!Itinerary.TRANSIT.equals(mode) && !Itinerary.DRIVE.equals(mode)) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "出行方式只能是 TRANSIT 或 DRIVE");
+        }
+        return mode;
+    }
+
+    private TripService.TripDetail saveTransport(UserCtx ctx, long tripId, java.util.function.UnaryOperator<Itinerary> change) {
+        return locked(tripId, () -> {
+            TripService.TripDetail detail = tripService.get(ctx, tripId, null);
+            Itinerary updated = change.apply(itinerary(detail));
+            String json = json(updated);
+            String content = updated.toMarkdown();
+            tripService.updateItinerary(tripId, detail.version().getVersion(), json, content);
+            detail.version().setItinerary(json);
+            detail.version().setContent(content);
+            return detail;
+        });
+    }
+
     /**
      * 复制行程：当前版本的逐日安排存成一个新的草稿行程，标题加"（副本）"，预订状态全部清空；
      * 给了 newStart 就把所有日期整体平移到从那天开始。
@@ -524,7 +577,8 @@ public class TripEditor {
                             shiftDate(st.checkOut(), shift), st.address(), st.price(), st.platform(), st.url(),
                             st.queriedAt(), st.quotes(), st.options(), st.poiId(), st.lng(), st.lat(), st.photo(),
                             st.rating())).toList();
-            Itinerary copied = new Itinerary(days, itinerary.tips(), itinerary.geo(), stays, null, null);
+            Itinerary copied = new Itinerary(days, itinerary.tips(), itinerary.geo(), stays, null, null, null,
+                    itinerary.transport(), itinerary.legModes());
             json = json(copied);
             content = copied.toMarkdown();
         }
@@ -1367,7 +1421,7 @@ public class TripEditor {
                 return known;
             }
             Itinerary itinerary = parse(detail.version().getItinerary());
-            if (itinerary == null || Boolean.TRUE.equals(itinerary.geo()) && !missingTaxi(itinerary)) {
+            if (itinerary == null || Boolean.TRUE.equals(itinerary.geo()) && !missingRoutes(itinerary)) {
                 return detail;
             }
             String json = json(geo.enrich(itinerary, detail.trip().getDestination()));
@@ -1377,10 +1431,11 @@ public class TripEditor {
         });
     }
 
-    /** 早先算的驾车路程没存打车费，补一次。 */
-    static boolean missingTaxi(Itinerary itinerary) {
+    /** 早先算的驾车路程没存打车费、远的路段还没查公交，补一次。 */
+    static boolean missingRoutes(Itinerary itinerary) {
         return itinerary.days().stream().filter(d -> d.legs() != null).flatMap(d -> d.legs().stream())
-                .anyMatch(l -> "DRIVE".equals(l.mode()) && l.taxi() == null);
+                .anyMatch(l -> !Itinerary.WALK.equals(l.mode()) && (l.transit() == null
+                        || Itinerary.DRIVE.equals(l.mode()) && l.taxi() == null));
     }
 
     /** 在这个行程的锁里执行；锁是可重入的，里面再调别的加锁方法没问题。用 ReentrantLock 而不是 synchronized，免得卡住虚拟线程。 */
@@ -1501,7 +1556,7 @@ public class TripEditor {
 
     private String json(Itinerary itinerary) {
         try {
-            return objectMapper.writeValueAsString(itinerary);
+            return objectMapper.writeValueAsString(itinerary.resolveLegs());
         } catch (JsonProcessingException e) {
             throw new IllegalStateException(e);
         }

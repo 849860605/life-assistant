@@ -79,15 +79,29 @@ export interface ItineraryItem {
   rating?: number;
 }
 
-/** 相邻两项之间的路程：WALK 步行、DRIVE 打车/自驾 */
+/** 一段公交方案（高德，地铁优先）：minutes 为 0 表示查过、没有公交方案；fee 是每人票价 */
+export interface LegTransit {
+  minutes: number;
+  fee?: number | null;
+  walkKm?: number | null;
+  lines?: string[];
+}
+
+/**
+ * 相邻两项之间的路程：mode 是所选方式（WALK 步行、TRANSIT 地铁公交、DRIVE 打车），minutes、km 跟着所选方式。
+ * 远的路段两种都查了：driveMinutes、driveKm、taxi 是打车的，transit 是地铁公交的，用来显示另一种方式。
+ */
 export interface ItineraryLeg {
   from: string;
   to: string;
-  mode: "WALK" | "DRIVE";
+  mode: "WALK" | "TRANSIT" | "DRIVE";
   minutes: number;
   km: number;
   /** 高德估的打车费（元），步行段没有 */
   taxi?: number | null;
+  driveMinutes?: number | null;
+  driveKm?: number | null;
+  transit?: LegTransit | null;
 }
 
 export interface ItineraryDay {
@@ -148,6 +162,10 @@ export interface Itinerary {
   tips?: string;
   /** 已经补过坐标和路程 */
   geo?: boolean;
+  /** 整个行程默认怎么走：TRANSIT 地铁公交（空也按它）、DRIVE 打车 */
+  transport?: "TRANSIT" | "DRIVE" | null;
+  /** 单独改过的路段，键是"起点 id>终点 id" */
+  legModes?: Record<string, "TRANSIT" | "DRIVE">;
 }
 
 /** 高德地点 */
@@ -169,7 +187,7 @@ export interface Place {
   tags?: string[];
 }
 
-/** 一天路上的合计（全部来自高德）：分钟、公里、打车费、步行段数、驾车段数、最后一项结束时间 */
+/** 一天路上的合计（全部来自高德）：分钟、公里、打车费、步行段数、打车段数、最后一项结束时间、地铁公交段数和票价（每人） */
 export interface DayTotals {
   minutes: number;
   km: number;
@@ -177,6 +195,8 @@ export interface DayTotals {
   walks: number;
   drives: number;
   endsAt: string | null;
+  transits?: number;
+  fare?: number | null;
 }
 
 /** 改动预览（没保存）：第几天、改动前后的这一天和合计；changed 为 false 表示没必要改 */
@@ -364,6 +384,8 @@ export interface FlightSearch {
   flights: Flight[];
   queriedAt: string;
   error?: string;
+  /** 一班都没查到时的说明（日期太远还没开售、额度用完等） */
+  notice?: string;
 }
 
 /** 携程问道给的行李额、退改签说明（一般规则，以购票页面为准） */

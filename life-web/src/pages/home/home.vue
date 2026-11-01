@@ -254,8 +254,8 @@ import CityPicker from "../../components/CityPicker.vue";
 import Icon from "../../components/Icon.vue";
 import Shell from "../../components/Shell.vue";
 import { cityCover, citySpots } from "../../utils/cover";
-import { shortDate, weekday, ymd } from "../../utils/format";
-import { cityOf, currentCity, dayMapUrl, dayTravel, duration, mapUrl, setCurrentCity } from "../../utils/place";
+import { addDays, shortDate, weekday, ymd } from "../../utils/format";
+import { cityOf, currentCity, dayMapUrl, dayTravel, duration, mapUrl, needsGeo, setCurrentCity } from "../../utils/place";
 import { useWide } from "../../utils/screen";
 
 /**
@@ -328,10 +328,10 @@ const today = ymd(new Date());
 const ORIGIN_KEY = "life_origin";
 const origin = ref<string>(uni.getStorageSync(ORIGIN_KEY) || "");
 const destination = ref(city);
-const flightDate = ref(ymd(addDays(new Date(), 7)));
+const flightDate = ref(addDays(ymd(new Date()), 7));
 const hotelPlace = ref("");
-const checkIn = ref(ymd(addDays(new Date(), 7)));
-const checkOut = ref(ymd(addDays(new Date(), 8)));
+const checkIn = ref(addDays(ymd(new Date()), 7));
+const checkOut = ref(addDays(ymd(new Date()), 8));
 
 const FEATURES = [
   { label: "个性化行程", icon: "checkCircle" },
@@ -392,7 +392,7 @@ async function loadTrip() {
     cityCover(cityOf(trip.value.destination || trip.value.title)).then((url) => (tripCover.value = url));
     let detail = await api.trip(trip.value.id);
     days.value = detail.version.itinerary?.days || [];
-    if (detail.version.itinerary && !detail.version.itinerary.geo) {
+    if (needsGeo(detail.version.itinerary)) {
       detail = await api.tripGeo(trip.value.id);
       days.value = detail.version.itinerary?.days || [];
     }
@@ -416,13 +416,10 @@ function dateRange(t: Trip): string {
 function statusText(t: Trip): string {
   if (t.status === "DRAFT") return "草稿";
   if (t.status === "FINISHED" || (t.endDate && t.endDate < today)) return "已完成";
-  return "进行中";
-}
-
-function addDays(d: Date, n: number): Date {
-  const out = new Date(d);
-  out.setDate(out.getDate() + n);
-  return out;
+  if (!t.startDate) return "日期待定";
+  if (t.startDate <= today) return "进行中";
+  const n = Math.round((Date.parse(t.startDate) - Date.parse(today)) / 86400000);
+  return n === 1 ? "明天出发" : `${n} 天后出发`;
 }
 
 function go(url: string) {
@@ -464,7 +461,7 @@ function searchFlights() {
 
 function setCheckIn(v: string) {
   checkIn.value = v;
-  if (checkOut.value <= v) checkOut.value = ymd(addDays(new Date(`${v}T00:00:00`), 1));
+  if (checkOut.value <= v) checkOut.value = addDays(v, 1);
 }
 
 function searchHotels() {

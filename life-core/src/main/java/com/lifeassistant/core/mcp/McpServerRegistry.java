@@ -42,10 +42,11 @@ public class McpServerRegistry {
     private record Connection(McpSyncClient client, List<ToolCallback> tools) {
     }
 
-    /** 这个服务是否配置了地址和 Key。 */
+    /** 这个服务是否配置了地址和 Key（Key 写成 false 表示关掉）。 */
     public boolean configured(String name) {
         LifeProperties.McpServer server = servers.get(name);
-        return server != null && StringUtils.hasText(server.getUrl()) && StringUtils.hasText(server.getApiKey());
+        return server != null && StringUtils.hasText(server.getUrl()) && StringUtils.hasText(server.getApiKey())
+                && !"false".equalsIgnoreCase(server.getApiKey());
     }
 
     /** 取某个服务的工具；没配置、连不上或在重试冷却期内返回空列表。 */
@@ -92,7 +93,8 @@ public class McpServerRegistry {
                     .clientInfo(new McpSchema.Implementation("life-assistant", "0.1.0"))
                     .build();
             client.initialize();
-            List<ToolCallback> tools = List.of(new SyncMcpToolCallbackProvider(client).getToolCallbacks());
+            List<ToolCallback> tools = java.util.Arrays.stream(new SyncMcpToolCallbackProvider(client).getToolCallbacks())
+                    .map(t -> (ToolCallback) new ResettingTool(name, t)).toList();
             failedAt.remove(name);
             log.info("已连接 MCP 服务 {}，工具：{}", name,
                     tools.stream().map(t -> t.getToolDefinition().name()).toList());
@@ -104,6 +106,60 @@ public class McpServerRegistry {
                 client.closeGracefully();
             }
             return null;
+        }
+    }
+
+    /** 调用出错（会话失效、服务端 502 等）时丢掉这个连接，下一轮对话重新连，不用重启应用。 */
+    private void reset(String name) {
+        Connection old = connections.remove(name);
+        if (old != null) {
+            log.warn("MCP 服务 {} 调用出错，下次用到时重新连接", name);
+            try {
+                old.client().closeGracefully();
+            } catch (RuntimeException ignored) {
+                // 已经断了，不用管
+            }
+        }
+    }
+
+    /** 包一层工具：调用抛异常时重置连接再把异常抛给调用方（模型会看到工具出错，改用别的办法）。 */
+    private final class ResettingTool implements ToolCallback {
+        private final String server;
+        private final ToolCallback delegate;
+
+        ResettingTool(String server, ToolCallback delegate) {
+            this.server = server;
+            this.delegate = delegate;
+        }
+
+        @Override
+        public org.springframework.ai.tool.definition.ToolDefinition getToolDefinition() {
+            return delegate.getToolDefinition();
+        }
+
+        @Override
+        public org.springframework.ai.tool.metadata.ToolMetadata getToolMetadata() {
+            return delegate.getToolMetadata();
+        }
+
+        @Override
+        public String call(String toolInput) {
+            try {
+                return delegate.call(toolInput);
+            } catch (RuntimeException e) {
+                reset(server);
+                throw e;
+            }
+        }
+
+        @Override
+        public String call(String toolInput, org.springframework.ai.chat.model.ToolContext toolContext) {
+            try {
+                return delegate.call(toolInput, toolContext);
+            } catch (RuntimeException e) {
+                reset(server);
+                throw e;
+            }
         }
     }
 
