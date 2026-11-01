@@ -1,6 +1,8 @@
 # 密钥类配置都来自环境变量（.env），不要写进这个文件
 server:
   port: ${SERVER_PORT:8080}
+  # 部署在 Nginx 后面时从 X-Forwarded-For 取真实客户端 IP（只信任内网和本机来的代理），登录防刷按 IP 计数要用
+  forward-headers-strategy: native
 
 spring:
   application:
@@ -63,8 +65,12 @@ sa-token:
   is-log: false
   is-print: false
 
+# 接口文档默认关闭，免得上线后不登录就能看到全部接口；本地需要时设 LIFE_API_DOCS=true
 springdoc:
+  api-docs:
+    enabled: ${LIFE_API_DOCS:false}
   swagger-ui:
+    enabled: ${LIFE_API_DOCS:false}
     path: /swagger-ui.html
 
 management:
@@ -126,8 +132,14 @@ life:
     api-host: ${QWEATHER_API_HOST:}
     api-key: ${QWEATHER_API_KEY:}
   # 没配和风时天气用高德兜底（没有逐小时和预警，日出日落按经纬度计算）
+  # 途牛开放平台 MCP（机票、酒店、门票等）：API Key 放 apiKey 请求头；每分钟 5 次、每天 50 次，所有 Key 共用
+  tuniu:
+    api-key: ${TUNIU_API_KEY:}
   amap:
     key: ${AMAP_KEY:}
+    # Web 端（JS API）Key 和安全密钥：页面上的可拖动地图用；安全密钥只在后端转发时加，不给前端。不配就用静态地图
+    js-key: ${AMAP_JS_KEY:}
+    js-security: ${AMAP_JS_SECURITY:}
   # 行程导出 PDF 用的中文字体目录，没有字体时运行 tools/fetch-fonts.sh
   pdf:
     font-dir: ${LIFE_PDF_FONT_DIR:data/fonts}

@@ -13,10 +13,12 @@ import org.springframework.web.client.RestClientException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Supplier;
 
 /**
@@ -40,6 +42,9 @@ public class AmapPlaceService {
     /** 一张地图最多标的点数，超出的不画也不查路线 */
     private static final int MAX_MARKERS = 10;
     private static final int MAP_CACHE_SIZE = 80;
+    /** 一张地图最多再画几条其他天的路线，每条最多这么多个点（URL 长度有限） */
+    private static final int MAX_LINES = 6;
+    private static final int LINE_POINTS = 40;
 
     /** 高德照片原图几百 KB，列表里用这个参数取 480×360 的缩略图 */
     private static final String THUMB = "?operate=merge&w=480&h=360&position=5";
@@ -68,15 +73,15 @@ public class AmapPlaceService {
 
     /**
      * 一个地点。category 是高德分类的最后一级（如"博物馆"），photo 是第一张照片，cost 是人均（元），
-     * distance 是离搜索中心的米数（周边搜索才有）。
+     * distance 是离搜索中心的米数（周边搜索才有），tags 是高德给的特色标签（如"夜景""演出"），最多 3 个。
      */
     public record Place(String id, String name, String category, String address, String area, Double lng,
                         Double lat, Double rating, Integer cost, String photo, List<String> photos, String tel,
-                        Integer distance) {
+                        Integer distance, List<String> tags) {
     }
 
-    /** 一段驾车路线：分钟、公里、沿途坐标（经度,纬度）。 */
-    public record Route(int minutes, double km, List<double[]> path) {
+    /** 一段驾车路线：分钟、公里、打车费估算（元，可能为空）、沿途坐标（经度,纬度）。 */
+    public record Route(int minutes, double km, Integer taxi, List<double[]> path) {
     }
 
     private record Cached(long at, Object value) {
@@ -152,8 +157,9 @@ public class AmapPlaceService {
         String origin = coord(from[0], from[1]);
         String destination = coord(to[0], to[1]);
         Route route = cached("drive|" + origin + "|" + destination, () -> {
-            JsonNode path = get("/v3/direction/driving", "origin", origin, "destination", destination,
-                    "strategy", "0", "extensions", "base").path("route").path("paths").path(0);
+            JsonNode body = get("/v3/direction/driving", "origin", origin, "destination", destination,
+                    "strategy", "0", "extensions", "all").path("route");
+            JsonNode path = body.path("paths").path(0);
             if (path.isMissingNode()) {
                 return null;
             }
@@ -161,25 +167,46 @@ public class AmapPlaceService {
             for (JsonNode step : path.path("steps")) {
                 points.addAll(parsePoints(step.path("polyline").asText("")));
             }
+            // 打车费只在 extensions=all 时返回
+            Double taxi = number(body, "taxi_cost");
             return new Route((int) Math.round(path.path("duration").asDouble() / 60),
-                    Math.round(path.path("distance").asDouble() / 100) / 10.0, points);
+                    Math.round(path.path("distance").asDouble() / 100) / 10.0,
+                    taxi == null ? null : (int) Math.round(taxi), points);
         });
         return Optional.ofNullable(route);
     }
 
+    /** 地图上额外画的一条线（比如其他几天的路线）：颜色是 6 位十六进制，点按顺序连。 */
+    public record Line(String color, List<double[]> points) {
+    }
+
     /**
-     * 静态地图 PNG：stops 按顺序标 1、2、3…，route 为 true 时用驾车路线把它们连起来；others 是灰色的小标记
-     * （比如候选地点，标 A、B、C…）。宽高是显示尺寸，按两倍清晰度生成。
+     * 一张静态地图要画什么：stops 按顺序标 1、2、3…（marks 为 false 时不画标记，由页面自己叠可点的编号），
+     * route 为 true 时用驾车路线把 stops 连起来；others 是橙色的小标记（比如候选地点，标 A、B、C…）。
+     * w、h 是显示尺寸，按两倍清晰度生成。color 是 stops 和路线的颜色（6 位十六进制，空为蓝色）；
+     * circle 大于 0 时以第一个 stop 为圆心画这么多米的范围圈；lines 是其他几天的路线。
+     * center、zoom 都给了就按它显示（页面要自己算标记位置时用），否则高德自动缩放到能看见所有点。
      */
+    public record MapSpec(List<double[]> stops, boolean route, List<double[]> others, int w, int h, String color,
+                          int circle, List<Line> lines, double[] center, Integer zoom, boolean marks) {
+    }
+
     public byte[] staticMap(List<double[]> allStops, boolean route, List<double[]> allOthers, int width, int height) {
-        List<double[]> stops = allStops.subList(0, Math.min(allStops.size(), MAX_MARKERS));
-        List<double[]> others = allOthers.subList(0, Math.min(allOthers.size(), MAX_MARKERS));
-        int w = Math.max(100, Math.min(width, 1024));
-        int h = Math.max(100, Math.min(height, 1024));
+        return staticMap(new MapSpec(allStops, route, allOthers, width, height, null, 0, List.of(), null, null, true));
+    }
+
+    /** 静态地图 PNG，画法见 MapSpec。其他几天的路线只用已经查过的驾车路线，没查过的画直线，不额外调高德。 */
+    public byte[] staticMap(MapSpec spec) {
+        String main = spec.color() == null ? "0x2563EB" : "0x" + spec.color();
+        List<double[]> stops = spec.stops().subList(0, Math.min(spec.stops().size(), MAX_MARKERS));
+        List<double[]> others = spec.others().subList(0, Math.min(spec.others().size(), MAX_MARKERS));
+        List<Line> lines = spec.lines() == null ? List.of() : spec.lines();
+        int w = Math.max(100, Math.min(spec.w(), 1024));
+        int h = Math.max(100, Math.min(spec.h(), 1024));
         List<String> params = new ArrayList<>(List.of("size", w + "*" + h, "scale", "2"));
         StringBuilder markers = new StringBuilder();
-        for (int i = 0; i < stops.size(); i++) {
-            markers.append(markers.isEmpty() ? "" : "|").append("mid,0x2563EB,").append(i < 9 ? String.valueOf(i + 1) : "0")
+        for (int i = 0; spec.marks() && i < stops.size(); i++) {
+            markers.append(markers.isEmpty() ? "" : "|").append("mid,").append(main).append(",").append(i < 9 ? String.valueOf(i + 1) : "0")
                     .append(":").append(coord(stops.get(i)[0], stops.get(i)[1]));
         }
         for (int i = 0; i < others.size(); i++) {
@@ -190,7 +217,23 @@ public class AmapPlaceService {
             params.add("markers");
             params.add(markers.toString());
         }
-        if (route && stops.size() > 1) {
+        List<String> paths = new ArrayList<>();
+        if (spec.circle() > 0 && !stops.isEmpty()) {
+            paths.add("2," + main + ",0.6," + main + ",0.1:" + String.join(";", ring(stops.get(0), spec.circle()).stream()
+                    .map(p -> coord(p[0], p[1])).toList()));
+        }
+        for (Line extra : lines.subList(0, Math.min(lines.size(), MAX_LINES))) {
+            List<double[]> pts = extra.points().subList(0, Math.min(extra.points().size(), MAX_MARKERS));
+            List<double[]> line = new ArrayList<>();
+            for (int i = 0; i + 1 < pts.size(); i++) {
+                line.addAll(cachedPath(pts.get(i), pts.get(i + 1)));
+            }
+            if (line.size() > 1) {
+                paths.add("4,0x" + extra.color() + ",0.7,,:" + String.join(";", sample(line, LINE_POINTS).stream()
+                        .map(p -> coord(p[0], p[1])).toList()));
+            }
+        }
+        if (spec.route() && stops.size() > 1) {
             List<double[]> line = new ArrayList<>();
             for (int i = 0; i + 1 < stops.size(); i++) {
                 List<double[]> segment = List.of(stops.get(i), stops.get(i + 1));
@@ -202,14 +245,20 @@ public class AmapPlaceService {
                 }
                 line.addAll(segment);
             }
-            params.add("paths");
-            params.add("6,0x2563EB,0.9,,:" + String.join(";", sample(line, MAX_PATH_POINTS).stream()
+            paths.add("6," + main + ",0.9,,:" + String.join(";", sample(line, MAX_PATH_POINTS).stream()
                     .map(p -> coord(p[0], p[1])).toList()));
         }
-        if (stops.isEmpty() && others.isEmpty()) {
+        if (!paths.isEmpty()) {
+            params.add("paths");
+            params.add(String.join("|", paths));
+        }
+        if (stops.isEmpty() && others.isEmpty() && lines.isEmpty()) {
             throw new BizException(ErrorCode.BAD_REQUEST, "地图上至少要有一个点");
         }
-        if (stops.size() + others.size() == 1) {
+        if (spec.center() != null && spec.zoom() != null) {
+            params.addAll(List.of("location", coord(spec.center()[0], spec.center()[1]),
+                    "zoom", String.valueOf(Math.max(3, Math.min(spec.zoom(), 17)))));
+        } else if (stops.size() + others.size() == 1 && spec.circle() <= 0 && lines.isEmpty()) {
             double[] only = stops.isEmpty() ? others.get(0) : stops.get(0);
             params.addAll(List.of("location", coord(only[0], only[1]), "zoom", "14"));
         }
@@ -221,6 +270,77 @@ public class AmapPlaceService {
         byte[] png = loadMap(params);
         mapCache.put(cacheKey, png);
         return png;
+    }
+
+    /**
+     * 驾车距离矩阵：用高德距离测量接口，每个终点查一次（起点一次最多 100 个）。
+     * 返回 [起点][终点] 的 {秒, 米}，查不到的为空。
+     */
+    public long[][][] drivingMatrix(List<double[]> points) {
+        int n = points.size();
+        long[][][] out = new long[n][n][];
+        for (int j = 0; j < n; j++) {
+            List<Integer> from = new ArrayList<>();
+            for (int i = 0; i < n; i++) {
+                if (i != j) {
+                    from.add(i);
+                }
+            }
+            if (from.isEmpty()) {
+                continue;
+            }
+            String origins = String.join("|", from.stream().map(i -> coord(points.get(i)[0], points.get(i)[1])).toList());
+            String destination = coord(points.get(j)[0], points.get(j)[1]);
+            JsonNode results = cached("distance|" + origins + "|" + destination,
+                    () -> get("/v3/distance", "origins", origins, "destination", destination, "type", "1").path("results"));
+            for (JsonNode r : results) {
+                int k = r.path("origin_id").asInt(0) - 1;
+                if (k >= 0 && k < from.size() && r.hasNonNull("duration")) {
+                    out[from.get(k)][j] = new long[]{r.path("duration").asLong(), r.path("distance").asLong()};
+                }
+            }
+        }
+        return out;
+    }
+
+    /**
+     * 画路线用的坐标：1.2 公里内连直线（按步行算），远的用高德驾车路线（有缓存），查不到连直线。
+     */
+    public List<double[]> path(double[] from, double[] to) {
+        double dLat = Math.toRadians(to[1] - from[1]);
+        double dLng = Math.toRadians(to[0] - from[0]);
+        double h = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(Math.toRadians(from[1]))
+                * Math.cos(Math.toRadians(to[1])) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+        double km = 6371 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+        if (km <= 1.2 || !available()) {
+            return List.of(from, to);
+        }
+        try {
+            return driving(from, to).map(Route::path).filter(p -> !p.isEmpty()).orElse(List.of(from, to));
+        } catch (RuntimeException e) {
+            return List.of(from, to);
+        }
+    }
+
+    /** 两点间已经查过的驾车路线；没查过的直接连直线，不为画图额外调高德。 */
+    private List<double[]> cachedPath(double[] from, double[] to) {
+        Cached hit = cache.get("drive|" + coord(from[0], from[1]) + "|" + coord(to[0], to[1]));
+        if (hit != null && hit.value() instanceof Route r && !r.path().isEmpty()) {
+            return r.path();
+        }
+        return List.of(from, to);
+    }
+
+    /** 以 center 为圆心、meters 米为半径的一圈点（首尾相接），用来画范围圈。 */
+    private static List<double[]> ring(double[] center, int meters) {
+        List<double[]> out = new ArrayList<>();
+        double dLat = meters / 111_320.0;
+        double dLng = meters / (111_320.0 * Math.cos(Math.toRadians(center[1])));
+        for (int i = 0; i <= 36; i++) {
+            double a = Math.toRadians(i * 10);
+            out.add(new double[]{center[0] + dLng * Math.cos(a), center[1] + dLat * Math.sin(a)});
+        }
+        return out;
     }
 
     /** 调高德静态地图接口取 PNG。 */
@@ -291,9 +411,26 @@ public class AmapPlaceService {
                     location.length == 2 ? Double.valueOf(location[0]) : null,
                     location.length == 2 ? Double.valueOf(location[1]) : null,
                     number(biz, "rating"), cost(biz), photos.isEmpty() ? null : photos.get(0) + THUMB, photos,
-                    text(biz, "tel"), p.path("distance").asText("").isBlank() ? null : p.path("distance").asInt()));
+                    text(biz, "tel"), p.path("distance").asText("").isBlank() ? null : p.path("distance").asInt(),
+                    tags(biz)));
         }
         return out;
+    }
+
+    /** 高德的特色标签（keytag、rectag），去重后最多 3 个。 */
+    private static List<String> tags(JsonNode biz) {
+        Set<String> out = new LinkedHashSet<>();
+        for (String field : List.of("keytag", "rectag")) {
+            String value = text(biz, field);
+            if (value != null) {
+                for (String tag : value.split("[,;，；、|]")) {
+                    if (!tag.isBlank() && tag.trim().length() <= 8) {
+                        out.add(tag.trim());
+                    }
+                }
+            }
+        }
+        return out.stream().limit(3).toList();
     }
 
     private static String text(JsonNode node, String field) {

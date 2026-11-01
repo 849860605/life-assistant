@@ -26,6 +26,8 @@ public class MeituanFlightSource implements FlightPriceSource {
             "\\[([\\u4e00-\\u9fa5]+?)([A-Z0-9]{2}\\d{2,4})\\s+(\\S+?)→(\\S+?)\\s+\\d{4}-\\d{2}-\\d{2}\\s+"
                     + "(\\d{1,2}:\\d{2})→(\\d{1,2}:\\d{2})[^\\]]*?[¥￥](\\d{2,6})\\]\\((https?://[^)\\s]+)\\)");
 
+    private static final Pattern DURATION = Pattern.compile("\\d+h\\d*m?|\\d+m");
+
     private final MeituanHtClient client;
 
     @Override
@@ -61,8 +63,10 @@ public class MeituanFlightSource implements FlightPriceSource {
             if (offers.stream().anyMatch(o -> o.flightNo().equals(flightNo))) {
                 continue;
             }
+            Matcher duration = DURATION.matcher(m.group());
             offers.add(new Offer(flightNo, m.group(1), m.group(5), m.group(6), m.group(3), m.group(4),
-                    Integer.valueOf(m.group(7)), m.group(8), null));
+                    Integer.valueOf(m.group(7)), m.group(8), null,
+                    duration.find() ? FlightPriceSource.minutes(duration.group()) : null, null));
         }
         return Result.of("美团", offers, null);
     }

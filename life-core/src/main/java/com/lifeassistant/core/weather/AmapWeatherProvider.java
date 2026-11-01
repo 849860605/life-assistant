@@ -88,6 +88,46 @@ public class AmapWeatherProvider implements WeatherProvider {
         return result;
     }
 
+    /** 对应高德 /v3/weather/weatherInfo?extensions=base（实况，没有体感温度）。 */
+    @Override
+    public WeatherNow now(WeatherLocation location) {
+        JsonNode live = get("/v3/weather/weatherInfo", "city", location.id(), "extensions", "base")
+                .path("lives").path(0);
+        Integer temp = live.path("temperature").asText("").matches("-?\\d+(\\.\\d+)?")
+                ? (int) Math.round(live.path("temperature").asDouble()) : null;
+        Integer humidity = live.path("humidity").asText("").matches("\\d+(\\.\\d+)?")
+                ? (int) Math.round(live.path("humidity").asDouble()) : null;
+        String dir = live.path("winddirection").asText("");
+        return new WeatherNow(live.path("weather").asText(), temp, null, humidity,
+                dir.isBlank() ? null : dir + (dir.endsWith("风") ? "" : "风"), live.path("windpower").asText(null),
+                live.path("reporttime").asText(null));
+    }
+
+    /**
+     * 同省离这里最近的几个城市（高德行政区划接口，带城市中心坐标和区划编码，可以直接查天气）。
+     */
+    public List<WeatherLocation> nearbyCities(WeatherLocation around, int count) {
+        if (around.adm() == null || around.adm().isBlank()) {
+            return List.of();
+        }
+        JsonNode cities = get("/v3/config/district", "keywords", around.adm(), "subdistrict", "1")
+                .path("districts").path(0).path("districts");
+        List<WeatherLocation> out = new ArrayList<>();
+        for (JsonNode c : cities) {
+            String center = c.path("center").asText("");
+            if (!center.contains(",")) {
+                continue;
+            }
+            WeatherLocation loc = location(c.path("name").asText(), c.path("adcode").asText(), around.adm(), center);
+            if (Math.abs(loc.lon() - around.lon()) < 0.05 && Math.abs(loc.lat() - around.lat()) < 0.05) {
+                continue;
+            }
+            out.add(loc);
+        }
+        out.sort(java.util.Comparator.comparingDouble(l -> Math.hypot(l.lon() - around.lon(), l.lat() - around.lat())));
+        return out.subList(0, Math.min(count, out.size()));
+    }
+
     @Override
     public List<HourlyForecast> hourly(WeatherLocation location) {
         throw new BizException(ErrorCode.EXTERNAL_SERVICE, "高德没有逐小时预报，配置和风天气后才能查");

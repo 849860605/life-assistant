@@ -23,6 +23,12 @@ export function ymd(date: Date): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
+/** "yyyy-MM-dd" 往后（负数往前）挪几天，按本地日期算，不受时区影响。 */
+export function addDays(date: string, days: number): string {
+  const [y, m, d] = date.split("-").map(Number);
+  return ymd(new Date(y, m - 1, d + days));
+}
+
 /** 本地时间 HH:mm。 */
 export function hm(date: Date): string {
   return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
@@ -93,6 +99,18 @@ export function weekday(date?: string | null): string {
 }
 
 /** 卡片上的查询时间：今天的只显示"10:32"，更早的显示"10/29 10:32"。旧数据是"HH:mm"字符串，原样返回。 */
+/** 查询时间写成"刚刚""12 分钟前""3 小时前"，超过一天写日期时间。 */
+export function ago(value?: string | null): string {
+  if (!value) return "";
+  const t = new Date(value).getTime();
+  if (Number.isNaN(t)) return value;
+  const min = Math.floor((Date.now() - t) / 60000);
+  if (min < 1) return "刚刚";
+  if (min < 60) return `${min} 分钟前`;
+  if (min < 24 * 60) return `${Math.floor(min / 60)} 小时前`;
+  return queriedAt(value);
+}
+
 export function queriedAt(value?: string | null): string {
   if (!value) return "";
   const d = new Date(value);

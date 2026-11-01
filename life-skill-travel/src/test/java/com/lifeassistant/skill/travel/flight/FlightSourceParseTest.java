@@ -73,6 +73,36 @@ class FlightSourceParseTest {
         assertThat(flights).extracting(FlightTools.Flight::lowest).isSorted();
     }
 
+    @Test
+    void durationAndAircraft() throws IOException {
+        assertThat(FlightPriceSource.minutes("2h40m")).isEqualTo(160);
+        assertThat(FlightPriceSource.minutes("45m")).isEqualTo(45);
+        assertThat(FlightPriceSource.minutes("3h")).isEqualTo(180);
+        assertThat(FlightPriceSource.minutes("经济舱")).isNull();
+        FlightPriceSource.Offer meituan = MeituanFlightSource.parse(read("meituan.md")).offers().getFirst();
+        assertThat(meituan.minutes()).isEqualTo(195);
+    }
+
+    @Test
+    void ctripRulesFromAnswer() {
+        String text = """
+                为您查到<MU2335>经济舱的免费托运行李额为**20KG**，退改签具体费率因购票舱位等级而异，需以购票时展示规则为准。
+
+                ### <MU2335>
+                - **航班信息**：上海虹桥T2 07:15起飞，西安咸阳T5 09:40到达，飞行2小时25分
+                - **机型**：C919，提供正餐
+                - **经济舱票价**：￥500起
+                - **免费托运行李额**：20KG，尺寸限制40×60×100cm
+                - **随身行李额**：1件，限重8KG，尺寸限制20×40×55cm
+                - **退改签规则**：退改费率随距起飞时间递增，具体费率以购票页面公示为准
+                """;
+        FlightRules.Rules rules = FlightRules.parse("MU2335", "2026-11-20", text);
+
+        assertThat(rules.items()).containsOnlyKeys("机型", "免费托运行李额", "随身行李额", "退改签规则");
+        assertThat(rules.items().get("免费托运行李额")).startsWith("20KG");
+        assertThat(rules.summary()).startsWith("为您查到MU2335经济舱的免费托运行李额为20KG");
+    }
+
     private String read(String name) throws IOException {
         try (InputStream in = getClass().getResourceAsStream("/flight/" + name)) {
             return new String(in.readAllBytes(), StandardCharsets.UTF_8);

@@ -2,10 +2,12 @@ package com.lifeassistant.api.web;
 
 import cn.dev33.satoken.stp.StpUtil;
 import cn.dev33.satoken.stp.parameter.SaLoginParameter;
+import com.lifeassistant.api.auth.LoginGuard;
 import com.lifeassistant.common.api.ApiResponse;
 import com.lifeassistant.core.auth.MediaTicket;
 import com.lifeassistant.core.user.User;
 import com.lifeassistant.core.user.UserService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import lombok.RequiredArgsConstructor;
@@ -25,6 +27,7 @@ public class AuthController {
 
     private final UserService userService;
     private final MediaTicket mediaTicket;
+    private final LoginGuard loginGuard;
 
     /** 登录请求体；device 可空，默认 WEB。 */
     public record LoginRequest(@NotBlank String username, @NotBlank String password, String device) {
@@ -42,10 +45,11 @@ public class AuthController {
         }
     }
 
-    /** POST /api/v1/auth/login：账号密码登录，返回 token。device 区分设备类型（WEB / MOBILE，默认 WEB），同类设备再次登录会顶掉旧会话。 */
+    /** POST /api/v1/auth/login：账号密码登录，返回 token；连续输错会暂停登录（见 LoginGuard）。device 区分设备类型（WEB / MOBILE，默认 WEB），同类设备再次登录会顶掉旧会话。 */
     @PostMapping("/login")
-    public ApiResponse<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
-        User user = userService.authenticate(request.username(), request.password());
+    public ApiResponse<LoginResponse> login(@Valid @RequestBody LoginRequest request, HttpServletRequest http) {
+        User user = loginGuard.guard("user", request.username(), http.getRemoteAddr(),
+                () -> userService.authenticate(request.username(), request.password()));
         StpUtil.login(user.getId(), new SaLoginParameter()
                 .setDeviceType(request.device() == null ? "WEB" : request.device()));
         return ApiResponse.ok(new LoginResponse(StpUtil.getTokenValue(), UserView.of(user)));

@@ -6,10 +6,19 @@
         <text class="brand-name">生活助手</text>
       </view>
       <view class="nav">
-        <view v-for="n in NAV" :key="n.key" class="nav-item" :class="{ on: n.key === active }" @click="go(n)">
-          <Icon :name="n.icon" :size="18" :color="n.key === active ? 'var(--accent)' : 'var(--ink)'" />
-          <text>{{ n.label }}</text>
-        </view>
+        <template v-for="n in NAV" :key="n.key">
+          <view class="nav-item" :class="{ on: n.key === active || (n.children && !opened(n) && n.children.some((c) => c.key === active)) }" @click="n.children ? toggleGroup(n.key) : go(n)">
+            <Icon :name="n.icon" :size="18" :color="n.key === active || n.children?.some((c) => c.key === active) ? 'var(--accent)' : 'var(--ink)'" />
+            <text>{{ n.label }}</text>
+            <Icon v-if="n.children" class="nav-caret" :class="{ open: opened(n) }" name="down" :size="14" color="var(--muted)" />
+          </view>
+          <template v-if="n.children && opened(n)">
+            <view v-for="c in n.children" :key="c.key" class="nav-item sub" :class="{ on: c.key === active }" @click="go(c)">
+              <Icon :name="c.icon" :size="16" :color="c.key === active ? 'var(--accent)' : 'var(--ink)'" />
+              <text>{{ c.label }}</text>
+            </view>
+          </template>
+        </template>
       </view>
       <view v-if="showRecent && recent.length" class="recent">
         <view class="recent-title">最近行程</view>
@@ -78,6 +87,8 @@ interface NavItem {
   label: string;
   icon: string;
   url: string;
+  /** 有子菜单时点它只展开收起 */
+  children?: NavItem[];
 }
 
 const city = currentCity();
@@ -88,11 +99,20 @@ const NAV = computed<NavItem[]>(() => [
   { key: "home", label: "首页", icon: "home", url: "/pages/home/home" },
   { key: "chat", label: "AI 对话", icon: "chat", url: "/pages/chat/chat" },
   { key: "plan", label: "旅行规划", icon: "users", url: latestId.value ? `/pages/trips/detail?id=${latestId.value}` : "/pages/chat/chat" },
-  { key: "flight", label: "机票酒店", icon: "plane", url: "/pages/search/flight" },
-  { key: "food", label: "美食推荐", icon: "food", url: "/pages/search/food" },
-  { key: "ticket", label: "景点门票", icon: "ticket", url: "/pages/search/flight?tab=ticket" },
+  {
+    key: "travel",
+    label: "机票酒店",
+    icon: "plane",
+    url: "",
+    children: [
+      { key: "flight", label: "机票比价", icon: "plane", url: latestId.value ? `/pages/search/flight?trip=${latestId.value}` : "/pages/search/flight" },
+      { key: "hotel", label: "酒店比价", icon: "bed", url: latestId.value ? `/pages/search/hotel?trip=${latestId.value}` : "/pages/search/hotel" },
+    ],
+  },
+  { key: "food", label: "美食推荐", icon: "food", url: latestId.value ? `/pages/plan/food?id=${latestId.value}` : "/pages/search/food" },
+  { key: "ticket", label: "景点门票", icon: "ticket", url: latestId.value ? `/pages/search/ticket?trip=${latestId.value}` : "/pages/search/ticket" },
   { key: "map", label: "地图出行", icon: "nav", url: "/pages/plan/map" },
-  { key: "weather", label: "天气查询", icon: "weather", url: "/pages/chat/chat?q=" + encodeURIComponent(`${city}这周天气怎么样，适合出去玩吗？`) },
+  { key: "weather", label: "天气查询", icon: "weather", url: `/pages/weather/weather?city=${encodeURIComponent(city)}` + (latestId.value ? `&trip=${latestId.value}` : "") },
   { key: "trips", label: "我的行程", icon: "trip", url: "/pages/trips/trips" },
   { key: "fav", label: "我的收藏", icon: "heart", url: "/pages/discover/discover" },
 ]);
@@ -126,6 +146,18 @@ onMounted(async () => {
     });
   }).catch(() => {});
 });
+
+/** 手动展开、收起的菜单组；当前页在组里时默认展开 */
+const groups = ref<Record<string, boolean>>({});
+
+function opened(n: NavItem) {
+  return groups.value[n.key] ?? !!n.children?.some((c) => c.key === props.active);
+}
+
+function toggleGroup(key: string) {
+  const n = NAV.value.find((x) => x.key === key);
+  if (n) groups.value = { ...groups.value, [key]: !opened(n) };
+}
 
 /** 侧栏跳转用 reLaunch，不在电脑上堆出很深的页面栈。 */
 function go(n: NavItem) {
@@ -186,6 +218,9 @@ function search() {
 .nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; font-size: 14px; cursor: pointer; }
 .nav-item:hover { background: var(--surface-2); }
 .nav-item.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.nav-item.sub { padding-left: 34px; font-size: 13px; }
+.nav-caret { margin-left: auto; transition: transform 0.15s; }
+.nav-caret.open { transform: rotate(180deg); }
 .recent { margin-top: auto; padding-top: 18px; }
 .recent-title { font-size: 13px; color: var(--muted); padding: 0 8px 8px; }
 .recent-item { display: flex; gap: 8px; align-items: center; padding: 6px 8px; border-radius: 10px; cursor: pointer; }

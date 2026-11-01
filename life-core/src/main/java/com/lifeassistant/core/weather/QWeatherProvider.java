@@ -95,6 +95,33 @@ public class QWeatherProvider implements WeatherProvider {
                 w.path("typeName").asText(), w.path("text").asText()));
     }
 
+    /** 对应和风 /v7/weather/now。 */
+    @Override
+    public WeatherNow now(WeatherLocation location) {
+        JsonNode n = get("/v7/weather/now", "location", location.id()).path("now");
+        return new WeatherNow(n.path("text").asText(), intOrNull(n, "temp"), intOrNull(n, "feelsLike"),
+                intOrNull(n, "humidity"), n.path("windDir").asText(null), n.path("windScale").asText(null),
+                n.path("obsTime").asText(null));
+    }
+
+    /** 对应和风 /v7/air/now。 */
+    @Override
+    public AirQuality air(WeatherLocation location) {
+        JsonNode n = get("/v7/air/now", "location", location.id()).path("now");
+        return new AirQuality(intOrNull(n, "aqi"), n.path("category").asText(null), n.path("pm2p5").asText(null),
+                n.path("pm10").asText(null), n.path("so2").asText(null), n.path("no2").asText(null),
+                n.path("o3").asText(null), n.path("co").asText(null));
+    }
+
+    private static Integer intOrNull(JsonNode node, String field) {
+        String t = node.path(field).asText("");
+        try {
+            return t.isBlank() ? null : (int) Math.round(Double.parseDouble(t));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
     /** 统一 GET 调用：带 lang=zh 并校验业务码 code=200；未配置、调用失败或返回错误码都抛 BizException。 */
     private JsonNode get(String path, String param, String value) {
         if (!configured) {

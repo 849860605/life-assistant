@@ -79,6 +79,9 @@ public class PlaceController {
     /**
      * GET /api/v1/maps/static?stops=经度,纬度;经度,纬度&route=true&others=…&w=600&h=400&mt=票据：地图图片。
      * stops 按顺序标 1、2、3，route 为 true 时画驾车路线；others 是橙色的候选点，各最多 10 个。图片缓存一天。
+     * 可选：color 路线颜色（6 位十六进制）、circle 范围圈半径（米，以第一个 stop 为圆心）、
+     * lines 其他几天的路线（"颜色:经度,纬度;经度,纬度|颜色:…"，最多 6 条）、center + zoom 指定显示范围、
+     * marks=false 不画 stops 的标记（页面自己叠可点的编号）。
      * &lt;image&gt; 带不了请求头，用 mt（下载票据）证明身份，也接受请求头里的登录 token。
      */
     @GetMapping("/maps/static")
@@ -87,11 +90,46 @@ public class PlaceController {
                                       @RequestParam(required = false) String others,
                                       @RequestParam(defaultValue = "600") int w,
                                       @RequestParam(defaultValue = "400") int h,
+                                      @RequestParam(required = false) String color,
+                                      @RequestParam(defaultValue = "0") int circle,
+                                      @RequestParam(required = false) String lines,
+                                      @RequestParam(required = false) String center,
+                                      @RequestParam(required = false) Integer zoom,
+                                      @RequestParam(defaultValue = "true") boolean marks,
                                       @RequestParam(required = false) String mt) {
         mediaAuth.user(mt);
-        byte[] png = places.staticMap(points(stops), route, points(others), w, h);
+        List<double[]> c = points(center);
+        byte[] png = places.staticMap(new AmapPlaceService.MapSpec(points(stops), route, points(others), w, h,
+                color(color), Math.max(0, Math.min(circle, 50_000)), lines(lines), c.isEmpty() ? null : c.get(0), zoom,
+                marks));
         return ResponseEntity.ok().contentType(MediaType.IMAGE_PNG)
                 .cacheControl(CacheControl.maxAge(Duration.ofDays(1)).cachePrivate()).body(png);
+    }
+
+    /** 颜色只收 6 位十六进制，其他的当没给。 */
+    private static String color(String text) {
+        return text != null && text.matches("[0-9A-Fa-f]{6}") ? text.toUpperCase() : null;
+    }
+
+    /** "颜色:经度,纬度;经度,纬度|颜色:…" 拆成几条线，最多 6 条。 */
+    private static List<AmapPlaceService.Line> lines(String text) {
+        List<AmapPlaceService.Line> out = new ArrayList<>();
+        if (text == null || text.isBlank()) {
+            return out;
+        }
+        String[] parts = text.split("\\|");
+        if (parts.length > 6) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "最多再画 6 条路线");
+        }
+        for (String part : parts) {
+            int colon = part.indexOf(':');
+            String c = colon < 0 ? null : color(part.substring(0, colon));
+            if (c == null) {
+                throw new BizException(ErrorCode.BAD_REQUEST, "路线要写成 颜色:经度,纬度;经度,纬度");
+            }
+            out.add(new AmapPlaceService.Line(c, points(part.substring(colon + 1))));
+        }
+        return out;
     }
 
     /** "经度,纬度;经度,纬度" 拆成坐标列表。 */

@@ -11,6 +11,7 @@ import com.lifeassistant.skill.travel.hiking.HikingTools;
 import com.lifeassistant.skill.travel.hotel.HotelLinkTools;
 import com.lifeassistant.skill.travel.hotel.HotelPriceTools;
 import com.lifeassistant.skill.travel.trip.TripTools;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.beans.factory.ObjectProvider;
@@ -23,6 +24,7 @@ import java.util.stream.Stream;
 /**
  * 出游技能：城市游、爬山徒步的规划和已保存行程的修改。地图能力来自高德官方 MCP（配置了 AMAP_KEY 才启用）。
  */
+@Slf4j
 @Component
 public class TravelSkill implements LifeSkill {
 
@@ -150,7 +152,17 @@ public class TravelSkill implements LifeSkill {
     @Override
     public List<ToolCallback> toolCallbacks() {
         return Stream.concat(
-                mcpToolProviders.orderedStream().flatMap(provider -> Arrays.stream(provider.getToolCallbacks())),
+                mcpToolProviders.orderedStream().flatMap(TravelSkill::safeTools),
                 mcpServers.tools("rollinggo").stream()).toList();
+    }
+
+    /** 远程 MCP 连不上（服务端 502、休眠后会话失效）时跳过它的工具，不让整轮对话失败。 */
+    private static Stream<ToolCallback> safeTools(ToolCallbackProvider provider) {
+        try {
+            return Arrays.stream(provider.getToolCallbacks());
+        } catch (RuntimeException e) {
+            log.warn("MCP 工具加载失败，这轮对话先不用它：{}", e.getMessage() == null ? e.toString() : e.getMessage().lines().findFirst().orElse(""));
+            return Stream.empty();
+        }
     }
 }

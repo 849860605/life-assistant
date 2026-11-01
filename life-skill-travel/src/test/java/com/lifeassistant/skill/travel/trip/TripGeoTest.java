@@ -46,6 +46,6 @@ class TripGeoTest {
 
     private static AmapPlaceService.Place place(String name, double lng, double lat) {
         return new AmapPlaceService.Place("id-" + name, name, "景点", null, null, lng, lat, 4.5, null, null, List.of(),
-                null, null);
+                null, null, List.of());
     }
 }

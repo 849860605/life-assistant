@@ -38,7 +38,13 @@ public class CtripWendaoClient {
         }
         body.put("query", question);
         body.put("source", "github");
-        return recorder.platform("携程", question, () -> restClient.post().uri("/skill/query")
+        String answer = recorder.platform("携程", question, () -> restClient.post().uri("/skill/query")
                 .contentType(MediaType.APPLICATION_JSON).body(body).retrieve().body(String.class));
+        // 出错时返回的是 {"error":"..."}，不是 Markdown
+        if (answer != null && answer.stripLeading().startsWith("{\"error\"")) {
+            throw new IllegalStateException(answer.contains("limit exceeded")
+                    ? "携程问道今天的查询额度用完了，明天恢复" : "携程问道返回错误：" + answer.strip());
+        }
+        return answer;
     }
 }

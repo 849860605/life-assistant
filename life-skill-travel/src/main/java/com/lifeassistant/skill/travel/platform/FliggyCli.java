@@ -23,6 +23,11 @@ import java.util.concurrent.TimeUnit;
 public class FliggyCli {
 
     private static final long TIMEOUT_SECONDS = 30;
+    /** 同时跑太多飞猪命令会被限流（返回"搜索…失败"或空结果），全局最多同时 2 个 */
+    private static final int MAX_PARALLEL = 2;
+    private static final long RETRY_DELAY_MILLIS = 600;
+
+    private final java.util.concurrent.Semaphore gate = new java.util.concurrent.Semaphore(MAX_PARALLEL, true);
 
     private final String apiKey;
     private final List<String> command;
@@ -47,7 +52,45 @@ public class FliggyCli {
      * 工具没装好、超时或输出不是 JSON 时抛 IllegalStateException，消息可以直接给用户看。
      */
     public JsonNode run(List<String> args) {
-        return recorder.platform("飞猪", String.join(" ", args), () -> doRun(args));
+        JsonNode result = limited(args);
+        if (failed(result)) {
+            // 多半是被限流，等一下再试一次
+            try {
+                Thread.sleep(RETRY_DELAY_MILLIS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return result;
+            }
+            result = limited(args);
+        }
+        return result;
+    }
+
+    private JsonNode limited(List<String> args) {
+        try {
+            gate.acquire();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("飞猪查询被中断", e);
+        }
+        try {
+            return recorder.platform("飞猪", String.join(" ", args), () -> doRun(args));
+        } finally {
+            gate.release();
+        }
+    }
+
+    /** 飞猪返回失败（status 不是 0、data 为空）或者列表是空的。 */
+    private static boolean failed(JsonNode root) {
+        if (root == null) {
+            return true;
+        }
+        JsonNode data = root.path("data");
+        if (data.isMissingNode() || data.isNull()) {
+            return true;
+        }
+        JsonNode list = data.path("itemList");
+        return list.isArray() && list.isEmpty();
     }
 
     private JsonNode doRun(List<String> args) {

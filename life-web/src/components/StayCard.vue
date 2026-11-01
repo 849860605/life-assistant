@@ -38,6 +38,7 @@
     <view v-if="editable" class="acts">
       <button class="btn ghost small" :class="{ bookedBtn: booked }" @click="toggleBooked">{{ booked ? "✓ 已预约" : "标记已预约" }}</button>
       <button v-if="stay.options?.length" class="btn ghost small" @click="showOptions = !showOptions">{{ showOptions ? "收起" : "换一家" }}</button>
+      <button v-if="!booked" class="btn ghost small" @click="compare">比价换酒店</button>
       <button class="btn ghost small" :disabled="quoting" @click="requote">{{ quoting ? "比价中，约 15–60 秒…" : "重新比价" }}</button>
     </view>
 
@@ -82,6 +83,11 @@ const nights = computed(() => {
 });
 
 /** 标记或取消已预约：只是记录，不会去平台下单或取消 */
+/** 去酒店比价页，带上行程和这段住宿，比完可以直接替换 */
+function compare() {
+  uni.navigateTo({ url: `/pages/search/hotel?trip=${props.tripId}&stay=${props.stay.id}` });
+}
+
 async function toggleBooked() {
   try {
     emit("updated", await api.markBooked(props.tripId, props.stay.id, !props.booked));

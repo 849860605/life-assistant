@@ -1,5 +1,8 @@
 package com.lifeassistant.core.weather;
 
+import com.lifeassistant.common.error.BizException;
+import com.lifeassistant.common.error.ErrorCode;
+
 import java.util.List;
 
 /**
@@ -24,6 +27,26 @@ public interface WeatherProvider {
 
     /** 当前生效的天气预警 */
     List<WeatherWarning> warnings(WeatherLocation location);
+
+    /** 实况：数据源不支持时抛 BizException */
+    default WeatherNow now(WeatherLocation location) {
+        throw new BizException(ErrorCode.EXTERNAL_SERVICE, name() + "没有实况天气");
+    }
+
+    /** 实时空气质量：数据源不支持时抛 BizException */
+    default AirQuality air(WeatherLocation location) {
+        throw new BizException(ErrorCode.EXTERNAL_SERVICE, "配置和风天气后才有空气质量");
+    }
+
+    /** 实况：feelsLike 体感温度（高德没有为空），windScale 风力等级，obsTime 观测时间。 */
+    record WeatherNow(String text, Integer temp, Integer feelsLike, Integer humidity, String windDir,
+                      String windScale, String obsTime) {
+    }
+
+    /** 空气质量：aqi 指数、category 等级（优、良……），各污染物浓度（μg/m³，CO 是 mg/m³）。 */
+    record AirQuality(Integer aqi, String category, String pm2p5, String pm10, String so2, String no2, String o3,
+                      String co) {
+    }
 
     /** 解析后的位置：id 用于后续查询（和风的 LocationID，坐标输入时是 "经度,纬度"），adm 是一级行政区。 */
     record WeatherLocation(String id, String name, String adm, double lon, double lat) {

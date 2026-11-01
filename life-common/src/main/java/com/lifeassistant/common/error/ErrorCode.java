@@ -11,6 +11,7 @@ public enum ErrorCode implements ApiResponse.ErrorCodeView {
     FORBIDDEN(403, "没有权限"),
     NOT_FOUND(404, "数据不存在"),
     CONFLICT(409, "数据已存在"),
+    TOO_MANY_REQUESTS(429, "请求太频繁，请稍后再试"),
     EXTERNAL_SERVICE(502, "外部服务调用失败"),
     INTERNAL(500, "服务内部错误");
 

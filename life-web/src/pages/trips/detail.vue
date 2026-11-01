@@ -109,7 +109,7 @@
         </view>
 
         <view class="panel">
-          <view class="panel-head"><text class="panel-title"><Icon name="food" :size="16" color="var(--accent)" /> 行程中的美食推荐</text><text class="more" @click="go('/pages/search/food')">查看更多 ›</text></view>
+          <view class="panel-head"><text class="panel-title"><Icon name="food" :size="16" color="var(--accent)" /> 行程中的美食推荐</text><text class="more" @click="openFood">顺路找餐厅 ›</text></view>
           <view class="muted small">{{ anchor ? `${anchor.name} 附近，高德评分从高到低` : "这一天还没有带位置的景点" }}</view>
           <view v-if="nearLoading" class="muted small pad">正在找附近的餐厅…</view>
           <view v-for="f in foods.slice(0, 3)" :key="f.id" class="food">
@@ -140,13 +140,12 @@
               </view>
               <view class="hotel-side">
                 <text v-if="hotel.cost" class="price">¥{{ hotel.cost }}</text>
-                <button v-if="isCurrent && hotelInDay" class="btn ghost small add" @click="openReplace(hotelInDay, null)">更换酒店</button>
-                <button v-else class="btn ghost small add" @click="go('/pages/search/flight?tab=hotel')">去比价</button>
+                <button class="btn ghost small add" @click="go(`/pages/search/hotel?trip=${tripId}`)">{{ isCurrent ? "比价换酒店" : "去比价" }}</button>
               </view>
             </view>
           </template>
           <template v-else>
-            <view class="muted small">行程里还没安排酒店，下面是{{ anchor?.name || "附近" }}的酒店（高德）</view>
+            <view class="muted small">行程里还没安排酒店，下面是{{ anchor?.name || "附近" }}的酒店（高德）<text class="more" @click="go(`/pages/search/hotel?trip=${tripId}`)">比价并设为住宿 ›</text></view>
             <view v-for="h in hotels.slice(0, 2)" :key="h.id" class="food">
               <image v-if="h.photo && !broken[h.id]" @error="broken[h.id] = true" class="food-img" :src="h.photo" mode="aspectFill" />
               <view v-else class="food-img ph"><Icon name="bed" :size="22" color="#fff" /></view>
@@ -359,7 +358,7 @@ import { amapNavUrl, amapUrl, cityOf, dayMapUrl, dayTravel, distanceText, durati
  * 行程详情（原型④）：按天切换的时间线，每项可以保留、换一个、不感兴趣，改完存成新版本。
  * 坐标、照片、路程由后端从高德补；电脑上中栏和右栏的美食、酒店、附近景点按当天第一个景点的位置从高德查。
  */
-const TABS = ["行程总览", "地图路线", "费用明细"];
+const TABS = ["行程总览", "地图路线", "美食推荐", "机票比价", "景点门票", "费用明细"];
 const TYPE_ICON: Record<string, string> = { SPOT: "pin", FOOD: "food", HOTEL: "bed", TRANSPORT: "car", FREE: "sparkle" };
 /** 这些类型能保留、换、删；交通和自由活动不能 */
 const EDITABLE = ["SPOT", "FOOD", "HOTEL"];
@@ -549,6 +548,10 @@ function regenerate() {
   go("/pages/chat/chat?q=" + encodeURIComponent(`帮我重新安排行程「${trip.value?.title}」（tripId=${tripId.value}）的第${dayIndex.value + 1}天，保留我标了保留的地方`));
 }
 
+function openFood() {
+  go(`/pages/plan/food?id=${tripId.value}&day=${dayIndex.value + 1}`);
+}
+
 function openMap() {
   go(`/pages/plan/map?id=${tripId.value}&day=${dayIndex.value + 1}`);
 }
@@ -704,6 +707,18 @@ function cnDate(date?: string | null) {
 function switchTab(t: string) {
   if (t === "地图路线") {
     openMap();
+    return;
+  }
+  if (t === "美食推荐") {
+    openFood();
+    return;
+  }
+  if (t === "景点门票") {
+    go(`/pages/search/ticket?trip=${tripId.value}&day=${dayIndex.value + 1}`);
+    return;
+  }
+  if (t === "机票比价") {
+    go(`/pages/search/flight?tab=flight&trip=${tripId.value}`);
     return;
   }
   tab.value = t;

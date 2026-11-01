@@ -37,6 +37,10 @@
 			"style": { "navigationBarTitleText": "地图路线" }
 		},
 		{
+			"path": "pages/plan/food",
+			"style": { "navigationBarTitleText": "美食推荐" }
+		},
+		{
 			"path": "pages/plan/edit",
 			"style": { "navigationBarTitleText": "行程调整" }
 		},
@@ -53,12 +57,20 @@
 			"style": { "navigationBarTitleText": "机票比价" }
 		},
 		{
+			"path": "pages/search/ticket",
+			"style": { "navigationBarTitleText": "景点门票" }
+		},
+		{
 			"path": "pages/search/hotel",
-			"style": { "navigationBarTitleText": "酒店推荐" }
+			"style": { "navigationBarTitleText": "酒店比价" }
 		},
 		{
 			"path": "pages/schedule/schedule",
 			"style": { "navigationBarTitleText": "日程" }
+		},
+		{
+			"path": "pages/weather/weather",
+			"style": { "navigationBarTitleText": "天气查询" }
 		},
 		{
 			"path": "pages/me/me",

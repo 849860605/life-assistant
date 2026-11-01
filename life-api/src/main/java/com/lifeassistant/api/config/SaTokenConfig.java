@@ -19,8 +19,9 @@ public class SaTokenConfig implements WebMvcConfigurer {
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(new SaInterceptor(handler -> {
             SaRouter.match("/api/v1/**")
-                    // 登录不需要登录；日历订阅用个人访问令牌，地图图片和行程 PDF 可以用下载票据，都在接口里自己校验
+                    // 登录不需要登录；日历订阅用个人访问令牌，地图图片、高德 JS 地图转发和行程 PDF 用下载票据，都在接口里自己校验
                     .notMatch("/api/v1/auth/login", "/api/v1/calendar/feed/**", "/api/v1/maps/static",
+                            "/api/v1/maps/amap/**",
                             "/api/v1/trips/*/pdf")
                     .check(r -> StpUtil.checkLogin());
             SaRouter.match("/admin/api/v1/**")

@@ -7,6 +7,8 @@ import com.lifeassistant.core.schedule.ScheduleEvent;
 import com.lifeassistant.core.place.AmapPlaceService;
 import com.lifeassistant.skill.travel.trip.Trip;
 import com.lifeassistant.skill.travel.trip.TripEditor;
+import com.lifeassistant.skill.travel.trip.TripFood;
+import com.lifeassistant.skill.travel.trip.TripTickets;
 import com.lifeassistant.skill.travel.trip.TripPdf;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
@@ -40,6 +42,8 @@ public class TripController {
     private final AuthFacade authFacade;
     private final TripService tripService;
     private final TripEditor tripEditor;
+    private final TripFood tripFood;
+    private final TripTickets tripTickets;
     private final TripPdf tripPdf;
     private final MediaAuth mediaAuth;
 
@@ -103,6 +107,13 @@ public class TripController {
         return ApiResponse.ok(tripEditor.replace(authFacade.current(), id, itemId, change.place(), change.reason()));
     }
 
+    /** POST /api/v1/trips/{id}/items/{itemId}/replace/preview：换之前看当天路上时间、里程、打车费怎么变，不保存。 */
+    @PostMapping("/{id}/items/{itemId}/replace/preview")
+    public ApiResponse<TripEditor.DayPreview> previewReplace(@PathVariable long id, @PathVariable String itemId,
+                                                             @RequestBody TripEditor.PlacePick place) {
+        return ApiResponse.ok(tripEditor.previewReplace(authFacade.current(), id, itemId, place));
+    }
+
     /** POST /api/v1/trips/{id}/items/{itemId}/remove：删掉某项，存新版本。 */
     @PostMapping("/{id}/items/{itemId}/remove")
     public ApiResponse<TripService.TripDetail> remove(@PathVariable long id, @PathVariable String itemId,
@@ -124,6 +135,47 @@ public class TripController {
         return ApiResponse.ok(tripEditor.markBooked(authFacade.current(), id, targetId, booked));
     }
 
+    /**
+     * POST /api/v1/trips/{id}/booking/{targetId}?status=PLANNED|OPENED|CONFIRMED：设置预订状态。
+     * OPENED 只表示点过预订链接，不算订好；用户自己确认订好才是 CONFIRMED。只改当前版本。
+     */
+    @PostMapping("/{id}/booking/{targetId}")
+    public ApiResponse<TripService.TripDetail> booking(@PathVariable long id, @PathVariable String targetId,
+                                                       @RequestParam String status) {
+        return ApiResponse.ok(tripEditor.setBooking(authFacade.current(), id, targetId, status));
+    }
+
+    /** POST /api/v1/trips/{id}/copy?start=2027-03-10：复制成新的草稿行程，给了 start 就整体平移日期，预订状态清空。 */
+    @PostMapping("/{id}/copy")
+    public ApiResponse<TripService.TripDetail> copy(@PathVariable long id,
+                                                    @RequestParam(required = false) java.time.LocalDate start) {
+        return ApiResponse.ok(tripEditor.copy(authFacade.current(), id, start));
+    }
+
+    /** POST /api/v1/trips/{id}/versions/{version}/restore：把某个历史版本的内容存成新版本（历史不删）。 */
+    @PostMapping("/{id}/versions/{version}/restore")
+    public ApiResponse<TripService.TripDetail> restore(@PathVariable long id, @PathVariable int version) {
+        return ApiResponse.ok(tripEditor.restore(authFacade.current(), id, version));
+    }
+
+    /**
+     * GET /api/v1/trips/{id}/days/{day}/optimize?goal=TIME|DISTANCE|COST：预览第 day 天（从 1 开始）的路线优化，不保存。
+     * 锁定的、已预约的项不动；路程全部来自高德。
+     */
+    @GetMapping("/{id}/days/{day}/optimize")
+    public ApiResponse<TripEditor.DayPreview> previewOptimize(@PathVariable long id, @PathVariable int day,
+                                                              @RequestParam(defaultValue = "TIME") TripEditor.Goal goal) {
+        return ApiResponse.ok(tripEditor.previewOptimize(authFacade.current(), id, day - 1, goal));
+    }
+
+    /** POST /api/v1/trips/{id}/days/{day}/optimize?goal=：确认优化，ids 是预览里的新顺序，一致才存成新版本。 */
+    @PostMapping("/{id}/days/{day}/optimize")
+    public ApiResponse<TripService.TripDetail> optimize(@PathVariable long id, @PathVariable int day,
+                                                        @RequestParam(defaultValue = "TIME") TripEditor.Goal goal,
+                                                        @RequestBody Order order) {
+        return ApiResponse.ok(tripEditor.optimize(authFacade.current(), id, day - 1, goal, order.ids()));
+    }
+
     /** PUT /api/v1/trips/{id}/days/{day}/order：调整第 day 天（从 1 开始）的顺序，存新版本。 */
     @PutMapping("/{id}/days/{day}/order")
     public ApiResponse<TripService.TripDetail> reorder(@PathVariable long id, @PathVariable int day,
@@ -136,6 +188,111 @@ public class TripController {
     public ApiResponse<TripService.TripDetail> add(@PathVariable long id, @PathVariable int day,
                                                    @RequestBody TripEditor.PlacePick place) {
         return ApiResponse.ok(tripEditor.add(authFacade.current(), id, day - 1, place));
+    }
+
+    /**
+     * GET /api/v1/trips/{id}/days/{day}/food?meal=LUNCH&keyword=&maxCost=&radius=&noSpicy=&local=&near=：
+     * 第 day 天某一顿顺路的餐厅（高德），按评分和绕路远近排。
+     */
+    @GetMapping("/{id}/days/{day}/food")
+    public ApiResponse<TripFood.FoodResult> food(@PathVariable long id, @PathVariable int day,
+                                                 @RequestParam(defaultValue = "LUNCH") TripEditor.Meal meal,
+                                                 @RequestParam(required = false) String keyword,
+                                                 @RequestParam(required = false) Integer maxCost,
+                                                 @RequestParam(required = false) Integer radius,
+                                                 @RequestParam(defaultValue = "false") boolean noSpicy,
+                                                 @RequestParam(defaultValue = "false") boolean local,
+                                                 @RequestParam(required = false) String near) {
+        return ApiResponse.ok(tripFood.find(authFacade.current(), id, day - 1,
+                new TripFood.FoodQuery(near, meal, keyword, maxCost, radius, noSpicy, local)));
+    }
+
+    /** 美食助手的一句话。 */
+    public record FoodAsk(String text) {
+    }
+
+    /** POST /api/v1/trips/{id}/days/{day}/food/ask?meal=：一句话找餐厅，模型只拆条件，餐厅和路程来自高德。 */
+    @PostMapping("/{id}/days/{day}/food/ask")
+    public ApiResponse<TripFood.FoodResult> askFood(@PathVariable long id, @PathVariable int day,
+                                                    @RequestParam(defaultValue = "LUNCH") TripEditor.Meal meal,
+                                                    @RequestBody FoodAsk ask) {
+        return ApiResponse.ok(tripFood.ask(authFacade.current(), id, day - 1, meal, ask.text()));
+    }
+
+    /** POST /api/v1/trips/{id}/days/{day}/meals/{meal}/preview：把餐厅放进某一顿的预览，不保存。 */
+    @PostMapping("/{id}/days/{day}/meals/{meal}/preview")
+    public ApiResponse<TripEditor.MealPreview> previewMeal(@PathVariable long id, @PathVariable int day,
+                                                           @PathVariable TripEditor.Meal meal,
+                                                           @RequestBody TripEditor.PlacePick place) {
+        return ApiResponse.ok(tripEditor.previewMeal(authFacade.current(), id, day - 1, meal, place));
+    }
+
+    /** POST /api/v1/trips/{id}/days/{day}/meals/{meal}?replaces=d1-4：确认放进这一顿，替换的项和预览一致才存新版本。 */
+    @PostMapping("/{id}/days/{day}/meals/{meal}")
+    public ApiResponse<TripService.TripDetail> saveMeal(@PathVariable long id, @PathVariable int day,
+                                                        @PathVariable TripEditor.Meal meal,
+                                                        @RequestParam(required = false) String replaces,
+                                                        @RequestBody TripEditor.PlacePick place) {
+        return ApiResponse.ok(tripEditor.saveMeal(authFacade.current(), id, day - 1, meal, place, replaces));
+    }
+
+    /** POST /api/v1/trips/{id}/days/{day}/flight/preview：把比价页选的航班写进第 day 天的预览，不保存。 */
+    @PostMapping("/{id}/days/{day}/flight/preview")
+    public ApiResponse<TripEditor.FlightPreview> previewFlight(@PathVariable long id, @PathVariable int day,
+                                                               @RequestBody TripEditor.FlightPick flight) {
+        return ApiResponse.ok(tripEditor.previewFlight(authFacade.current(), id, day - 1, flight));
+    }
+
+    /** POST /api/v1/trips/{id}/days/{day}/flight?replaces=d1-2：确认写进行程，存新版本；不下单。 */
+    @PostMapping("/{id}/days/{day}/flight")
+    public ApiResponse<TripService.TripDetail> saveFlight(@PathVariable long id, @PathVariable int day,
+                                                          @RequestParam(required = false) String replaces,
+                                                          @RequestBody TripEditor.FlightPick flight) {
+        return ApiResponse.ok(tripEditor.saveFlight(authFacade.current(), id, day - 1, flight, replaces));
+    }
+
+    /**
+     * POST /api/v1/trips/{id}/stays/preview?stayId=s1：把比价页选的酒店换进行程的预览（不传 stayId：只有一段住宿就换那段，
+     * 没有住宿就新加一段），列出每天路程的变化。不保存。
+     */
+    @PostMapping("/{id}/stays/preview")
+    public ApiResponse<TripEditor.StayPreview> previewStay(@PathVariable long id,
+                                                           @RequestParam(required = false) String stayId,
+                                                           @RequestBody TripEditor.StayPick hotel) {
+        return ApiResponse.ok(tripEditor.previewStay(authFacade.current(), id, stayId, hotel));
+    }
+
+    /** POST /api/v1/trips/{id}/stays/apply?stayId=&replaces=s1：确认换酒店，被换的那段和预览一致才存新版本；不下单。 */
+    @PostMapping("/{id}/stays/apply")
+    public ApiResponse<TripService.TripDetail> applyStay(@PathVariable long id,
+                                                         @RequestParam(required = false) String stayId,
+                                                         @RequestParam(required = false) String replaces,
+                                                         @RequestBody TripEditor.StayPick hotel) {
+        return ApiResponse.ok(tripEditor.saveStay(authFacade.current(), id, stayId, hotel, replaces));
+    }
+
+    /** GET /api/v1/trips/{id}/days/{day}/tickets：第 day 天每个景点的门票（飞猪），对不上的标待查。 */
+    @GetMapping("/{id}/days/{day}/tickets")
+    public ApiResponse<TripTickets.DayTickets> tickets(@PathVariable long id, @PathVariable int day,
+                                                       @RequestParam(defaultValue = "false") boolean refresh) {
+        return ApiResponse.ok(tripTickets.day(authFacade.current(), id, day - 1, refresh));
+    }
+
+    /** 跨天对调两个景点：a、b 是两项的 id；保存时带上预览时两项的名称，对不上说明行程变了。 */
+    public record Swap(String a, String b, String aName, String bName) {
+    }
+
+    /** POST /api/v1/trips/{id}/swap/preview：预览把不同两天的两个景点对调（如下雨天的户外和晴天的室内），不保存。 */
+    @PostMapping("/{id}/swap/preview")
+    public ApiResponse<TripEditor.SwapPreview> previewSwap(@PathVariable long id, @RequestBody Swap swap) {
+        return ApiResponse.ok(tripEditor.previewSwap(authFacade.current(), id, swap.a(), swap.b()));
+    }
+
+    /** POST /api/v1/trips/{id}/swap：确认对调，存新版本。 */
+    @PostMapping("/{id}/swap")
+    public ApiResponse<TripService.TripDetail> swap(@PathVariable long id, @RequestBody Swap swap) {
+        return ApiResponse.ok(tripEditor.saveSwap(authFacade.current(), id, swap.a(), swap.b(), swap.aName(),
+                swap.bName()));
     }
 
     /** 换酒店：酒店名（比价候选里的一家，或用户自己说的）。 */

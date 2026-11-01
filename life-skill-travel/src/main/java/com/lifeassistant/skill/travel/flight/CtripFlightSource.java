@@ -27,6 +27,7 @@ public class CtripFlightSource implements FlightPriceSource {
     private static final Pattern DEP = Pattern.compile("起飞[：:]\\s*(.+?)\\s+(\\d{1,2}:\\d{2})");
     private static final Pattern ARR = Pattern.compile("到达[：:]\\s*(.+?)\\s+(\\d{1,2}:\\d{2})");
     private static final Pattern PRICE = Pattern.compile("[￥¥]\\s*(\\d{2,6})");
+    private static final Pattern DURATION = Pattern.compile("飞行时间[：:]\\s*(\\S+)");
 
     private final CtripWendaoClient client;
 
@@ -47,7 +48,7 @@ public class CtripFlightSource implements FlightPriceSource {
                     + "的航班和价格，请用md格式返回"));
         } catch (RuntimeException e) {
             log.warn("携程查机票失败：{}", e.getMessage());
-            return Result.failed(platform(), "携程暂时查不到：" + e.getMessage());
+            return Result.failed(platform(), e instanceof IllegalStateException ? e.getMessage() : "携程暂时查不到：" + e.getMessage());
         }
     }
 
@@ -76,10 +77,15 @@ public class CtripFlightSource implements FlightPriceSource {
             Matcher price = PRICE.matcher(body);
             boolean hasDep = dep.find();
             boolean hasArr = arr.find();
-            String airline = heads.get(i)[0].split("\\s+")[0];
+            // 标题是"航司 机型"，航司可能写成"新海航|海南航空"
+            String[] title = heads.get(i)[0].trim().split("\\s+", 2);
+            String airline = title[0].contains("|") ? title[0].substring(title[0].indexOf('|') + 1) : title[0];
+            Matcher duration = DURATION.matcher(body);
             offers.add(new Offer(no.group(1), airline, hasDep ? dep.group(2) : null, hasArr ? arr.group(2) : null,
                     hasDep ? dep.group(1) : null, hasArr ? arr.group(1) : null,
-                    price.find() ? Integer.valueOf(price.group(1)) : null, url, null));
+                    price.find() ? Integer.valueOf(price.group(1)) : null, url, null,
+                    duration.find() ? FlightPriceSource.minutes(duration.group(1)) : null,
+                    title.length > 1 ? title[1].replaceAll("[(（][^)）]*[)）]$", "").trim() : null));
         }
         String note = offers.isEmpty() && markdown.contains("未匹配") ? "携程没匹配到航班" : null;
         return Result.of("携程", offers, note);

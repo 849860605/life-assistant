@@ -185,7 +185,7 @@ public class TripGeo {
         }
         try {
             return places.driving(new double[]{a.lng(), a.lat()}, new double[]{b.lng(), b.lat()})
-                    .map(r -> new Itinerary.Leg(a.id(), b.id(), "DRIVE", Math.max(1, r.minutes()), r.km()))
+                    .map(r -> new Itinerary.Leg(a.id(), b.id(), "DRIVE", Math.max(1, r.minutes()), r.km(), r.taxi()))
                     .orElse(null);
         } catch (RuntimeException e) {
             log.warn("路线 {} → {} 查询失败：{}", a.name(), b.name(), e.getMessage());

@@ -1,5 +1,6 @@
 package com.lifeassistant.api.web.admin;
 
+import com.lifeassistant.api.auth.LoginGuard;
 import com.lifeassistant.api.auth.StpAdminUtil;
 import com.lifeassistant.common.api.ApiResponse;
 import com.lifeassistant.core.audit.AdminOpLogger;
@@ -10,6 +11,7 @@ import com.lifeassistant.core.eval.EvalService;
 import com.lifeassistant.core.schedule.ReminderDispatcher;
 import com.lifeassistant.core.user.AdminUser;
 import com.lifeassistant.core.user.AdminUserService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import lombok.RequiredArgsConstructor;
@@ -38,15 +40,18 @@ public class AdminController {
     private final LlmUsageMapper usageMapper;
     private final ToolCallLogMapper toolCallLogMapper;
     private final AdminOpLogger opLogger;
+    private final LoginGuard loginGuard;
 
     /** 管理员登录请求体。 */
     public record AdminLoginRequest(@NotBlank String username, @NotBlank String password) {
     }
 
-    /** POST /admin/api/v1/auth/login：管理员登录，返回管理端 token（与用户 token 独立）。 */
+    /** POST /admin/api/v1/auth/login：管理员登录，返回管理端 token（与用户 token 独立）；连续输错会暂停登录。 */
     @PostMapping("/auth/login")
-    public ApiResponse<Map<String, String>> login(@Valid @RequestBody AdminLoginRequest request) {
-        AdminUser admin = adminUserService.authenticate(request.username(), request.password());
+    public ApiResponse<Map<String, String>> login(@Valid @RequestBody AdminLoginRequest request,
+                                                  HttpServletRequest http) {
+        AdminUser admin = loginGuard.guard("admin", request.username(), http.getRemoteAddr(),
+                () -> adminUserService.authenticate(request.username(), request.password()));
         StpAdminUtil.STP.login(admin.getId());
         return ApiResponse.ok(Map.of("token", StpAdminUtil.STP.getTokenValue()));
     }

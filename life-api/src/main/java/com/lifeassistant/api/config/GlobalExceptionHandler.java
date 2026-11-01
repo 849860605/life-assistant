@@ -7,7 +7,12 @@ import com.lifeassistant.common.error.ErrorCode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -28,6 +33,7 @@ public class GlobalExceptionHandler {
             case FORBIDDEN -> HttpStatus.FORBIDDEN;
             case NOT_FOUND -> HttpStatus.NOT_FOUND;
             case CONFLICT -> HttpStatus.CONFLICT;
+            case TOO_MANY_REQUESTS -> HttpStatus.TOO_MANY_REQUESTS;
             case EXTERNAL_SERVICE -> HttpStatus.BAD_GATEWAY;
             case INTERNAL -> HttpStatus.INTERNAL_SERVER_ERROR;
         };
@@ -54,6 +60,29 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ApiResponse<Void>> handleIllegalArgument(IllegalArgumentException e) {
         return ResponseEntity.badRequest().body(ApiResponse.fail(ErrorCode.BAD_REQUEST, e.getMessage()));
+    }
+
+    /** 缺参数、参数类型不对、请求体不是合法 JSON：返回 400，不当成服务器错误。 */
+    @ExceptionHandler({MissingServletRequestParameterException.class, MethodArgumentTypeMismatchException.class,
+            HttpMessageNotReadableException.class})
+    public ResponseEntity<ApiResponse<Void>> handleBadParam(Exception e) {
+        String message = e instanceof MissingServletRequestParameterException m ? "缺少参数 " + m.getParameterName()
+                : e instanceof MethodArgumentTypeMismatchException t ? "参数 " + t.getName() + " 格式不对"
+                : "请求内容格式不对";
+        return ResponseEntity.badRequest().body(ApiResponse.fail(ErrorCode.BAD_REQUEST, message));
+    }
+
+    /** 不存在的地址（包括已关闭的接口文档）：返回 404，不当成服务器错误记日志。 */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleNoResource(NoResourceFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiResponse.fail(ErrorCode.NOT_FOUND, "地址不存在"));
+    }
+
+    /** 请求方法不对（比如对只收 POST 的接口发 GET）：返回 405。 */
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMethod(HttpRequestMethodNotSupportedException e) {
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED)
+                .body(ApiResponse.fail(ErrorCode.BAD_REQUEST, "不支持 " + e.getMethod() + " 请求"));
     }
 
     /** 兜底：记录错误日志，对外只返回通用的 500 文案，不暴露异常细节。 */

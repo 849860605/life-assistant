@@ -71,7 +71,12 @@ public class LifeProperties {
     /** 高德 Web 服务配置；地图能力走高德 MCP，这里的 Key 用于天气兜底。 */
     @Data
     public static class Amap {
+        /** Web 服务 Key：后端查地点、路线、静态地图 */
         private String key;
+        /** Web 端（JS API）Key：页面上的可拖动地图 */
+        private String jsKey;
+        /** JS API 的安全密钥，只在后端转发高德请求时加上 */
+        private String jsSecurity;
     }
 
     /** 一个远程 MCP 服务（Streamable HTTP）。apiKey 为空表示没开通，不会去连。 */
