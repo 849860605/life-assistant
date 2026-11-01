@@ -295,5 +295,6 @@ function forgetOtherUser(userId: number) {
   .slogan .ai { font-size: 20px; }
   .panel { padding: 28px 20px 20px; }
   .panel-title { font-size: 24px; }
+  .trust .sep { display: none; }
 }
 </style>

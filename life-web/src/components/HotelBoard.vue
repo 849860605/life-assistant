@@ -153,7 +153,7 @@
               </view>
             </template>
             <view v-else-if="quoteOf(selected)?.error" class="err small">{{ quoteOf(selected)!.error }}</view>
-            <button v-else class="btn ghost small" :disabled="quoteOf(selected)?.loading" @click="loadQuote(selected)">{{ quoteOf(selected)?.loading ? "正在查携程、美团、飞猪，约 15 秒…" : "比较各平台价格" }}</button>
+            <button v-else class="btn ghost small" :disabled="quoteOf(selected)?.loading" @click="loadQuote(selected)">{{ quoteOf(selected)?.loading ? "正在查携程、美团、飞猪、途牛，约 15 秒…" : "比较各平台价格" }}</button>
             <view v-if="quoteOf(selected)?.data" class="muted small">{{ ago(quoteOf(selected)!.data!.queriedAt) }}比价 · <text class="link" @click="loadQuote(selected, true)">{{ quoteOf(selected)!.loading ? "重新比价中…" : "重新比价" }}</text></view>
             <view class="muted small">各平台的价格口径不同（有的是酒店起价、有的是具体房型），以平台页面为准。预订链接部分带推广参数，不影响排序和推荐；付款在平台上由你自己完成。</view>
           </view>

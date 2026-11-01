@@ -119,3 +119,14 @@ export function queriedAt(value?: string | null): string {
   const sameDay = d.toDateString() === today.toDateString();
   return (sameDay ? "" : `${d.getMonth() + 1}/${d.getDate()} `) + hm(d);
 }
+
+/** 能标记"去过了 / 吃过了"的安排：景点和吃饭 */
+export function doneable(type: string) {
+  return type === "SPOT" || type === "FOOD";
+}
+
+/** 这次行程里"已去 / 已吃"的文字：done 为 false 时是按钮上的"标记…"（和规划时的"以前去过，换一个"区分开） */
+export function doneText(type: string, done: boolean) {
+  const word = type === "FOOD" ? "已吃" : "已去";
+  return done ? word : "标记" + word;
+}

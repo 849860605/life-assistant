@@ -143,6 +143,8 @@ export interface Itinerary {
   booked?: string[];
   /** 点过预订链接的项（值 OPENED，"已跳转平台"，还不算订好）；已确认的看 booked */
   bookingStatus?: Record<string, string>;
+  /** 用户标记"去过了 / 吃过了"的安排 id */
+  done?: string[];
   tips?: string;
   /** 已经补过坐标和路程 */
   geo?: boolean;
@@ -622,4 +624,18 @@ export interface TokenView {
   scope: string;
   prefix: string;
   plainKey: string | null;
+}
+
+/** 途牛上的一个票种：price 是起价（可售日期里的最低价），没有预订链接 */
+export interface TuniuTicket {
+  name: string;
+  type: string | null;
+  category: string | null;
+  price: number | null;
+  refund: string | null;
+  enter: string | null;
+  advance: string | null;
+  open: string | null;
+  saleFrom: string | null;
+  saleTo: string | null;
 }

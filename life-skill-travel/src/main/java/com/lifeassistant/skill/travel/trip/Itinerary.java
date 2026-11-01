@@ -17,49 +17,66 @@ import java.util.Set;
  * booked 是用户标记"已预约"的安排和住宿的 id（如 d1-3、s1）：用户自己在平台上订好后在页面上标记，不经过我们下单。
  * bookingStatus 记"已跳转平台"（值 OPENED）：用户点过预订链接，但还没确认订好，不能当成预订成功；
  * 已确认的只看 booked，两边不会对不上。
+ * done 是用户标记"去过了 / 吃过了"的安排 id：出行中或回来后在页面上勾，不算新版本。
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record Itinerary(List<Day> days, String tips, Boolean geo, List<Stay> stays, List<String> booked,
-                        java.util.Map<String, String> bookingStatus) {
+                        java.util.Map<String, String> bookingStatus, List<String> done) {
 
     /** 预订状态：计划预订、已跳转平台、已确认订单 */
     public static final String PLANNED = "PLANNED";
     public static final String OPENED = "OPENED";
     public static final String CONFIRMED = "CONFIRMED";
 
+    public Itinerary(List<Day> days, String tips, Boolean geo, List<Stay> stays, List<String> booked,
+                     java.util.Map<String, String> bookingStatus) {
+        this(days, tips, geo, stays, booked, bookingStatus, null);
+    }
+
     public Itinerary(List<Day> days, String tips, Boolean geo, List<Stay> stays, List<String> booked) {
-        this(days, tips, geo, stays, booked, null);
+        this(days, tips, geo, stays, booked, null, null);
     }
 
     public Itinerary(List<Day> days, String tips) {
-        this(days, tips, null, null, null, null);
+        this(days, tips, null, null, null, null, null);
     }
 
     /** 换掉逐日安排，其余不变。 */
     public Itinerary withDays(List<Day> newDays) {
-        return new Itinerary(newDays, tips, geo, stays, booked, bookingStatus);
+        return new Itinerary(newDays, tips, geo, stays, booked, bookingStatus, done);
     }
 
     /** 换掉住宿，其余不变。 */
     public Itinerary withStays(List<Stay> newStays) {
-        return new Itinerary(days, tips, geo, newStays, booked, bookingStatus);
+        return new Itinerary(days, tips, geo, newStays, booked, bookingStatus, done);
     }
 
     /** 换掉已预约的 id 列表，其余不变；空列表存成 null。 */
     public Itinerary withBooked(List<String> newBooked) {
         return new Itinerary(days, tips, geo, stays, newBooked == null || newBooked.isEmpty() ? null : List.copyOf(newBooked),
-                bookingStatus);
+                bookingStatus, done);
     }
 
     /** 换掉"已跳转平台"的记录，其余不变；空的存成 null。 */
     public Itinerary withBookingStatus(java.util.Map<String, String> status) {
         return new Itinerary(days, tips, geo, stays, booked,
-                status == null || status.isEmpty() ? null : java.util.Map.copyOf(status));
+                status == null || status.isEmpty() ? null : java.util.Map.copyOf(status), done);
+    }
+
+    /** 换掉"去过了 / 吃过了"的 id 列表，其余不变；空列表存成 null。 */
+    public Itinerary withDone(List<String> newDone) {
+        return new Itinerary(days, tips, geo, stays, booked, bookingStatus,
+                newDone == null || newDone.isEmpty() ? null : List.copyOf(newDone));
+    }
+
+    /** 这一项是不是已经去过 / 吃过。 */
+    public boolean isDone(String id) {
+        return done != null && done.contains(id);
     }
 
     /** 标记已补过地理信息。 */
     public Itinerary located(List<Day> newDays, List<Stay> newStays) {
-        return new Itinerary(newDays, tips, true, newStays, booked, bookingStatus);
+        return new Itinerary(newDays, tips, true, newStays, booked, bookingStatus, done);
     }
 
     /** 某项的预订状态：在 booked 里是已确认，点过预订链接是已跳转平台，否则是计划预订。 */
@@ -233,6 +250,9 @@ public record Itinerary(List<Day> days, String tips, Boolean geo, List<Stay> sta
                 }
                 if (isBooked(item.id())) {
                     out.append(" · 已预约");
+                }
+                if (isDone(item.id())) {
+                    out.append(" · ").append("FOOD".equals(item.type()) ? "已吃过" : "已去过");
                 }
                 out.append("\n");
             }

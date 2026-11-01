@@ -1,0 +1,15 @@
+# 密钥不进镜像：.env 只在运行时由 docker compose 读取
+.env
+.env.*
+!.env.example
+.git
+.idea
+.vscode
+**/target
+**/node_modules
+life-web/dist
+life-web/unpackage
+# data 里只带字体（构建时拷进镜像），其他运行数据不带
+data/*
+!data/fonts
+*.log

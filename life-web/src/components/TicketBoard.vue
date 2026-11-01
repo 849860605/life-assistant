@@ -59,6 +59,7 @@
           <view class="card-acts" @click.stop>
             <button v-if="s.free !== true" class="btn small" :disabled="ticketsOf(s)?.loading" @click="toggleTickets(s)">{{ ticketsOf(s)?.open ? "收起门票" : ticketsOf(s)?.loading ? "查询中…" : "查门票" }}</button>
             <button class="btn ghost small" :disabled="rulesOf(s)?.loading" @click="loadRules(s)">{{ rulesOf(s)?.loading ? "问携程中，约 15 秒…" : s.free ? "查预约入口和规则" : "查预约规则" }}</button>
+            <button class="btn ghost small" :disabled="tuniuOf(s)?.loading" @click="loadTuniu(s)">{{ tuniuOf(s)?.loading ? "正在查途牛…" : "查途牛价格" }}</button>
             <text v-if="s.url" class="link" @click="openUrl(s.url!)">飞猪景点页 ›</text>
           </view>
           <view v-if="ticketsOf(s)?.open" class="products" @click.stop>
@@ -75,6 +76,25 @@
               </view>
               <text v-if="p.url" class="link" @click="openUrl(p.url!)">去飞猪预订 ›</text>
             </view>
+          </view>
+          <view v-if="tuniuOf(s)?.data || tuniuOf(s)?.error" class="products" @click.stop>
+            <view class="p-head"><text class="p-title">途牛</text><text class="muted small">起价是可售日期里的最低价，以下单页为准</text></view>
+            <view v-if="tuniuOf(s)!.error" class="err small">{{ tuniuOf(s)!.error }}</view>
+            <view v-else-if="!tuniuList(s).length" class="muted small">{{ tuniuOf(s)!.data!.length ? `途牛上没有${ticketType}票` : "途牛上没找到这个景点的门票" }}</view>
+            <view v-for="t in tuniuList(s)" :key="t.name" class="tuniu">
+              <view class="tn-head">
+                <text class="tn-name">{{ t.name }}</text>
+                <text class="tn-price">{{ t.price != null ? `¥${t.price}起` : "—" }}</text>
+              </view>
+              <view class="tn-tags">
+                <text v-if="t.type" class="tag">{{ t.type }}</text>
+                <text v-if="t.category && t.category !== '景点门票'" class="tag warn">{{ t.category }}</text>
+                <text v-if="t.advance" class="tag" :class="{ warn: t.advance !== '可当天订' }">{{ t.advance }}</text>
+                <text v-if="t.refund" class="tag">{{ t.refund }}</text>
+                <text v-if="t.enter" class="tag">{{ t.enter }}</text>
+              </view>
+            </view>
+            <view v-if="tuniuOf(s)!.data" class="muted small">途牛没给预订链接，去途牛 App 搜「{{ s.name }}」预订。<text v-if="tuniuDate(s)">按 {{ tuniuDate(s) }} 出游查的。</text><text class="link" @click="loadTuniu(s, true)">{{ tuniuOf(s)!.loading ? "重新查询中…" : "重新查（耗途牛额度）" }}</text></view>
           </view>
           <view v-if="rulesOf(s)?.data || rulesOf(s)?.error" class="rules" @click.stop>
             <view v-if="rulesOf(s)!.error" class="err small">{{ rulesOf(s)!.error }}</view>
@@ -144,7 +164,7 @@
         </view>
         <view class="panel">
           <view class="panel-title">数据说明</view>
-          <view class="muted small">门票商品目前只接了飞猪，还做不到多平台比价；携程问道只用来查预约规则和开放时间（每天额度有限）。"免费"只表示不收门票，很多免费博物馆仍要实名预约。</view>
+          <view class="muted small">门票商品来自飞猪，途牛的票种和起价点"查途牛价格"才查（途牛每天只有 50 次额度）；携程问道只用来查预约规则和开放时间（每天额度有限）。"免费"只表示不收门票，很多免费博物馆仍要实名预约。</view>
         </view>
       </view>
     </view>
@@ -157,7 +177,7 @@ import Icon from "./Icon.vue";
 import RouteMap from "./RouteMap.vue";
 import { api } from "../api";
 import { showError } from "../api/http";
-import type { DayTickets, ItineraryDay, SpotRules, TicketProduct, TicketSpot, TripDetail } from "../api/types";
+import type { DayTickets, ItineraryDay, SpotRules, TicketProduct, TicketSpot, TripDetail, TuniuTicket } from "../api/types";
 import { ago, openUrl } from "../utils/format";
 import { cityOf, currentCity, type MapStop } from "../utils/place";
 import { useWide } from "../utils/screen";
@@ -427,6 +447,43 @@ function skusOf(p: TicketProduct) {
   return p.skus.filter((k) => k.type === ticketType.value).slice(0, 8);
 }
 
+/** 途牛门票：每天只有 50 次额度，点了才查 */
+const tuniu = reactive<Record<string, { loading: boolean; data: TuniuTicket[] | null; error: string }>>({});
+
+function tuniuOf(s: TicketSpot) {
+  return tuniu[s.name];
+}
+
+/** 行程里有这个景点就按那天查，否则不带日期 */
+function tuniuDate(s: TicketSpot) {
+  const d = tripDayOf(s);
+  return d ? trip.value?.days[Number(d.slice(1)) - 1]?.date || null : null;
+}
+
+/** 按票种筛选：套票看园内项目和讲解，其他票种只看对应类别 */
+function tuniuList(s: TicketSpot) {
+  const list = tuniu[s.name]?.data || [];
+  if (ticketType.value === "全部") return list;
+  if (ticketType.value === "套票") return list.filter((t) => t.category !== "景点门票");
+  // "通用"是不限人群的票，成人也按它买
+  return list.filter((t) => t.category === "景点门票" && (t.type === ticketType.value || (ticketType.value === "成人" && t.type === "通用")));
+}
+
+async function loadTuniu(s: TicketSpot, refresh = false) {
+  if (tuniu[s.name]?.data && !refresh) return;
+  if (refresh && tuniu[s.name]?.data) tuniu[s.name].loading = true;
+  else tuniu[s.name] = { loading: true, data: null, error: "" };
+  try {
+    tuniu[s.name].data = await api.tuniuTickets(s.name, tuniuDate(s), refresh);
+    tuniu[s.name].error = "";
+  } catch (e) {
+    if (refresh && tuniu[s.name].data) showError(e);
+    else tuniu[s.name].error = e instanceof Error ? e.message : String(e);
+  } finally {
+    tuniu[s.name].loading = false;
+  }
+}
+
 function rulesOf(s: TicketSpot) {
   return rules[s.name];
 }
@@ -498,6 +555,13 @@ async function loadRules(s: TicketSpot, refresh = false) {
 .desc { font-size: 12px; color: var(--muted); line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .card-acts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .card-acts .btn { margin: 0; }
+.tuniu { display: flex; flex-direction: column; gap: 4px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.tuniu:last-of-type { border-bottom: none; }
+.tn-head { display: flex; justify-content: space-between; gap: 8px; }
+.tn-name { font-size: 13px; font-weight: 600; min-width: 0; }
+.tn-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.tn-tags .tag { background: var(--surface); }
+.tn-price { font-weight: 800; color: var(--price); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .products, .rules { display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: 10px; background: var(--surface-2); cursor: default; }
 .product { display: flex; flex-direction: column; gap: 4px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
 .product:last-child { border-bottom: none; padding-bottom: 0; }

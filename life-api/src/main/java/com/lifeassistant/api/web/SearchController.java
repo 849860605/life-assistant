@@ -10,6 +10,7 @@ import com.lifeassistant.skill.travel.hotel.HotelQuoteBook;
 import com.lifeassistant.skill.travel.hotel.HotelSearch;
 import com.lifeassistant.skill.travel.ticket.TicketRules;
 import com.lifeassistant.skill.travel.ticket.TicketSearch;
+import com.lifeassistant.skill.travel.ticket.TuniuTickets;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -33,6 +34,7 @@ public class SearchController {
     private final HotelSearch hotelSearch;
     private final TicketSearch ticketSearch;
     private final TicketRules ticketRules;
+    private final TuniuTickets tuniuTickets;
     private final com.lifeassistant.core.cache.QueryCache queryCache;
     private final FoodTools foodTools;
 
@@ -150,6 +152,14 @@ public class SearchController {
     public ApiResponse<TicketRules.Rules> spotRules(@RequestParam String city, @RequestParam String spot,
                                                    @RequestParam(defaultValue = "false") boolean refresh) {
         return ApiResponse.ok(ticketRules.rules(city, spot, refresh));
+    }
+
+    /** GET /api/v1/search/spots/tuniu-tickets?spot=大雁塔&date=2026-12-31：途牛上这个景点的票种和起价（耗途牛额度，点了才查）。 */
+    @GetMapping("/spots/tuniu-tickets")
+    public ApiResponse<java.util.List<TuniuTickets.Ticket>> spotTuniuTickets(@RequestParam String spot,
+                                                                           @RequestParam(required = false) java.time.LocalDate date,
+                                                                           @RequestParam(defaultValue = "false") boolean refresh) {
+        return ApiResponse.ok(tuniuTickets.tickets(spot, date, refresh));
     }
 
     /** GET /api/v1/search/spots/tickets?city=西安&spot=兵马俑：这个景点的门票商品（飞猪），成人价、儿童价按票种挑。 */

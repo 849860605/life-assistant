@@ -200,6 +200,7 @@ public class TripTools {
         CallRecorder.Scope scope = CallRecorder.current();
         itinerary = itinerary.withStays(toStays(stays, scope == null ? null : scope.conversationId(), previous));
         itinerary = carryBooked(itinerary, previous);
+        itinerary = carryDone(itinerary, previous);
         List<String> problems = new ArrayList<>(itinerary.problems(start, end));
         for (Itinerary.Stay st : itinerary.stays()) {
             if (st.nights() == 0) {
@@ -330,6 +331,18 @@ public class TripTools {
                     old.lat(), old.photo(), old.rating()));
         }
         return out;
+    }
+
+    /** 同上，按名称把上一版"去过了 / 吃过了"的安排对到新版本上。 */
+    static Itinerary carryDone(Itinerary itinerary, Itinerary previous) {
+        if (previous == null || previous.done() == null) {
+            return itinerary;
+        }
+        java.util.Set<String> names = new java.util.HashSet<>();
+        previous.days().forEach(d -> d.items().stream().filter(i -> previous.isDone(i.id())).forEach(i -> names.add(i.name())));
+        List<String> ids = new ArrayList<>();
+        itinerary.days().forEach(d -> d.items().stream().filter(i -> names.contains(i.name())).forEach(i -> ids.add(i.id())));
+        return itinerary.withDone(ids);
     }
 
     /** 模型改版时 id 会重新编号，按名称把上一版"已预约"的安排和住宿对到新版本上。 */

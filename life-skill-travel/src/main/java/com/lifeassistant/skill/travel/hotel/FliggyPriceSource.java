@@ -62,9 +62,10 @@ public class FliggyPriceSource implements HotelPriceSource {
             return Quote.failed("飞猪", "飞猪没搜到这家酒店");
         }
         JsonNode picked = null;
+        String want = normalize(hotel);
         for (JsonNode item : items) {
-            String name = item.path("name").asText();
-            if (name.equals(hotel) || name.contains(hotel) || hotel.contains(name)) {
+            String name = normalize(item.path("name").asText());
+            if (!name.isEmpty() && (name.equals(want) || name.contains(want) || want.contains(name))) {
                 picked = item;
                 break;
             }
@@ -77,5 +78,10 @@ public class FliggyPriceSource implements HotelPriceSource {
         Matcher price = NUMBER.matcher(picked.path("price").asText());
         return Quote.ok("飞猪", price.find() ? Integer.valueOf(price.group(1)) : null, "酒店级明码价，不是具体房型价",
                 picked.path("detailUrl").asText(null), picked.path("name").asText(), List.of(), note);
+    }
+
+    /** 去掉括号（全角半角都算）、空格和点号，方便比较酒店名。 */
+    private static String normalize(String name) {
+        return name == null ? "" : name.replaceAll("[\\s()（）·・\\-]", "");
     }
 }

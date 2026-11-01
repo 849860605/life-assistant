@@ -135,6 +135,13 @@ public class TripController {
         return ApiResponse.ok(tripEditor.markBooked(authFacade.current(), id, targetId, booked));
     }
 
+    /** POST /api/v1/trips/{id}/done/{itemId}?done=true|false：标记某个安排去过了 / 吃过了。只改当前版本。 */
+    @PostMapping("/{id}/done/{itemId}")
+    public ApiResponse<TripService.TripDetail> done(@PathVariable long id, @PathVariable String itemId,
+                                                    @RequestParam boolean done) {
+        return ApiResponse.ok(tripEditor.setDone(authFacade.current(), id, itemId, done));
+    }
+
     /**
      * POST /api/v1/trips/{id}/booking/{targetId}?status=PLANNED|OPENED|CONFIRMED：设置预订状态。
      * OPENED 只表示点过预订链接，不算订好；用户自己确认订好才是 CONFIRMED。只改当前版本。

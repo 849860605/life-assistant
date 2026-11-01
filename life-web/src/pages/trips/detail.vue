@@ -61,6 +61,7 @@
                       <text v-if="item.type === 'SPOT' && (item.rating || 0) >= 4.8" class="must">高分景点</text>
                       <text v-if="item.locked" class="kept-tag">已保留</text>
                       <text v-if="isBooked(item.id)" class="booked-tag">已预约</text>
+                      <text v-if="isDone(item.id)" class="booked-tag">{{ doneText(item.type, true) }}</text>
                     </view>
                     <view class="tl-note">{{ item.note }}</view>
                     <view class="tl-facts">
@@ -76,13 +77,14 @@
                   </view>
                   <view v-if="isCurrent" class="tl-more" @click="more(item)"><Icon name="more" :size="16" color="var(--muted)" /></view>
                 </view>
-                <view v-if="isCurrent && BOOKABLE.includes(item.type)" class="tl-acts">
+                <view v-if="isCurrent && (BOOKABLE.includes(item.type) || doneable(item.type))" class="tl-acts">
                   <template v-if="EDITABLE.includes(item.type)">
                     <view class="a keep" :class="{ on: item.locked }" @click="toggleKeep(item)"><Icon name="heart" :size="13" :fill="!!item.locked" color="var(--ok)" />{{ item.locked ? "已保留" : "喜欢，保留" }}</view>
-                    <view class="a swap" @click="openReplace(item, 'VISITED')"><Icon name="refresh" :size="13" color="var(--accent)" />去过了，换一个</view>
+                    <view class="a swap" @click="openReplace(item, 'VISITED')"><Icon name="refresh" :size="13" color="var(--accent)" />以前去过，换一个</view>
                     <view class="a" @click="openReplace(item, 'DISLIKE')"><Icon name="close" :size="13" color="var(--muted)" />不感兴趣</view>
                   </template>
-                  <view class="a book" :class="{ on: isBooked(item.id) }" @click="toggleBooked(item.id, item.name)"><Icon name="checkCircle" :size="13" color="var(--ok)" />{{ isBooked(item.id) ? "已预约" : "标记已预约" }}</view>
+                  <view v-if="BOOKABLE.includes(item.type)" class="a book" :class="{ on: isBooked(item.id) }" @click="toggleBooked(item.id, item.name)"><Icon name="checkCircle" :size="13" color="var(--ok)" />{{ isBooked(item.id) ? "已预约" : "标记已预约" }}</view>
+                  <view v-if="doneable(item.type)" class="a book" :class="{ on: isDone(item.id) }" @click="toggleDone(item)"><Icon name="check" :size="13" color="var(--ok)" />{{ doneText(item.type, isDone(item.id)) }}</view>
                 </view>
               </view>
             </view>
@@ -251,6 +253,7 @@
               <view v-else class="thumb placeholder" :class="item.type"><Icon :name="TYPE_ICON[item.type] || 'pin'" :size="22" color="#fff" /></view>
               <view class="stop-body">
                 <view class="stop-name" :class="{ link: item.url }" @click="openUrl(item.url)">{{ item.name }}<text v-if="isBooked(item.id)" class="booked-tag">已预约</text></view>
+                <text v-if="doneable(item.type)" class="done-btn" :class="{ on: isDone(item.id) }" @click.stop="toggleDone(item)">{{ isDone(item.id) ? "✓ " : "" }}{{ doneText(item.type, isDone(item.id)) }}</text>
                 <view class="stop-time">{{ item.start }}<text v-if="item.end"> - {{ item.end }}</text><text v-if="item.rating" class="star"> · ★{{ item.rating }}</text><text v-if="item.cost" class="cost"> · ¥{{ item.cost }}/人</text></view>
                 <view v-if="item.note" class="stop-note">{{ item.note }}</view>
                 <view v-if="EDITABLE.includes(item.type)" class="amap-links">
@@ -351,7 +354,7 @@ import ReplaceModal from "../../components/ReplaceModal.vue";
 import StayCard from "../../components/StayCard.vue";
 import Shell from "../../components/Shell.vue";
 import { useWide } from "../../utils/screen";
-import { hm, openUrl, shortDate } from "../../utils/format";
+import { doneable, doneText, hm, openUrl, shortDate } from "../../utils/format";
 import { amapNavUrl, amapUrl, cityOf, dayMapUrl, dayTravel, distanceText, duration as duration2, legFrom, legText, located } from "../../utils/place";
 
 /**
@@ -561,6 +564,20 @@ const bookedIds = computed(() => new Set(detail.value?.version.itinerary?.booked
 
 function isBooked(id: string) {
   return bookedIds.value.has(id);
+}
+
+function isDone(id: string) {
+  return !!detail.value?.version.itinerary?.done?.includes(id);
+}
+
+/** 标记或取消"去过了 / 吃过了"：只记在当前版本上，不算新版本 */
+async function toggleDone(item: ItineraryItem) {
+  const done = !isDone(item.id);
+  try {
+    detail.value = await api.setDone(tripId.value, item.id, done);
+  } catch (e) {
+    showError(e);
+  }
 }
 
 /** 标记或取消"已预约"：只是记录，不会去平台下单或取消 */
@@ -1036,6 +1053,8 @@ async function loadVersions() {
 .m-pdf { display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; font-size: 13px; color: var(--accent); cursor: pointer; }
 .amap-links { display: flex; gap: 12px; margin-top: 4px; }
 .amap { display: inline-flex; align-items: center; gap: 2px; font-size: 12px; color: var(--accent); cursor: pointer; }
+.done-btn { align-self: flex-start; margin: 2px 0; font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); cursor: pointer; }
+.done-btn.on { border-color: transparent; background: var(--ok-soft); color: var(--ok); font-weight: 600; }
 .booked-tag { margin-left: 6px; font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 999px; background: var(--ok-soft); color: var(--ok); }
 .a.book.on, .act.book.on { background: var(--ok-soft); border-color: var(--ok); color: var(--ok); }
 </style>

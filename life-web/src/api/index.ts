@@ -1,6 +1,6 @@
 import { request } from "./http";
 import type {
-  BookingState, ChangeReason, ChatMessage, Conversation, DayPreview, FlightPick, FlightPreview, FlightRules, FlightSearch, FoodResult, DayTickets, HotelComparison, HotelSearchResult, SpotRules, TicketProduct, TicketSpot, TuniuCabin, StayPick, StayPreview, Meal, MealPreview, MemoryCategory, MemoryItem, OptimizeGoal, Place, PlacePick,
+  BookingState, ChangeReason, ChatMessage, Conversation, DayPreview, FlightPick, FlightPreview, FlightRules, FlightSearch, FoodResult, DayTickets, HotelComparison, HotelSearchResult, SpotRules, TicketProduct, TuniuTicket, TicketSpot, TuniuCabin, StayPick, StayPreview, Meal, MealPreview, MemoryCategory, MemoryItem, OptimizeGoal, Place, PlacePick,
   ScheduleEvent, TokenView,
   TripDetail, TripVersion, Trip, UserView,
   WeatherBoard, TripForecast, SwapPreview,
@@ -38,6 +38,8 @@ export const api = {
     request<TripDetail>("POST", `/api/v1/trips/${id}/versions/${version}/restore`),
   setBooking: (id: number, targetId: string, status: BookingState) =>
     request<TripDetail>("POST", `/api/v1/trips/${id}/booking/${targetId}` + qs({ status })),
+  setDone: (id: number, itemId: string, done: boolean) =>
+    request<TripDetail>("POST", `/api/v1/trips/${id}/done/${itemId}?done=${done}`),
   tripGeo: (id: number) => request<TripDetail>("POST", `/api/v1/trips/${id}/geo`),
   alternatives: (id: number, itemId: string, keyword?: string) =>
     request<Place[]>("GET", `/api/v1/trips/${id}/items/${itemId}/alternatives` + qs({ keyword })),
@@ -95,6 +97,8 @@ export const api = {
     request<TicketSpot[]>("GET", "/api/v1/search/spots" + qs({ city, keyword, category, refresh: refresh || undefined })),
   spotTickets: (city: string, spot: string, refresh?: boolean) =>
     request<TicketProduct[]>("GET", "/api/v1/search/spots/tickets" + qs({ city, spot, refresh: refresh || undefined })),
+  tuniuTickets: (spot: string, date?: string | null, refresh?: boolean) =>
+    request<TuniuTicket[]>("GET", "/api/v1/search/spots/tuniu-tickets" + qs({ spot, date: date || undefined, refresh: refresh || undefined })),
   spotRules: (city: string, spot: string, refresh?: boolean) =>
     request<SpotRules>("GET", "/api/v1/search/spots/rules" + qs({ city, spot, refresh: refresh || undefined })),
   tripTickets: (id: number, day: number, refresh?: boolean) =>

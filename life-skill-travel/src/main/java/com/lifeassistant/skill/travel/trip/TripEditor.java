@@ -418,8 +418,13 @@ public class TripEditor {
         });
     }
 
-    /** 换掉、删掉的项不再算已预约。 */
+    /** 换掉、删掉的项不再算已预约，也不再算去过。 */
     private static Itinerary unbook(Itinerary itinerary, String id) {
+        if (itinerary.isDone(id)) {
+            List<String> done = new ArrayList<>(itinerary.done());
+            done.remove(id);
+            itinerary = itinerary.withDone(done);
+        }
         // 换掉的项沿用原来的 id，"已跳转平台"的记录也要一起清掉
         if (itinerary.bookingStatus() != null && itinerary.bookingStatus().containsKey(id)) {
             Map<String, String> status = new HashMap<>(itinerary.bookingStatus());
@@ -465,6 +470,31 @@ public class TripEditor {
                 opened.put(targetId, Itinerary.OPENED);
             }
             Itinerary updated = itinerary.withBooked(ids).withBookingStatus(opened);
+            String json = json(updated);
+            String content = updated.toMarkdown();
+            tripService.updateItinerary(tripId, detail.version().getVersion(), json, content);
+            detail.version().setItinerary(json);
+            detail.version().setContent(content);
+            return detail;
+        });
+    }
+
+    /** 标记某个安排去过了 / 吃过了（done 为 false 取消）。只改当前版本，不算新版本。 */
+    public TripService.TripDetail setDone(UserCtx ctx, long tripId, String itemId, boolean done) {
+        return locked(tripId, () -> {
+            TripService.TripDetail detail = tripService.get(ctx, tripId, null);
+            Itinerary itinerary = itinerary(detail);
+            find(itinerary, itemId);
+            if (itinerary.isDone(itemId) == done) {
+                return detail;
+            }
+            List<String> ids = new ArrayList<>(itinerary.done() == null ? List.of() : itinerary.done());
+            if (done) {
+                ids.add(itemId);
+            } else {
+                ids.remove(itemId);
+            }
+            Itinerary updated = itinerary.withDone(ids);
             String json = json(updated);
             String content = updated.toMarkdown();
             tripService.updateItinerary(tripId, detail.version().getVersion(), json, content);

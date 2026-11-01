@@ -116,13 +116,14 @@
                 <text class="strong">第{{ i + 1 }}天</text><text class="small">{{ cnDay(d.date) }}</text>
               </view>
             </view>
-            <view class="day-title">第{{ dayIndex + 1 }}天<text v-if="day?.theme"> · {{ day.theme }}</text></view>
-            <view v-for="it in day?.items || []" :key="it.id" class="tl">
+            <view class="day-title">第{{ dayIndex + 1 }}天<text v-if="day?.theme"> · {{ day.theme }}</text><text v-if="dayProgress.total" class="progress">已完成 {{ dayProgress.done }}/{{ dayProgress.total }}</text></view>
+            <view v-for="it in day?.items || []" :key="it.id" class="tl" :class="{ done: isDone(it.id) }">
               <text class="tl-time">{{ it.start || "" }}</text>
-              <view class="tl-icon"><Icon :name="TYPE_ICON[it.type] || 'pin'" :size="15" color="var(--accent)" /></view>
+              <view class="tl-icon"><Icon :name="isDone(it.id) ? 'check' : TYPE_ICON[it.type] || 'pin'" :size="15" :color="isDone(it.id) ? 'var(--ok)' : 'var(--accent)'" /></view>
               <view class="tl-body">
                 <view class="tl-name">{{ it.name }}</view>
                 <view v-if="it.note || it.address" class="muted small">{{ it.note || it.address }}</view>
+                <text v-if="doneable(it.type)" class="done-btn" :class="{ on: isDone(it.id) }" @click="toggleDone(it)">{{ isDone(it.id) ? "✓ " : "" }}{{ doneText(it.type, isDone(it.id)) }}</text>
               </view>
               <BookingTag v-if="bookable(it)" :state="stateOf(it.id)" :url="it.url || null" @set="(s: BookingState) => setBooking(it.id, s)" @open="openBooking(it.id, it.url!)" />
             </view>
@@ -221,7 +222,7 @@ import { api } from "../../api";
 import { showError } from "../../api/http";
 import type { BookingState, ItineraryItem, Stay, Trip, TripDetail, TripVersion } from "../../api/types";
 import { cityCover } from "../../utils/cover";
-import { openUrl, queriedAt, ymd } from "../../utils/format";
+import { doneable, doneText, openUrl, queriedAt, ymd } from "../../utils/format";
 import { cityOf, duration, type MapStop } from "../../utils/place";
 import { useWide } from "../../utils/screen";
 
@@ -411,6 +412,27 @@ function nightsOf(st: Stay) {
 /** 能预订的项才显示预订状态：住宿、交通，以及有门票或预订链接的景点 */
 function bookable(it: ItineraryItem) {
   return it.type === "HOTEL" || it.type === "TRANSPORT" || (it.type === "SPOT" && (!!it.cost || !!it.url));
+}
+
+function isDone(id: string) {
+  return !!detail.value?.version.itinerary?.done?.includes(id);
+}
+
+/** 这天景点和吃饭里标了去过 / 吃过的有几项 */
+const dayProgress = computed(() => {
+  const items = (day.value?.items || []).filter((x) => doneable(x.type));
+  return { done: items.filter((x) => isDone(x.id)).length, total: items.length };
+});
+
+/** 标记或取消"去过了 / 吃过了"：只记在当前版本上，不算新版本 */
+async function toggleDone(it: ItineraryItem) {
+  if (!selected.value) return;
+  const done = !isDone(it.id);
+  try {
+    detail.value = await api.setDone(selected.value.id, it.id, done);
+  } catch (e) {
+    showError(e);
+  }
 }
 
 function stateOf(id: string): BookingState {
@@ -603,6 +625,11 @@ function toChat() {
 .tl { display: grid; grid-template-columns: 52px 28px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); }
 .tl:last-child { border-bottom: none; }
 /* 住宿、门票没有时间列 */
+.tl.done .tl-name { color: var(--muted); }
+.tl.done .tl-icon { background: var(--ok-soft); }
+.done-btn { align-self: flex-start; margin-top: 2px; font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); cursor: pointer; }
+.done-btn.on { border-color: transparent; background: var(--ok-soft); color: var(--ok); font-weight: 600; }
+.progress { margin-left: 8px; font-size: 12px; font-weight: 600; color: var(--ok); }
 .tl.no-time { grid-template-columns: 28px minmax(0, 1fr) auto; }
 .tl-time { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .tl-icon { width: 28px; height: 28px; border-radius: 8px; background: var(--accent-soft); display: flex; align-items: center; justify-content: center; }
