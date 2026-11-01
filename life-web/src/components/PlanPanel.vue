@@ -68,6 +68,7 @@
             <view v-if="p.style" class="plan-style">{{ p.style }}</view>
             <view v-if="p.budgetPerPerson" class="plan-price"><text class="per">人均约 </text>¥{{ Number(p.budgetPerPerson).toLocaleString() }}</view>
             <view v-for="pt in p.highlights || []" :key="pt" class="point"><Icon name="check" :size="14" color="var(--tone)" /><text>{{ pt }}</text></view>
+            <view v-if="p.transport" class="point muted"><Icon name="plane" :size="14" color="var(--muted)" /><text>{{ p.transport }}</text></view>
             <view v-if="p.hotel" class="point muted"><Icon name="bed" :size="14" color="var(--muted)" /><text>{{ p.hotel }}</text></view>
             <button class="btn plan-btn" :class="{ ghost: i !== 0 }" @click="choose(p.title)">选这个方案</button>
           </view>

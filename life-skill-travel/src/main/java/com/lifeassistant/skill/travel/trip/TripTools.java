@@ -84,6 +84,7 @@ public class TripTools {
             @ToolParam(description = "每人预算估算（元），含大交通、住宿、门票、餐饮") Integer budgetPerPerson,
             @ToolParam(description = "3-4 条亮点，每条十来个字") List<String> highlights,
             @ToolParam(description = "住宿档次或区域，例如：钟楼附近四星酒店", required = false) String hotel,
+            @ToolParam(description = "大交通怎么走，例如：深圳直飞赤峰；经北京中转；沈阳进、赤峰出；高铁往返", required = false) String transport,
             @ToolParam(description = "逐日概要") List<OutlineDay> outline) {
     }
 
@@ -119,6 +120,7 @@ public class TripTools {
             m.put("budgetPerPerson", o.budgetPerPerson());
             m.put("highlights", o.highlights() == null ? List.of() : o.highlights());
             m.put("hotel", o.hotel());
+            m.put("transport", o.transport());
             m.put("outline", o.outline() == null ? List.of() : o.outline());
             list.add(m);
         }
@@ -146,7 +148,8 @@ public class TripTools {
             @ToolParam(description = "每人预算（元）", required = false) Integer budgetPerPerson,
             @ToolParam(description = "已知的旅行偏好，例如：自然风光、美食体验", required = false) List<String> interests,
             @ToolParam(description = "已经去过、不想再去的地方", required = false) List<String> visited,
-            @ToolParam(description = "节奏：轻松 / 适中 / 紧凑", required = false) String pace) {
+            @ToolParam(description = "节奏：轻松 / 适中 / 紧凑", required = false) String pace,
+            @ToolParam(description = "大交通：尽量直飞 / 中转也行 / 只要直飞，用户说过才填", required = false) String transfer) {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("destination", destination);
         data.put("origin", origin);
@@ -160,6 +163,7 @@ public class TripTools {
         data.put("interests", interests == null ? List.of() : interests);
         data.put("visited", visited == null ? List.of() : visited);
         data.put("pace", pace);
+        data.put("transfer", transfer);
         data.put("interestOptions", INTERESTS);
         if (!cards.emit("requirement", data, "需求卡：" + (destination == null ? "目的地待填" : destination) + "，等用户确认")) {
             return Map.of("error", "当前界面不能显示需求卡，改成用文字一次问清缺的信息");

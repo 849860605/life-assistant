@@ -21,6 +21,7 @@
                 <Icon name="check" :size="14" color="var(--tone)" />
                 <text>{{ pt }}</text>
               </view>
+              <view v-if="p.transport" class="point muted">交通：{{ p.transport }}</view>
               <view v-if="p.hotel" class="point muted">住：{{ p.hotel }}</view>
               <view class="outline">
                 <view v-for="d in p.outline" :key="d.day" class="outline-row">

@@ -60,6 +60,12 @@
         </view>
       </view>
       <view class="row block">
+        <view class="row-head"><Icon name="plane" :size="16" color="var(--accent)" /><text class="label">大交通</text></view>
+        <view class="options">
+          <text v-for="t in TRANSFERS" :key="t" class="option" :class="{ on: form.transfer === t }" @click="!locked && (form.transfer = t)">{{ t }}</text>
+        </view>
+      </view>
+      <view class="row block">
         <view class="row-head"><Icon name="route" :size="16" color="var(--accent)" /><text class="label">节奏</text></view>
         <view class="options">
           <text v-for="p in PACES" :key="p" class="option" :class="{ on: form.pace === p }" @click="!locked && (form.pace = p)">{{ p }}</text>
@@ -92,6 +98,8 @@ const COUNTS: { key: CountKey; unit: string }[] = [
   { key: "elders", unit: " 老人" },
 ];
 const PACES = ["轻松", "适中", "紧凑"];
+/** 能不能接受中转；换城市进出、改高铁这类大改都要先问用户 */
+const TRANSFERS = ["尽量直飞", "中转也行", "只要直飞"];
 
 const submitted = ref(false);
 const locked = computed(() => !props.active || submitted.value);
@@ -106,6 +114,7 @@ const form = reactive({
   budget: props.data.budgetPerPerson ? String(props.data.budgetPerPerson) : "",
   interests: [...(props.data.interests || [])] as string[],
   pace: props.data.pace || "适中",
+  transfer: TRANSFERS.includes(props.data.transfer) ? props.data.transfer : "尽量直飞",
   visited: [...(props.data.visited || [])] as string[],
 });
 const visitedInput = ref("");
@@ -167,6 +176,7 @@ function submit() {
   if (form.budget) parts.push(`预算 每人 ${form.budget} 元`);
   if (form.interests.length) parts.push(`偏好 ${form.interests.join("、")}`);
   parts.push(`节奏 ${form.pace}`);
+  parts.push(`大交通 ${form.transfer}（要中转、换城市进出先给我选）`);
   addVisited();
   const visited = form.visited;
   if (visited.length) parts.push(`去过 ${visited.join("、")}（不要再安排）`);

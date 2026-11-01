@@ -13,6 +13,7 @@
           <Icon name="check" :size="13" color="var(--tone)" />
           <text>{{ h }}</text>
         </view>
+        <view v-if="o.transport" class="opt-point"><Icon name="plane" :size="13" color="var(--muted)" /><text>{{ o.transport }}</text></view>
         <view class="opt-outline muted">
           <view v-for="d in o.outline" :key="d.day">D{{ d.day }} {{ d.title }}</view>
         </view>
