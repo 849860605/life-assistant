@@ -2,6 +2,9 @@ package com.lifeassistant.skill.travel.trip;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.lifeassistant.common.auth.UserCtx;
+import com.lifeassistant.common.error.BizException;
+import com.lifeassistant.common.error.ErrorCode;
 import com.lifeassistant.core.auth.ToolContexts;
 import com.lifeassistant.core.audit.CallRecorder;
 import com.lifeassistant.core.card.CardHub;
@@ -292,6 +295,120 @@ public class TripTools {
         return out;
     }
 
+    /** 用户上传的订单里的航班记进行程：按日期找到那一天，写进航班并标成已确认订单。不下单。 */
+    @Tool(description = """
+            把用户上传的机票行程单、订单截图里的航班记进行程，并标成已预约。用户明确同意"记进行程"后才调用，
+            参数用附件里识别出的原值，看不清的不要猜。这天原来有航班会换掉；原来的航班标了已预约或保留时返回 error。""")
+    public Map<String, Object> addBookedFlight(
+            @ToolParam(description = "行程 id") long tripId,
+            @ToolParam(description = "起飞日期 yyyy-MM-dd") String date,
+            @ToolParam(description = "航班号，例如 CZ3101") String flightNo,
+            @ToolParam(description = "起飞时间 HH:mm") String depTime,
+            @ToolParam(description = "到达时间 HH:mm") String arrTime,
+            @ToolParam(description = "出发机场和航站楼，例如：宝安机场 T3", required = false) String depAirport,
+            @ToolParam(description = "到达机场和航站楼", required = false) String arrAirport,
+            @ToolParam(description = "航空公司", required = false) String airline,
+            @ToolParam(description = "订单上的票价（元），没有就不填", required = false) Integer price,
+            ToolContext toolContext) {
+        UserCtx ctx = ToolContexts.user(toolContext);
+        try {
+            int day = dayIndex(ctx, tripId, date);
+            if (day < 0) {
+                return Map.of("error", date + " 不在这个行程的日期里，先问用户是不是记错了行程或要不要改行程日期");
+            }
+            TripEditor.FlightPick pick = new TripEditor.FlightPick(flightNo == null ? null : flightNo.replace(" ", "").toUpperCase(),
+                    airline, depTime, arrTime, depAirport, arrAirport, price, TripEditor.ORDER, null);
+            TripEditor.FlightPreview preview = tripEditor.previewFlight(ctx, tripId, day, pick);
+            tripEditor.saveFlight(ctx, tripId, day, pick, preview.replacesId());
+            tripEditor.setBooking(ctx, tripId, preview.item().id(), Itinerary.CONFIRMED);
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("saved", "第 " + (day + 1) + " 天：" + preview.item().name() + "，已标为已预约");
+            if (preview.replacesName() != null) {
+                out.put("replaced", preview.replacesName());
+            }
+            if (!preview.conflicts().isEmpty()) {
+                out.put("conflicts", preview.conflicts().stream().map(c -> c.name() + "：" + c.problem()).toList());
+                out.put("hint", "把冲突告诉用户，问要不要顺便调整这些安排");
+            }
+            return out;
+        } catch (BizException e) {
+            return Map.of("error", e.getMessage());
+        }
+    }
+
+    /** 用户上传的酒店订单记进行程：按入住日期找到那段住宿，换成订单上的酒店并标成已确认订单。不下单。 */
+    @Tool(description = """
+            把用户上传的酒店订单里的酒店记进行程，并标成已预约。用户明确同意"记进行程"后才调用，参数用附件里识别出的原值。
+            按入住日期找到行程里对应的那段住宿：同一家就直接标已预约，不同就换成订单上的酒店；行程原来没有住宿会新加一段。""")
+    public Map<String, Object> addBookedStay(
+            @ToolParam(description = "行程 id") long tripId,
+            @ToolParam(description = "酒店名称，按订单原样") String hotel,
+            @ToolParam(description = "入住日期 yyyy-MM-dd") String checkIn,
+            @ToolParam(description = "离店日期 yyyy-MM-dd") String checkOut,
+            @ToolParam(description = "酒店地址", required = false) String address,
+            @ToolParam(description = "每晚价格（元），订单只有总价时除以晚数，没有就不填", required = false) Integer pricePerNight,
+            ToolContext toolContext) {
+        UserCtx ctx = ToolContexts.user(toolContext);
+        try {
+            TripService.TripDetail detail = tripService.get(ctx, tripId, null);
+            if (!(parse(detail.version().getItinerary()) instanceof Itinerary itinerary)) {
+                return Map.of("error", "这个行程是早期的纯文字行程，记不了住宿");
+            }
+            List<Itinerary.Stay> stays = itinerary.stays() == null ? List.of() : itinerary.stays();
+            Itinerary.Stay match = stays.stream().filter(s -> s.checkIn() != null && s.checkOut() != null
+                    && s.checkIn().compareTo(checkIn) <= 0 && s.checkOut().compareTo(checkIn) > 0).findFirst().orElse(null);
+            if (match == null && !stays.isEmpty()) {
+                return Map.of("error", "行程里没有覆盖 " + checkIn + " 入住的住宿，现有住宿："
+                        + stays.stream().map(s -> s.name() + "（" + s.checkIn() + "–" + s.checkOut() + "）").toList()
+                        + "。问用户是不是记错了行程");
+            }
+            Map<String, Object> out = new LinkedHashMap<>();
+            String stayId;
+            if (match != null && sameHotel(match.name(), hotel)) {
+                stayId = match.id();
+                out.put("saved", "行程里本来就是「" + match.name() + "」，已标为已预约");
+            } else {
+                TripEditor.StayPick pick = new TripEditor.StayPick(hotel, address, null, null, null, null, pricePerNight,
+                        TripEditor.ORDER, null, null);
+                TripEditor.StayPreview preview = tripEditor.previewStay(ctx, tripId, match == null ? null : match.id(), pick);
+                tripEditor.saveStay(ctx, tripId, match == null ? null : match.id(), pick, preview.replacesId());
+                stayId = preview.stay().id();
+                out.put("saved", (preview.replacesName() == null ? "加上住宿「" : "住宿从「" + preview.replacesName() + "」换成「")
+                        + hotel + "」，已标为已预约");
+                out.put("notes", preview.notes());
+            }
+            tripEditor.setBooking(ctx, tripId, stayId, Itinerary.CONFIRMED);
+            if (match != null && (!match.checkIn().equals(checkIn) || !match.checkOut().equals(checkOut))) {
+                out.put("datesDiffer", "订单是 " + checkIn + "–" + checkOut + "，行程里这段住宿是 " + match.checkIn() + "–"
+                        + match.checkOut() + "，日期没有自动改，告诉用户");
+            }
+            return out;
+        } catch (BizException e) {
+            return Map.of("error", e.getMessage());
+        }
+    }
+
+    /** 日期在行程第几天（从 0 开始），不在行程里返回 -1。 */
+    private int dayIndex(UserCtx ctx, long tripId, String date) {
+        TripService.TripDetail detail = tripService.get(ctx, tripId, null);
+        if (!(parse(detail.version().getItinerary()) instanceof Itinerary itinerary)) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "这个行程是早期的纯文字行程，记不了航班");
+        }
+        for (int i = 0; i < itinerary.days().size(); i++) {
+            if (date != null && date.equals(itinerary.days().get(i).date())) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /** 酒店名去掉空格和括号后互相包含，就当是同一家。 */
+    private static boolean sameHotel(String a, String b) {
+        String x = a == null ? "" : a.replaceAll("[\\s()（）·]", "");
+        String y = b == null ? "" : b.replaceAll("[\\s()（）·]", "");
+        return !x.isEmpty() && !y.isEmpty() && (x.contains(y) || y.contains(x));
+    }
+
     /**
      * 给模型看的精简行程：每项只留时间、类型、名称、地址、说明、人均、链接和状态（保留 / 已预约 / 已去过），
      * 每天附上路上的合计；照片、坐标、各平台报价这些模型用不上，去掉省 token。
@@ -559,6 +676,9 @@ public class TripTools {
     }
 
     private Object parse(String json) {
+        if (json == null) {
+            return null;
+        }
         try {
             return objectMapper.readValue(json, Itinerary.class);
         } catch (JsonProcessingException e) {

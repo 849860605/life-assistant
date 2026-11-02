@@ -10,6 +10,11 @@ spring:
   threads:
     virtual:
       enabled: true
+  servlet:
+    multipart:
+      # 对话里上传的文件，业务上限 15MB（nginx 是 20m）
+      max-file-size: 16MB
+      max-request-size: 17MB
   mvc:
     async:
       # 带工具调用的回答可能超过默认的 30 秒
@@ -125,7 +130,7 @@ life:
     router: ${LIFE_MODEL_ROUTER:qwen-turbo}
     skill: ${LIFE_MODEL_SKILL:qwen-plus}
     planner: ${LIFE_MODEL_PLANNER:qwen-max}
-    vision: ${LIFE_MODEL_VISION:qwen-vl-plus}
+    vision: ${LIFE_MODEL_VISION:qwen-vl-max}
   bark:
     server: ${BARK_SERVER:https://api.day.app}
   qweather:

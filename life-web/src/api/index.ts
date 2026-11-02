@@ -1,5 +1,6 @@
-import { request } from "./http";
+import { request, upload } from "./http";
 import type {
+  UploadView,
   BookingState, ChangeReason, ChatMessage, Conversation, DayPreview, FlightPick, FlightPreview, FlightRules, FlightSearch, FoodResult, DayTickets, HotelComparison, HotelSearchResult, SpotRules, TicketProduct, TuniuTicket, TicketSpot, TuniuCabin, StayPick, StayPreview, Meal, MealPreview, MemoryCategory, MemoryItem, OptimizeGoal, Place, PlacePick,
   ScheduleEvent, TokenView,
   TripDetail, TripVersion, Trip, UserView,
@@ -24,6 +25,8 @@ export const api = {
   conversations: () => request<Conversation[]>("GET", "/api/v1/conversations?limit=50"),
   createConversation: () => request<Conversation>("POST", "/api/v1/conversations"),
   deleteConversation: (id: string) => request<void>("DELETE", `/api/v1/conversations/${id}`),
+  /** 上传文件并识别，图片和扫描件要十几秒 */
+  uploadFile: (file: { path: string; name?: string; file?: File }) => upload<UploadView>("/api/v1/files", file),
   messages: (id: string) => request<ChatMessage[]>("GET", `/api/v1/conversations/${id}/messages?limit=200`),
 
   trips: () => request<Trip[]>("GET", "/api/v1/trips"),

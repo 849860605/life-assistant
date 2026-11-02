@@ -6,7 +6,8 @@ import type { ChatEvent } from "./types";
  * 以后出小程序时改用 uni.request 的 enableChunked。signal 用来中途停止。
  */
 export async function streamMessage(conversationId: string, content: string,
-                                    onEvent: (event: ChatEvent) => void, signal?: AbortSignal): Promise<void> {
+                                    onEvent: (event: ChatEvent) => void, signal?: AbortSignal,
+                                    files: string[] = []): Promise<void> {
   const res = await fetch(`${API_BASE}/api/v1/conversations/${conversationId}/messages`, {
     method: "POST",
     headers: {
@@ -14,7 +15,7 @@ export async function streamMessage(conversationId: string, content: string,
       "Content-Type": "application/json",
       Accept: "text/event-stream",
     },
-    body: JSON.stringify({ content }),
+    body: JSON.stringify({ content, files }),
     signal,
   });
   if (res.status === 401) {

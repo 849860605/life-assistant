@@ -888,6 +888,9 @@ public class TripEditor {
                                 String replacesTime, List<FlightConflict> conflicts, List<String> notes) {
     }
 
+    /** 用户上传的订单记进来的航班、住宿，平台写这个 */
+    public static final String ORDER = "订单";
+
     private static final java.util.regex.Pattern FLIGHT_NO = java.util.regex.Pattern.compile("[A-Z0-9]{2}\\d{1,4}(/[A-Z0-9]{2}\\d{1,4})*");
     /** 安排名称里带航班号的交通项就当成这天的航班 */
     private static final java.util.regex.Pattern FLIGHT_IN_NAME = java.util.regex.Pattern.compile("(?<![A-Z0-9])[A-Z0-9]{2}\\d{3,4}(?!\\d)");
@@ -938,7 +941,8 @@ public class TripEditor {
         String name = (f.airline() == null ? "" : f.airline() + " ") + f.flightNo() + " "
                 + (f.depAirport() == null ? "" : f.depAirport()) + " → " + (f.arrAirport() == null ? "" : f.arrAirport())
                 + (nextDay ? "（次日 " + f.arrTime() + " 到）" : "");
-        String note = (f.price() == null ? "" : f.platform() + " ¥" + f.price() + "，")
+        String note = ORDER.equals(f.platform()) ? "已出票（用户上传的订单）" + (f.price() == null ? "" : "，票价 ¥" + f.price())
+                : (f.price() == null ? "" : f.platform() + " ¥" + f.price() + "，")
                 + LocalDate.now() + " 比价，价格以平台为准；订好后回来标记已预约";
         String id = old != null ? old.id() : "d" + (dayIndex + 1) + "-" + (items.stream().map(i -> i.id().replaceAll(".*-", ""))
                 .filter(x -> x.matches("\\d+")).mapToInt(Integer::parseInt).max().orElse(0) + 1);

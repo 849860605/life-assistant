@@ -44,8 +44,13 @@ public class ChatOrchestrator {
      * @param ctx 必须在请求线程里取好，图里的节点拿不到登录态
      */
     public Flux<ChatEvent> chat(UserCtx ctx, String conversationId, String input) {
+        return chat(ctx, conversationId, input, input);
+    }
+
+    /** 带附件的消息：input 是拼上附件内容的完整消息，typed 是用户自己打的字，用来起会话标题。 */
+    public Flux<ChatEvent> chat(UserCtx ctx, String conversationId, String input, String typed) {
         Conversation conversation = conversationService.getOwned(ctx, conversationId);
-        String firstInput = conversation.getTitle() == null ? input : null;
+        String firstInput = conversation.getTitle() == null ? typed : null;
 
         Map<String, Object> inputs = new HashMap<>();
         inputs.put(LifeGraphConfig.INPUT, input);

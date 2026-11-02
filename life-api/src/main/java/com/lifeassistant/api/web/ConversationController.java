@@ -6,6 +6,7 @@ import com.lifeassistant.core.auth.AuthFacade;
 import com.lifeassistant.core.conversation.ChatMessageEntity;
 import com.lifeassistant.core.conversation.Conversation;
 import com.lifeassistant.core.conversation.ConversationService;
+import com.lifeassistant.core.file.UploadService;
 import com.lifeassistant.core.orchestrator.ChatEvent;
 import com.lifeassistant.core.orchestrator.ChatOrchestrator;
 import jakarta.validation.Valid;
@@ -37,9 +38,10 @@ public class ConversationController {
     private final AuthFacade authFacade;
     private final ConversationService conversationService;
     private final ChatOrchestrator chatOrchestrator;
+    private final UploadService uploadService;
 
-    /** 发消息请求体，内容最长 4000 字。 */
-    public record SendMessageRequest(@NotBlank @Size(max = 4000) String content) {
+    /** 发消息请求体：内容最长 4000 字；files 是这条消息带的上传文件 id，最多 5 个。 */
+    public record SendMessageRequest(@NotBlank @Size(max = 4000) String content, @Size(max = 5) List<String> files) {
     }
 
     /** POST /api/v1/conversations：新建一个无标题会话，标题在首轮对话后自动生成。 */
@@ -69,7 +71,8 @@ public class ConversationController {
     public Flux<ServerSentEvent<ChatEvent>> send(@PathVariable String id, @Valid @RequestBody SendMessageRequest request) {
         // 身份必须在请求线程里取，后面的图和工具都在其他线程执行
         UserCtx ctx = authFacade.current();
-        return chatOrchestrator.chat(ctx, id, request.content())
+        String input = uploadService.compose(ctx, request.content(), request.files());
+        return chatOrchestrator.chat(ctx, id, input, request.content())
                 .map(event -> ServerSentEvent.builder(event).event(event.type()).build());
     }
 

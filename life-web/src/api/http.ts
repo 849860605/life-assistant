@@ -56,6 +56,42 @@ export function request<T>(method: "GET" | "POST" | "PUT" | "DELETE", url: strin
   });
 }
 
+/** 上传一个文件（multipart，字段名 file）：自动带 token，业务失败抛 ApiError。H5 上传 File 对象以保留原文件名。 */
+export function upload<T>(url: string, file: { path: string; name?: string; file?: File }): Promise<T> {
+  return new Promise((resolve, reject) => {
+    uni.uploadFile({
+      url: API_BASE + url,
+      name: "file",
+      filePath: file.path,
+      ...(file.file ? { file: file.file } : {}),
+      header: { Authorization: `Bearer ${getToken()}` },
+      success: (res) => {
+        let body: ApiResponse<T> | null = null;
+        try {
+          body = JSON.parse(res.data as string);
+        } catch {
+          // 不是 JSON（比如 nginx 的 413 页面）
+        }
+        if (res.statusCode === 401) {
+          toLogin();
+          reject(new ApiError(401, "请先登录"));
+          return;
+        }
+        if (res.statusCode === 413) {
+          reject(new ApiError(413, "文件太大了，最大 15MB"));
+          return;
+        }
+        if (!body || body.code !== 0) {
+          reject(new ApiError(body?.code ?? res.statusCode, body?.message || `上传失败（${res.statusCode}）`));
+          return;
+        }
+        resolve(body.data);
+      },
+      fail: (err) => reject(new ApiError(-1, "上传失败：" + (err.errMsg || ""))),
+    } as UniApp.UploadFileOption);
+  });
+}
+
 /** 弹出错误提示；未登录已经在跳登录页，不再提示。 */
 export function showError(e: unknown) {
   if (e instanceof ApiError && e.code === 401) return;

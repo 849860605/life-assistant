@@ -58,7 +58,12 @@
 
           <view v-for="m in messages" :key="m.key" class="msg" :class="m.role">
             <template v-if="m.role === 'user'">
-              <view class="bubble">{{ m.text }}</view>
+              <view class="bubble">
+                <text v-if="m.text">{{ m.text }}</text>
+                <view v-if="m.files?.length" class="b-files">
+                  <view v-for="f in m.files" :key="f.id" class="b-file" @click="openFile(f.id)"><Icon :name="fileIcon(f.name)" :size="13" color="currentColor" /><text>{{ f.name }}</text></view>
+                </view>
+              </view>
               <view class="me-avatar">{{ myInitial }}</view>
             </template>
             <view v-else class="answer">
@@ -94,6 +99,16 @@
 
       <view class="composer">
         <view class="composer-box">
+          <view v-if="pending.length" class="att-list">
+            <view v-for="(a, i) in pending" :key="a.key" class="att" :class="a.state">
+              <Icon :name="fileIcon(a.name)" :size="14" color="var(--muted)" />
+              <view class="att-body">
+                <text class="att-name">{{ a.name }}</text>
+                <text class="att-state">{{ a.state === "uploading" ? "识别中，图片和扫描件要十几秒…" : a.state === "error" ? a.error : a.view?.error ? "没识别出来：" + a.view.error : `已识别 ${a.view?.chars} 字` }}</text>
+              </view>
+              <view class="att-x" @click="pending.splice(i, 1)"><Icon name="close" :size="12" color="var(--muted)" /></view>
+            </view>
+          </view>
           <textarea
             id="chat-input"
             v-model="input"
@@ -103,14 +118,14 @@
             :show-confirm-bar="false"
             confirm-type="send"
             placeholder="你可以继续补充需求，例如：更换航班、增加景点…"
-            @confirm="send(input)"
+            @confirm="sendInput"
           />
           <view class="composer-tools">
-            <view class="tool" @click="notYet('上传图片')"><Icon name="layers" :size="14" color="var(--muted)" /><text>上传图片</text></view>
+            <view class="tool" @click="pickFiles"><Icon name="plus" :size="14" color="var(--muted)" /><text>上传文件</text></view>
             <view class="tool" @click="notYet('深度搜索')"><Icon name="search" :size="14" color="var(--muted)" /><text>深度搜索</text></view>
             <view class="model"><Icon name="sparkle" :size="13" color="var(--accent)" /><text>DeepSeek</text></view>
             <button v-if="sending" class="btn danger small stop-btn" @click="stop">停止</button>
-            <view v-else class="send" :class="{ off: !input.trim() }" @click="send(input)"><Icon name="send" :size="18" color="#fff" /></view>
+            <view v-else class="send" :class="{ off: !canSend }" @click="sendInput"><Icon name="send" :size="18" color="#fff" /></view>
           </view>
         </view>
       </view>
@@ -122,7 +137,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, reactive, ref, watch } from "vue";
 import { onLoad, onShow } from "@dcloudio/uni-app";
 import { api } from "../../api";
 import { getToken, showError } from "../../api/http";
@@ -137,6 +152,9 @@ import { useWide } from "../../utils/screen";
 import { savePlans } from "../../utils/plans";
 import { currentCity } from "../../utils/place";
 import { relativeTime, SKILL_NAMES } from "../../utils/format";
+import { ensureMediaTicket } from "../../utils/media";
+import { fileIcon, fileUrl, splitAttachments, UPLOAD_EXTS, type Attached } from "../../utils/attach";
+import type { UploadView } from "../../api/types";
 
 /** 页面上的一条消息；assistant 消息的 status 跟着流式事件变化。 */
 interface UiMessage {
@@ -149,6 +167,67 @@ interface UiMessage {
   skillName?: string;
   status?: "waiting" | "streaming" | "done" | "stopped" | "error";
   error?: string;
+  /** 用户消息带的附件 */
+  files?: Attached[];
+}
+
+/** 输入框上方待发送的附件：上传完就已经识别好了 */
+interface PendingFile {
+  key: number;
+  name: string;
+  state: "uploading" | "ok" | "error";
+  view?: UploadView;
+  error?: string;
+}
+const pending = ref<PendingFile[]>([]);
+const MAX_FILES = 5;
+/** 有字，或者有识别完的附件、没有还在上传的，才能发 */
+const canSend = computed(() => !pending.value.some((a) => a.state === "uploading")
+  && (!!input.value.trim() || pending.value.some((a) => a.state === "ok")));
+
+/** 选文件并逐个上传识别；失败的留在列表里显示原因，可以删掉。 */
+function pickFiles() {
+  const room = MAX_FILES - pending.value.length;
+  if (room <= 0) {
+    uni.showToast({ title: `一次最多带 ${MAX_FILES} 个文件`, icon: "none" });
+    return;
+  }
+  uni.chooseFile({
+    count: room,
+    extension: UPLOAD_EXTS,
+    success: (res) => {
+      const files = (Array.isArray(res.tempFiles) ? res.tempFiles : [res.tempFiles]) as any[];
+      for (const f of files.slice(0, room)) {
+        const item = reactive<PendingFile>({ key: ++seq, name: f.name || "文件", state: "uploading" });
+        pending.value.push(item);
+        api.uploadFile({ path: f.path, name: f.name, file: f instanceof File ? f : undefined })
+          .then((view) => {
+            item.view = view;
+            item.state = "ok";
+          })
+          .catch((e) => {
+            item.state = "error";
+            item.error = e instanceof Error ? e.message : String(e);
+          });
+      }
+    },
+  });
+}
+
+/** 输入框发送：带上识别好的附件；只发了文件没打字时补一句。 */
+function sendInput() {
+  if (!canSend.value) return;
+  const ok = pending.value.filter((a) => a.state === "ok" && a.view);
+  const text = input.value.trim() || (ok.length > 1 ? "帮我看看这几个文件" : "帮我看看这个文件");
+  const files = ok.map((a) => ({ id: a.view!.id, name: a.view!.name }));
+  pending.value = [];
+  send(text, files);
+}
+
+/** 在新标签页打开原文件 */
+async function openFile(id: string) {
+  await ensureMediaTicket();
+  window.open(fileUrl(id), "_blank");
 }
 
 /** 示例问题，城市用顶栏选的当前城市 */
@@ -307,7 +386,7 @@ async function open(c: Conversation) {
       .map((m) => ({
         key: ++seq,
         role: m.role === "USER" ? "user" : "assistant",
-        text: m.content,
+        ...(m.role === "USER" ? splitAttachments(m.content) : { text: m.content }),
         cards: cardsOf(m),
         skillId: m.role === "ASSISTANT" && c.skillId ? c.skillId : undefined,
         status: "done",
@@ -339,12 +418,12 @@ function remove(c: Conversation) {
 }
 
 /** 发一条消息并流式显示回答；第一条消息时先建会话。 */
-async function send(raw: string) {
+async function send(raw: string, files: Attached[] = []) {
   const text = raw.trim();
   if (!text || sending.value) return;
   input.value = "";
   sending.value = true;
-  messages.value.push({ key: ++seq, role: "user", text, cards: [] });
+  messages.value.push({ key: ++seq, role: "user", text, cards: [], files });
   messages.value.push({ key: ++seq, role: "assistant", text: "", cards: [], status: "waiting" });
   // 取响应式代理，后面直接改它，界面才会更新
   const answer = messages.value[messages.value.length - 1];
@@ -373,7 +452,7 @@ async function send(raw: string) {
       } else if (event.type === "done" && answer.status !== "error") {
         answer.status = "done";
       }
-    }, controller.signal);
+    }, controller.signal, files.map((f) => f.id));
     if (answer.status === "waiting" || answer.status === "streaming") {
       answer.status = "done";
     }
@@ -628,6 +707,16 @@ function scrollToBottom() {
 .msg.user { gap: 8px; align-items: flex-start; }
 .composer-box { max-width: 760px; margin: 0 auto; border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px 8px; background: var(--surface); }
 .composer-box .composer-input { border: none; background: transparent; padding: 2px 0; width: 100%; }
+.att-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.att { display: flex; align-items: center; gap: 8px; max-width: 100%; padding: 6px 8px 6px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
+.att.error { border-color: var(--price); }
+.att-body { display: flex; flex-direction: column; min-width: 0; }
+.att-name { font-size: 13px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+.att-state { font-size: 11px; color: var(--muted); }
+.att.error .att-state { color: var(--price); }
+.att-x { padding: 4px; cursor: pointer; }
+.b-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.b-file { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 3px 8px; border-radius: 8px; background: rgba(255, 255, 255, 0.18); cursor: pointer; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .composer-tools { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
 .tool { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
 .model { display: flex; align-items: center; gap: 4px; font-size: 12px; padding: 4px 8px; border-radius: 8px; background: var(--surface-2); margin-left: auto; }

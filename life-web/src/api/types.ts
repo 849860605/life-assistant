@@ -661,3 +661,15 @@ export interface TuniuTicket {
   saleFrom: string | null;
   saleTo: string | null;
 }
+
+/** 上传的文件和识别结果：识别失败时 error 有值 */
+export interface UploadView {
+  id: string;
+  name: string;
+  kind: "IMAGE" | "PDF" | "WORD" | "EXCEL" | "TEXT";
+  size: number;
+  pages?: number | null;
+  chars: number;
+  preview: string;
+  error?: string | null;
+}
