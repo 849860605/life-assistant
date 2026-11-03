@@ -66,6 +66,8 @@ public class LifeProperties {
         /** 对话接口路径，为空用客户端默认值（openai 是 /v1/chat/completions）；智谱、豆包这类路径不同的要填 */
         private String completionsPath;
         private String apiKey;
+        /** 关掉思考要额外带的请求参数（openai 类型才用），打分、分类这类简单任务用，例如 DeepSeek 是 thinking.type=disabled */
+        private Map<String, Object> noThinking;
     }
 
     /** 高德 Web 服务配置；地图能力走高德 MCP，这里的 Key 用于天气兜底。 */

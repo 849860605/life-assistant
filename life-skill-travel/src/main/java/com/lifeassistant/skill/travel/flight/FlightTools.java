@@ -11,6 +11,8 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -63,7 +65,10 @@ public class FlightTools {
             @ToolParam(description = "出发城市，例如：深圳") String origin,
             @ToolParam(description = "到达城市，例如：北京") String destination,
             @ToolParam(description = "出发日期 yyyy-MM-dd") String date) {
-        Map<String, Object> out = compare(origin, destination, date, MAX_FLIGHTS);
+        CardHub.Tracker progress = cards.track("机票比价 " + origin + " → " + destination);
+        Map<String, Object> out = compare(origin, destination, date, MAX_FLIGHTS, null, progress);
+        progress.finish(out.containsKey("error") ? "没查成：" + out.get("error")
+                : "比价完成，找到 " + ((List<?>) out.get("flights")).size() + " 个航班");
         @SuppressWarnings("unchecked")
         List<Flight> flights = (List<Flight>) out.get("flights");
         if (flights != null && !flights.isEmpty()) {
@@ -84,7 +89,7 @@ public class FlightTools {
     public Map<String, Object> search(String origin, String destination, String date, String cabin, boolean refresh) {
         return queryCache.get("flights", origin + "|" + destination + "|" + date + "|" + cabin, java.time.Duration.ofMinutes(30),
                 refresh, Map.class, () -> {
-                    Map<String, Object> out = compare(origin, destination, date, PAGE_FLIGHTS, cabin);
+                    Map<String, Object> out = compare(origin, destination, date, PAGE_FLIGHTS, cabin, CardHub.Tracker.none());
                     out.put("cabin", cabin == null ? "ECONOMY" : cabin.toUpperCase());
                     out.put("queriedAt", CardHub.now());
                     return out;
@@ -143,11 +148,9 @@ public class FlightTools {
         return out;
     }
 
-    private Map<String, Object> compare(String origin, String destination, String date, int limit) {
-        return compare(origin, destination, date, limit, null);
-    }
 
-    private Map<String, Object> compare(String origin, String destination, String date, int limit, String cabin) {
+    private Map<String, Object> compare(String origin, String destination, String date, int limit, String cabin,
+                                        CardHub.Tracker progress) {
         LocalDate day;
         try {
             day = LocalDate.parse(date.trim());
@@ -159,9 +162,21 @@ public class FlightTools {
         }
         List<FlightPriceSource> active = sources.stream().filter(FlightPriceSource::available).toList();
         List<FlightPriceSource.Result> results = new ArrayList<>();
+        Set<String> finished = ConcurrentHashMap.newKeySet();
+        progress.update("在 " + String.join("、", active.stream().map(FlightPriceSource::platform).toList()) + " 查 " + day + " 的航班");
         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             List<Future<FlightPriceSource.Result>> futures = active.stream()
-                    .map(s -> executor.submit(() -> s.search(origin, destination, day, cabin))).toList();
+                    .map(s -> executor.submit(() -> {
+                        try {
+                            return s.search(origin, destination, day, cabin);
+                        } finally {
+                            finished.add(s.platform());
+                            List<String> waiting = active.stream().map(FlightPriceSource::platform)
+                                    .filter(p -> !finished.contains(p)).toList();
+                            progress.update(finished.size() + "/" + active.size() + " 个平台已返回"
+                                    + (waiting.isEmpty() ? "" : "，还在等 " + String.join("、", waiting)));
+                        }
+                    })).toList();
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(DEADLINE_SECONDS);
             for (int i = 0; i < futures.size(); i++) {
                 results.add(await(futures.get(i), active.get(i).platform(), deadline));

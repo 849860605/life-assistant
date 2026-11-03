@@ -11,6 +11,7 @@ import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.model.tool.ToolCallingManager;
 import org.springframework.ai.openai.OpenAiChatModel;
+import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
@@ -51,6 +52,20 @@ public class ChatModelRegistry {
      */
     public static ChatOptions options(ModelSpec spec, Double temperature) {
         return ToolCallingChatOptions.builder().model(spec.model()).temperature(temperature).build();
+    }
+
+    /**
+     * 简单任务（打分、分类）用的参数：在 options 的基础上关掉思考，省下模型先想一遍的时间；
+     * 提供方没配 no-thinking 时和 options 一样。
+     */
+    public ChatOptions quickOptions(ModelSpec spec, Double temperature) {
+        LifeProperties.Provider provider = properties.getLlm().getProviders().get(spec.provider());
+        if (provider == null || !"openai".equals(provider.getType()) || provider.getNoThinking() == null
+                || provider.getNoThinking().isEmpty()) {
+            return options(spec, temperature);
+        }
+        return OpenAiChatOptions.builder().model(spec.model()).temperature(temperature)
+                .extraBody(provider.getNoThinking()).build();
     }
 
     /** 按提供方类型创建 ChatModel：dashscope 走百炼原生接口，openai 走 OpenAI 兼容接口。 */

@@ -2,6 +2,7 @@ package com.lifeassistant.skill.travel.hotel;
 
 import com.lifeassistant.core.audit.CallRecorder;
 import com.lifeassistant.core.audit.UsageRecorder;
+import com.lifeassistant.core.card.CardHub;
 import com.lifeassistant.core.config.LifeProperties;
 import com.lifeassistant.core.llm.ChatModelRegistry;
 import com.lifeassistant.core.llm.ModelSpec;
@@ -20,6 +21,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 候选酒店重排序：先给每家查网上口碑（美团评分按评价条数加权、高德评分），用户提了住宿要求时，
@@ -67,10 +69,14 @@ public class HotelRanker {
     public record Match(int index, int score, String reason) {
     }
 
-    /** 查口碑、按需求打分，返回从好到差排好的全部候选。needs 为空时只按口碑排。 */
-    public List<Ranked> rank(List<Candidate> candidates, String city, String needs) {
-        List<HotelReviews.Review> found = reviewsOf(candidates, city);
-        Map<Integer, Match> matches = needs == null || needs.isBlank() ? Map.of() : match(candidates, found, needs);
+    /** 查口碑、按需求打分，返回从好到差排好的全部候选。needs 为空时只按口碑排；progress 里报查到第几家了。 */
+    public List<Ranked> rank(List<Candidate> candidates, String city, String needs, CardHub.Tracker progress) {
+        List<HotelReviews.Review> found = reviewsOf(candidates, city, progress);
+        Map<Integer, Match> matches = Map.of();
+        if (needs != null && !needs.isBlank()) {
+            progress.update("按你的要求（" + needs + "）给 " + candidates.size() + " 家打分");
+            matches = match(candidates, found, needs);
+        }
         List<Ranked> ranked = new ArrayList<>();
         for (int i = 0; i < candidates.size(); i++) {
             Match m = matches.get(i);
@@ -95,14 +101,23 @@ public class HotelRanker {
         return (1 - MATCH_WEIGHT) * quality + MATCH_WEIGHT * match;
     }
 
-    /** 并行查每家的口碑，超时或出错的当没有评分。 */
-    private List<HotelReviews.Review> reviewsOf(List<Candidate> candidates, String city) {
+    /** 并行查每家的口碑，超时或出错的当没有评分；每查完一家报一次进度。 */
+    private List<HotelReviews.Review> reviewsOf(List<Candidate> candidates, String city, CardHub.Tracker progress) {
         HotelReviews.Review none = HotelReviews.combine(null, null, null, null);
         List<HotelReviews.Review> out = new ArrayList<>();
         CallRecorder.Scope scope = CallRecorder.current();
+        AtomicInteger done = new AtomicInteger();
+        String total = "/" + candidates.size() + "（美团、高德）";
+        progress.update("找到 " + candidates.size() + " 家候选，查网上口碑 0" + total);
         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             List<Future<HotelReviews.Review>> futures = candidates.stream()
-                    .map(c -> executor.submit(() -> recorder.withScope(scope, () -> reviews.of(c.name(), city))))
+                    .map(c -> executor.submit(() -> {
+                        try {
+                            return recorder.withScope(scope, () -> reviews.of(c.name(), city));
+                        } finally {
+                            progress.update("找到 " + candidates.size() + " 家候选，查网上口碑 " + done.incrementAndGet() + total);
+                        }
+                    }))
                     .toList();
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(REVIEW_DEADLINE_SECONDS);
             for (int i = 0; i < futures.size(); i++) {
@@ -136,7 +151,7 @@ public class HotelRanker {
             ModelSpec model = chatModels.resolve(properties.getModels().getRouter());
             ResponseEntity<ChatResponse, Matches> response = chatModels.client(model).prompt()
                     .system(PROMPT).user(user.toString())
-                    .options(ChatModelRegistry.options(model, 0.0))
+                    .options(chatModels.quickOptions(model, 0.0))
                     .call().responseEntity(Matches.class);
             CallRecorder.Scope scope = CallRecorder.current();
             if (response.response() != null) {

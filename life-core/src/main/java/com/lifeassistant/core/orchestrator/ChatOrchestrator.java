@@ -9,6 +9,7 @@ import com.lifeassistant.common.auth.UserCtx;
 import com.lifeassistant.common.error.BizException;
 import com.lifeassistant.core.card.Card;
 import com.lifeassistant.core.card.CardHub;
+import com.lifeassistant.core.card.Progress;
 import com.lifeassistant.core.conversation.Conversation;
 import com.lifeassistant.core.conversation.ConversationService;
 import com.lifeassistant.core.skill.SkillRegistry;
@@ -79,7 +80,7 @@ public class ChatOrchestrator {
         AtomicInteger textLength = new AtomicInteger();
         StringBuilder answer = new StringBuilder();
         List<Card> shown = new ArrayList<>();
-        return Flux.merge(graphEvents, turn.cards().map(ChatEvent::card))
+        return Flux.merge(graphEvents, turn.events().map(e -> e instanceof Progress p ? ChatEvent.progress(p) : ChatEvent.card((Card) e)))
                 .map(event -> {
                     if (event.text() != null) {
                         textLength.addAndGet(event.text().length());

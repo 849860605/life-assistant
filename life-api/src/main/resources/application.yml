@@ -103,6 +103,7 @@ life:
         type: openai
         base-url: https://api.deepseek.com
         api-key: ${DEEPSEEK_API_KEY:}
+        no-thinking: {thinking: {type: disabled}}
       moonshot:
         type: openai
         base-url: https://api.moonshot.cn

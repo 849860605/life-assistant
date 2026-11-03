@@ -73,7 +73,7 @@
                 <text v-if="m.skillId" class="chip" :class="m.skillId">{{ m.skillName || skillName(m.skillId) }}</text>
               </view>
               <view v-if="steps(m).length" class="progress">
-                <view v-for="st in steps(m)" :key="st.title" class="pstep" :class="st.state">
+                <view v-for="(st, si) in steps(m)" :key="si" class="pstep" :class="st.state">
                   <view class="pdot"><Icon :name="st.state === 'done' ? 'check' : 'refresh'" :size="12" color="#fff" /></view>
                   <view>
                     <view class="ptitle">{{ st.title }}</view>
@@ -146,7 +146,7 @@ import { onLoad, onShow } from "@dcloudio/uni-app";
 import { api } from "../../api";
 import { getToken, showError } from "../../api/http";
 import { streamMessage } from "../../api/sse";
-import type { Card, ChatMessage, Conversation } from "../../api/types";
+import type { Card, ChatMessage, Conversation, Progress } from "../../api/types";
 import MarkdownView from "../../components/MarkdownView.vue";
 import ChatCard from "../../components/cards/ChatCard.vue";
 import Icon from "../../components/Icon.vue";
@@ -177,6 +177,8 @@ interface UiMessage {
   files?: Attached[];
   /** 回答下面的快捷回复，只在最新一条回答下显示 */
   suggestions?: string[];
+  /** 工具执行中的实时进度（比价查到第几家），按 id 覆盖；回答结束后不再显示 */
+  progress?: Progress[];
 }
 
 /** 输入框上方待发送的附件：上传完就已经识别好了 */
@@ -270,7 +272,10 @@ const latestPlans = computed(() => {
   return null;
 });
 
-/** 回答顶部的进度：路由完成算"理解需求"，每张卡片对应一步，还没结束时最后一步显示"处理中"。 */
+/**
+ * 回答顶部的进度：路由完成算"理解需求"，每张卡片对应一步；还没结束时，工具报的实时进度（比价查到第几家）
+ * 排在后面，没有实时进度时最后一步显示"处理中"。实时进度只在回答过程中显示，结束后由卡片那一步代替。
+ */
 function steps(m: UiMessage): { title: string; detail?: string; state: "done" | "doing" }[] {
   if (m.role !== "assistant" || (!m.cards.length && m.status === "done")) return [];
   const out: { title: string; detail?: string; state: "done" | "doing" }[] = [];
@@ -285,7 +290,9 @@ function steps(m: UiMessage): { title: string; detail?: string; state: "done" | 
     else if (c.kind === "requirement") out.push({ title: "整理需求", detail: "请在卡片上确认", state: "done" });
   }
   if (m.status === "waiting" || m.status === "streaming") {
-    out.push({ title: m.cards.length ? "整理结果中…" : "正在查询…", state: "doing" });
+    const live = (m.progress || []).filter((p) => !p.done);
+    for (const p of live) out.push({ title: p.title, detail: p.detail, state: "doing" });
+    if (!live.length) out.push({ title: m.cards.length ? "整理结果中…" : "正在查询…", state: "doing" });
   }
   return out.length > 1 || m.status !== "done" ? out : [];
 }
@@ -472,6 +479,11 @@ async function send(raw: string, files: Attached[] = [], chip = false) {
         answer.cards.push(event.card);
         answer.status = "streaming";
         scrollToBottom();
+      } else if (event.type === "progress" && event.progress) {
+        const list = answer.progress || (answer.progress = []);
+        const i = list.findIndex((p) => p.id === event.progress!.id);
+        if (i >= 0) list[i] = event.progress;
+        else list.push(event.progress);
       } else if (event.type === "suggestions") {
         answer.suggestions = event.suggestions || [];
         scrollToBottom();

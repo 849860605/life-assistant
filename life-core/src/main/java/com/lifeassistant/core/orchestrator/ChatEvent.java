@@ -2,6 +2,7 @@ package com.lifeassistant.core.orchestrator;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.lifeassistant.core.card.Card;
+import com.lifeassistant.core.card.Progress;
 
 /**
  * 推给前端的流式事件。
@@ -9,6 +10,7 @@ import com.lifeassistant.core.card.Card;
  *   <li>route：路由到了哪个技能</li>
  *   <li>delta：回答的增量文本</li>
  *   <li>card：工具查到的结构化结果，前端渲染成卡片</li>
+ *   <li>progress：工具执行中的进度（比价查到第几家了），前端显示在回答顶部，不存库</li>
  *   <li>suggestions：回答下面的快捷回复，点了就当用户发了这句</li>
  *   <li>done：本轮结束</li>
  *   <li>error：出错，message 是给用户看的说明</li>
@@ -16,29 +18,33 @@ import com.lifeassistant.core.card.Card;
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record ChatEvent(String type, String skillId, String skillName, String text, String message, Card card,
-                        java.util.List<String> suggestions) {
+                        java.util.List<String> suggestions, Progress progress) {
 
     public static ChatEvent route(String skillId, String skillName) {
-        return new ChatEvent("route", skillId, skillName, null, null, null, null);
+        return new ChatEvent("route", skillId, skillName, null, null, null, null, null);
     }
 
     public static ChatEvent delta(String text) {
-        return new ChatEvent("delta", null, null, text, null, null, null);
+        return new ChatEvent("delta", null, null, text, null, null, null, null);
     }
 
     public static ChatEvent done() {
-        return new ChatEvent("done", null, null, null, null, null, null);
+        return new ChatEvent("done", null, null, null, null, null, null, null);
     }
 
     public static ChatEvent error(String message) {
-        return new ChatEvent("error", null, null, null, message, null, null);
+        return new ChatEvent("error", null, null, null, message, null, null, null);
     }
 
     public static ChatEvent suggestions(java.util.List<String> chips) {
-        return new ChatEvent("suggestions", null, null, null, null, null, chips);
+        return new ChatEvent("suggestions", null, null, null, null, null, chips, null);
     }
 
     public static ChatEvent card(Card card) {
-        return new ChatEvent("card", null, null, null, null, card, null);
+        return new ChatEvent("card", null, null, null, null, card, null, null);
+    }
+
+    public static ChatEvent progress(Progress progress) {
+        return new ChatEvent("progress", null, null, null, null, null, null, progress);
     }
 }

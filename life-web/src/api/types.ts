@@ -39,7 +39,7 @@ export interface Card {
 
 /** 对话流里的一个事件：route 选中技能，delta 增量文字，card 卡片，done 结束，error 出错。 */
 export interface ChatEvent {
-  type: "route" | "delta" | "card" | "suggestions" | "done" | "error";
+  type: "route" | "delta" | "card" | "progress" | "suggestions" | "done" | "error";
   skillId?: string;
   skillName?: string;
   text?: string;
@@ -47,6 +47,16 @@ export interface ChatEvent {
   card?: Card;
   /** 回答下面的快捷回复 */
   suggestions?: string[];
+  /** 工具执行中的进度，同一个 id 的新进度覆盖旧的 */
+  progress?: Progress;
+}
+
+/** 工具执行中的一条进度（比价查到第几家了），只在回答过程中显示 */
+export interface Progress {
+  id: string;
+  title: string;
+  detail?: string;
+  done: boolean;
 }
 
 export interface Trip {
