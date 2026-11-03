@@ -1,5 +1,5 @@
 <template>
-  <Shell active="">
+  <Shell active="schedule">
   <view class="container">
     <view class="top">
       <text class="muted">未来 60 天</text>
@@ -30,7 +30,7 @@
     <view v-for="g in groups" :key="g.day">
       <view class="section-title">{{ g.label }}</view>
       <view class="card day">
-        <view v-for="e in g.events" :key="e.id" class="event">
+        <view v-for="e in g.events" :key="e.id" class="event" @click="openDetail(e)">
           <text class="time">{{ e.allDay ? "全天" : hm(new Date(e.startAt)) }}</text>
           <view class="event-body">
             <view class="event-title">{{ e.title }}</view>
@@ -39,8 +39,29 @@
           <text v-if="e.source !== 'USER'" class="chip" :class="e.source === 'TRAVEL' ? 'travel' : ''">
             {{ SOURCE[e.source] || e.source }}
           </text>
-          <text class="del" @click="remove(e)">删除</text>
+          <text class="del" @click.stop="remove(e)">删除</text>
         </view>
+      </view>
+    </view>
+  </view>
+
+  <view v-if="detail" class="sheet-mask" @click.self="closeDetail">
+    <view class="sheet">
+      <view class="sheet-bar" />
+      <view class="d-title">{{ detail.title }}</view>
+      <view class="d-row"><Icon name="clock" :size="15" color="var(--muted)" /><text>{{ whenText(detail) }}</text></view>
+      <view v-if="detail.location" class="d-row"><Icon name="pin" :size="15" color="var(--muted)" /><text>{{ detail.location }}</text></view>
+      <view v-if="detailEntry && leaveText(detailEntry)" class="d-row"><Icon name="car" :size="15" color="var(--muted)" /><text>{{ leaveText(detailEntry) }}</text></view>
+      <view v-if="detail.description" class="d-desc">{{ detail.description }}</view>
+      <view v-if="detail.source !== 'USER'" class="d-row muted small">来自{{ SOURCE[detail.source] || detail.source }}</view>
+      <view v-if="detail.location" class="d-acts">
+        <button class="btn" @click="goNav">导航</button>
+        <button class="btn ghost" @click="goTaxi">{{ detailEntry && canGo(detailEntry) ? taxiText(detailEntry) : "打车" }}</button>
+      </view>
+      <view class="muted small">叫车和付款在高德里确认，星络不会替你下单。</view>
+      <view class="d-foot">
+        <text class="del" @click="remove(detail)">删除这条日程</text>
+        <text class="d-close" @click="closeDetail">关闭</text>
       </view>
     </view>
   </view>
@@ -53,8 +74,11 @@ import { computed, reactive, ref } from "vue";
 import { onShow } from "@dcloudio/uni-app";
 import { api } from "../../api";
 import { showError } from "../../api/http";
-import type { ScheduleEvent } from "../../api/types";
+import type { AgendaEntry, ScheduleEvent } from "../../api/types";
+import Icon from "../../components/Icon.vue";
 import { dayLabel, hm, toOffsetIso, ymd } from "../../utils/format";
+import { currentCity } from "../../utils/place";
+import { canGo, leaveText, navigate, searchPlace, takePendingEvent, takeTaxi, taxiText } from "../../utils/today";
 
 const SOURCE: Record<string, string> = { TRAVEL: "出游", FITNESS: "健身", AI: "助手" };
 const REMINDS: { label: string; minutes: number | null }[] = [
@@ -84,13 +108,23 @@ const groups = computed(() => {
   return [...map.entries()].map(([day, list]) => ({ day, label: dayLabel(new Date(day + "T00:00:00")), events: list }));
 });
 
+/** 正在看详情的日程；从首页点进来时 detailEntry 带着首页查好的坐标和路程 */
+const detail = ref<ScheduleEvent | null>(null);
+const detailEntry = ref<AgendaEntry | null>(null);
+const city = currentCity();
+
 onShow(load);
 
-/** 读今天起 60 天内的日程。 */
+/** 读今天起 60 天内的日程；首页点了某一项进来的，读完打开它的详情。 */
 async function load() {
   const today = new Date();
   try {
     events.value = await api.events(ymd(today), ymd(new Date(today.getTime() + 60 * 86400000)));
+    const p = takePendingEvent();
+    if (p) {
+      detail.value = events.value.find((e) => e.id === p.id) || null;
+      detailEntry.value = p.entry || null;
+    }
   } catch (e) {
     showError(e);
   } finally {
@@ -120,6 +154,37 @@ async function create() {
   }
 }
 
+function openDetail(e: ScheduleEvent) {
+  detail.value = e;
+  detailEntry.value = null;
+}
+
+function closeDetail() {
+  detail.value = null;
+  detailEntry.value = null;
+}
+
+/** 详情里的时间：日期、几点到几点（全天的写全天） */
+function whenText(e: ScheduleEvent): string {
+  const start = new Date(e.startAt);
+  const day = dayLabel(new Date(ymd(start) + "T00:00:00"));
+  if (e.allDay) return `${day} 全天`;
+  return `${day} ${hm(start)}${e.endAt ? ` – ${hm(new Date(e.endAt))}` : ""}`;
+}
+
+/** 导航：首页查到了坐标就直接导航，否则在高德里搜这个地点 */
+function goNav() {
+  const e = detailEntry.value;
+  if (e && canGo(e)) navigate(e);
+  else if (detail.value?.location) searchPlace(detail.value.location, city);
+}
+
+function goTaxi() {
+  const e = detailEntry.value;
+  if (e && canGo(e)) takeTaxi(e);
+  else if (detail.value?.location) searchPlace(detail.value.location, city);
+}
+
 /** 删除前确认，提醒会一起删掉。 */
 function remove(e: ScheduleEvent) {
   uni.showModal({
@@ -131,6 +196,7 @@ function remove(e: ScheduleEvent) {
       if (!res.confirm) return;
       try {
         await api.deleteEvent(e.id);
+        closeDetail();
         await load();
       } catch (err) {
         showError(err);
@@ -163,6 +229,18 @@ function remove(e: ScheduleEvent) {
 .small { font-size: 13px; }
 .del { font-size: 13px; color: var(--muted); cursor: pointer; flex-shrink: 0; }
 .del:hover { color: var(--danger); }
+.event { cursor: pointer; }
+.sheet-mask { position: fixed; inset: 0; z-index: 200; background: rgba(15, 23, 42, 0.45); display: flex; align-items: flex-end; justify-content: center; }
+.sheet { width: 100%; max-width: 520px; background: var(--surface); border-radius: 18px 18px 0 0; padding: 10px 18px calc(18px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; gap: 10px; box-sizing: border-box; }
+.sheet-bar { width: 36px; height: 4px; border-radius: 2px; background: var(--line); align-self: center; }
+.d-title { font-size: 18px; font-weight: 800; }
+.d-row { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.d-desc { font-size: 14px; color: var(--muted); white-space: pre-wrap; }
+.d-acts { display: flex; gap: 10px; }
+.d-acts .btn { flex: 1; margin: 0; }
+.d-foot { display: flex; justify-content: space-between; padding-top: 6px; border-top: 1px solid var(--line); }
+.d-close { font-size: 13px; color: var(--accent); cursor: pointer; }
+@media (min-width: 1024px) { .sheet-mask { align-items: center; } .sheet { border-radius: 18px; } }
 @media (min-width: 1024px) {
   .page, .container { max-width: 1180px; padding: 24px 28px; }
   .list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }

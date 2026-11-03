@@ -10,8 +10,19 @@
     </view>
 
     <view class="card links">
-      <view class="link-row" @click="go('/pages/schedule/schedule')"><text>我的日程和提醒</text><text class="muted">›</text></view>
+      <view class="link-row" @click="goSchedule"><text>我的日程和提醒</text><text class="muted">›</text></view>
       <view class="link-row" @click="go('/pages/chat/chat')"><text>对话记录</text><text class="muted">›</text></view>
+    </view>
+
+    <!-- 家庭地址：首页今日安排按它算几点出发 -->
+    <view class="section-title">常用地址</view>
+    <view class="card home-addr">
+      <view class="muted small">设了家的地址，首页"今日安排"会按从家出发算路上多久、建议几点出发；旅行中按当晚住的酒店算。星络对话时也会知道。</view>
+      <view class="add-memory">
+        <text class="addr-label">家</text>
+        <input id="home-address" v-model="homeAddress" class="input grow" placeholder="比如：深圳市南山区科技园某某小区" />
+        <button class="btn small" :disabled="savingAddress" @click="saveAddress">{{ savingAddress ? "保存中…" : "保存" }}</button>
+      </view>
     </view>
 
     <!-- 记忆 -->
@@ -106,6 +117,7 @@
 import Shell from "../../components/Shell.vue";
 import { reactive, ref } from "vue";
 import { onShow } from "@dcloudio/uni-app";
+import { useWide } from "../../utils/screen";
 import { api } from "../../api";
 import { showError, toLogin } from "../../api/http";
 import type { Brief, BriefSettings, MemoryCategory, MemoryItem, TokenView, UserView } from "../../api/types";
@@ -129,6 +141,9 @@ const memoryForm = reactive({ categoryIndex: 1, content: "" });
 const brief = reactive<BriefSettings>({ enabled: true, sendTime: "07:30", city: "", hasChannel: false });
 const todayBrief = ref<Brief | null>(null);
 const pushing = ref(false);
+const wide = useWide();
+const homeAddress = ref("");
+const savingAddress = ref(false);
 
 /** 读简报设置和今天的内容；简报出错不影响页面其他部分 */
 async function loadBrief() {
@@ -179,7 +194,29 @@ onShow(async () => {
     showError(e);
   }
   loadBrief();
+  api.homeAddress().then((r) => (homeAddress.value = r.address || "")).catch(() => {});
 });
+
+/** 保存家的地址（高德找不到会提示换个写法），清空表示删掉；记忆列表跟着刷新 */
+async function saveAddress() {
+  savingAddress.value = true;
+  try {
+    const r = await api.saveHomeAddress(homeAddress.value.trim());
+    homeAddress.value = r.address || "";
+    uni.showToast({ title: r.address ? "已保存" : "已删除", icon: "success" });
+    memories.value = await api.memories();
+  } catch (e) {
+    showError(e);
+  } finally {
+    savingAddress.value = false;
+  }
+}
+
+/** 日程页现在是底部标签页：手机用 switchTab，电脑上整页切换 */
+function goSchedule() {
+  if (wide.value) uni.reLaunch({ url: "/pages/schedule/schedule" });
+  else uni.switchTab({ url: "/pages/schedule/schedule" });
+}
 
 /** 手动添加一条记忆；键用时间戳生成，同类同键才会覆盖，所以不会冲掉别的记忆。 */
 async function addMemory() {
@@ -315,6 +352,7 @@ function go(url: string) {
 .del { margin-left: auto; font-size: 13px; color: var(--muted); cursor: pointer; flex-shrink: 0; }
 .del:hover { color: var(--danger); }
 .links { padding: 0 16px; margin-top: 12px; }
+.addr-label { font-weight: 700; }
 .link-row { display: flex; justify-content: space-between; padding: 13px 0; border-bottom: 1px solid var(--line); cursor: pointer; }
 .link-row:last-child { border-bottom: none; }
 @media (min-width: 1024px) {

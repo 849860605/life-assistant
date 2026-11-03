@@ -2,11 +2,12 @@
 import { onLaunch } from "@dcloudio/uni-app";
 import { getToken } from "./api/http";
 
-// 没登录直接去登录页
+// 没登录直接去登录页；手机底部栏中间的星络按钮进对话
 onLaunch(() => {
   if (!getToken()) {
     uni.reLaunch({ url: "/pages/login/login" });
   }
+  uni.onTabBarMidButtonTap(() => uni.navigateTo({ url: "/pages/chat/chat" }));
 });
 </script>
 
@@ -195,4 +196,9 @@ page {
 .md th, .md td { border: 1px solid var(--line); padding: 6px 8px; text-align: left; font-variant-numeric: tabular-nums; }
 .md th { background: var(--surface-2); font-weight: 600; }
 .md hr { border: none; border-top: 1px solid var(--line); margin: 12px 0; }
+/* 原生底部栏的底色写死在 pages.json，深色模式下跟着页面变暗 */
+@media (prefers-color-scheme: dark) {
+  .uni-tabbar { background-color: #151b28 !important; }
+  .uni-tabbar-border { background-color: rgba(255, 255, 255, 0.08) !important; }
+}
 </style>

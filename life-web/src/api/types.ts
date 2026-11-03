@@ -706,3 +706,35 @@ export interface Brief {
   title: string;
   sections: { key: string; title: string; lines: string[]; url?: string }[];
 }
+
+/**
+ * 今日安排的一项：kind 是 EVENT（日程）或 TRIP（行程里的一项）；time、end 是 HH:mm（全天为"全天"）；
+ * lng、lat 有值才能导航；minutes、taxi 是从 from 过去的路程和打车费估算，mode 是这段路怎么走，leaveAt 是建议出发时间。
+ */
+export interface AgendaEntry {
+  kind: "EVENT" | "TRIP";
+  id: string;
+  time: string;
+  end?: string | null;
+  title: string;
+  place?: string | null;
+  note?: string | null;
+  type?: string | null;
+  lng?: number | null;
+  lat?: number | null;
+  minutes?: number | null;
+  taxi?: number | null;
+  from?: string | null;
+  mode?: "DRIVE" | "WALK" | "TRANSIT" | null;
+  leaveAt?: string | null;
+  past: boolean;
+  tripId?: number | null;
+}
+
+/** 首页的今日安排：今天的各项、进行中的旅行（第几天）、算出发时间用的家庭地址 */
+export interface TodayAgenda {
+  date: string;
+  entries: AgendaEntry[];
+  trip: { id: number; title: string; dayNo: number; totalDays: number } | null;
+  home: string | null;
+}

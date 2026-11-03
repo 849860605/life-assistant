@@ -85,10 +85,15 @@
 		"fontSize": "11px",
 		"iconWidth": "22px",
 		"height": "56px",
+		"midButton": {
+		  "width": "72px",
+		  "height": "72px",
+		  "backgroundImage": "static/tab/xinglo-mid.png"
+		},
 		"list": [
 			{ "pagePath": "pages/home/home", "text": "首页", "iconPath": "static/tab/home.png", "selectedIconPath": "static/tab/home-on.png" },
 			{ "pagePath": "pages/trips/trips", "text": "行程", "iconPath": "static/tab/trip.png", "selectedIconPath": "static/tab/trip-on.png" },
-			{ "pagePath": "pages/discover/discover", "text": "发现", "iconPath": "static/tab/discover.png", "selectedIconPath": "static/tab/discover-on.png" },
+			{ "pagePath": "pages/schedule/schedule", "text": "日程", "iconPath": "static/tab/schedule.png", "selectedIconPath": "static/tab/schedule-on.png" },
 			{ "pagePath": "pages/me/me", "text": "我的", "iconPath": "static/tab/me.png", "selectedIconPath": "static/tab/me-on.png" }
 		]
 	},

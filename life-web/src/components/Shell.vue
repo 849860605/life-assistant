@@ -104,8 +104,9 @@ const latestId = ref<number | null>(null);
 
 const NAV = computed<NavItem[]>(() => [
   { key: "home", label: "首页", icon: "home", url: "/pages/home/home" },
-  { key: "chat", label: "AI 对话", icon: "chat", url: "/pages/chat/chat" },
-  { key: "plan", label: "旅行规划", icon: "calendar", url: latestId.value ? `/pages/trips/detail?id=${latestId.value}` : "/pages/chat/chat" },
+  { key: "chat", label: "问星络", icon: "chat", url: "/pages/chat/chat" },
+  { key: "schedule", label: "我的日程", icon: "calendar", url: "/pages/schedule/schedule" },
+  { key: "plan", label: "旅行规划", icon: "flyCloud", url: latestId.value ? `/pages/trips/detail?id=${latestId.value}` : "/pages/chat/chat" },
   {
     key: "travel",
     label: "机票酒店",

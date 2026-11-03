@@ -1,6 +1,7 @@
 import { request, upload } from "./http";
 import type {
   Brief,
+  TodayAgenda,
   BriefSettings,
   UploadView,
   BookingState, ChangeReason, ChatMessage, Conversation, DayPreview, FlightPick, FlightPreview, FlightRules, FlightSearch, FoodResult, DayTickets, HotelComparison, HotelSearchResult, SpotRules, TicketProduct, TuniuTicket, TicketSpot, TuniuCabin, StayPick, StayPreview, Meal, MealPreview, MemoryCategory, MemoryItem, OptimizeGoal, Place, PlacePick,
@@ -28,6 +29,9 @@ export const api = {
   createConversation: () => request<Conversation>("POST", "/api/v1/conversations"),
   deleteConversation: (id: string) => request<void>("DELETE", `/api/v1/conversations/${id}`),
   brief: () => request<Brief>("GET", "/api/v1/brief"),
+  today: (city: string) => request<TodayAgenda>("GET", "/api/v1/home/today" + qs({ city })),
+  homeAddress: () => request<{ address: string | null }>("GET", "/api/v1/home/address"),
+  saveHomeAddress: (address: string) => request<{ address: string | null }>("PUT", "/api/v1/home/address", { address }),
   briefSettings: () => request<BriefSettings>("GET", "/api/v1/brief/settings"),
   saveBriefSettings: (s: { enabled: boolean; sendTime: string; city?: string | null }) =>
     request<BriefSettings>("PUT", "/api/v1/brief/settings", s),
