@@ -87,12 +87,24 @@ public class ConversationService {
      * 把本轮的卡片存到本轮的助手消息上（metadata.cards）。模型这轮一个字没写时助手消息不会入库，就补一条空文本的。
      */
     public void attachCards(String conversationId, List<Card> cards) {
-        if (cards.isEmpty()) {
+        attachMeta(conversationId, cards, List.of());
+    }
+
+    /** 本轮的卡片和快捷回复一起存到助手消息的 metadata 上；都没有就不写。 */
+    public void attachMeta(String conversationId, List<Card> cards, List<String> suggestions) {
+        if (cards.isEmpty() && suggestions.isEmpty()) {
             return;
+        }
+        Map<String, Object> meta = new java.util.LinkedHashMap<>();
+        if (!cards.isEmpty()) {
+            meta.put("cards", cards);
+        }
+        if (!suggestions.isEmpty()) {
+            meta.put("suggestions", suggestions);
         }
         String json;
         try {
-            json = objectMapper.writeValueAsString(Map.of("cards", cards));
+            json = objectMapper.writeValueAsString(meta);
         } catch (JsonProcessingException e) {
             throw new IllegalStateException(e);
         }

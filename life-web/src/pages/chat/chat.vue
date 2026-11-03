@@ -1,6 +1,6 @@
 <template>
-  <Shell active="chat" :show-recent="false">
-  <view class="chat" :class="{ wide }">
+  <Shell active="chat" :show-recent="false" fill>
+  <view class="chat" :class="{ wide, split: showPanel }">
     <!-- 会话列表：抽屉，点"历史对话"打开 -->
     <view class="aside" :class="{ open: showList }">
       <view class="aside-head">
@@ -29,27 +29,28 @@
 
     <view class="main">
       <view class="toolbar">
-        <view class="bot-logo"><Icon name="chat" :size="18" color="#fff" /></view>
+        <BrandMark :size="34" />
         <view class="toolbar-title">
-          <view class="bot-name">AI 旅行助手 <text class="beta">Beta</text></view>
-          <view class="bot-sub">{{ currentId ? currentTitle : "帮你规划更好的旅行" }}</view>
+          <view class="bot-name">星络 <text class="beta">Beta</text></view>
+          <view class="bot-sub">{{ currentId ? currentTitle : "旅行 · 日程 · 出行 · 生活" }}</view>
         </view>
-        <button class="btn ghost small" @click="toggleList">历史对话</button>
-        <button class="btn ghost small" @click="startNew">新对话</button>
+        <button v-if="wide && hasPanel && panelClosed" class="btn ghost small" @click="panelClosed = false">{{ latestTrip ? "显示行程" : "显示方案" }}</button>
+        <button class="btn ghost small tb-btn" @click="toggleList"><Icon name="clock" :size="14" color="var(--accent)" /><text>历史对话</text></button>
+        <button class="btn ghost small tb-btn" @click="startNew"><Icon name="plus" :size="14" color="var(--accent)" /><text>新对话</text></button>
       </view>
 
       <scroll-view scroll-y class="messages" :scroll-top="scrollTop" :scroll-with-animation="false">
         <view class="thread">
           <view v-if="!messages.length" class="welcome">
             <view class="greet">
-              <view class="avatar"><Icon name="chat" :size="16" color="#fff" /></view>
+              <BrandMark :size="28" />
               <view class="greet-bubble">
-                <view>你好！我是你的 AI 旅行助手。</view>
-                <view>我可以帮你规划行程、推荐景点美食、查询机票酒店、比价预订等。</view>
-                <view class="greet-tip">请告诉我你的旅行需求，或从下面的示例开始：</view>
+                <view>你好！我是星络。</view>
+                <view>我可以帮你规划行程、推荐景点美食、查询机票酒店并比价，也能记日程、提醒天气。</view>
+                <view class="greet-tip">说说你想做什么，或从下面的示例开始：</view>
                 <view class="suggestions">
-                  <view v-for="s in suggestions" :key="s" class="suggestion" @click="send(s)">
-                    <text>{{ s }}</text><Icon name="right" :size="14" color="var(--accent)" />
+                  <view v-for="s in suggestions" :key="s.text" class="suggestion" @click="send(s.text)">
+                    <DuoIcon :name="s.icon" :size="18" /><text class="suggestion-text">{{ s.text }}</text><Icon name="right" :size="14" color="var(--accent)" />
                   </view>
                 </view>
               </view>
@@ -68,7 +69,7 @@
             </template>
             <view v-else class="answer">
               <view class="answer-head">
-                <view class="avatar"><Icon name="chat" :size="14" color="#fff" /></view>
+                <BrandMark :size="24" />
                 <text v-if="m.skillId" class="chip" :class="m.skillId">{{ m.skillName || skillName(m.skillId) }}</text>
               </view>
               <view v-if="steps(m).length" class="progress">
@@ -92,6 +93,9 @@
               <view v-if="m.status === 'streaming'" class="caret" />
               <view v-if="m.status === 'stopped'" class="status">已停止</view>
               <view v-if="m.status === 'error'" class="error">{{ m.error }}</view>
+              <view v-if="m.suggestions?.length && m === messages[messages.length - 1] && !sending && m.status === 'done'" class="chips">
+                <text v-for="(c, i) in m.suggestions" :key="c" class="chip-btn" :class="{ first: i === 0 }" @click="send(c, [], true)">{{ c }}</text>
+              </view>
             </view>
           </view>
         </view>
@@ -124,14 +128,14 @@
             <view class="tool" @click="pickFiles"><Icon name="plus" :size="14" color="var(--muted)" /><text>上传文件</text></view>
             <view class="tool" @click="notYet('深度搜索')"><Icon name="search" :size="14" color="var(--muted)" /><text>深度搜索</text></view>
             <view class="model"><Icon name="sparkle" :size="13" color="var(--accent)" /><text>DeepSeek</text></view>
-            <button v-if="sending" class="btn danger small stop-btn" @click="stop">停止</button>
+            <view v-if="sending" class="send stop-btn" title="停止" @click="stop"><Icon name="stop" :size="14" color="#fff" fill /></view>
             <view v-else class="send" :class="{ off: !canSend }" @click="sendInput"><Icon name="send" :size="18" color="#fff" /></view>
           </view>
         </view>
       </view>
     </view>
 
-    <PlanPanel v-if="wide" class="side-panel" :trip="latestTrip" :plans="latestPlans" @send="send" />
+    <PlanPanel v-if="showPanel" class="side-panel" :trip="latestTrip" :plans="latestPlans" @send="send" @close="panelClosed = true" />
   </view>
   </Shell>
 </template>
@@ -146,6 +150,8 @@ import type { Card, ChatMessage, Conversation } from "../../api/types";
 import MarkdownView from "../../components/MarkdownView.vue";
 import ChatCard from "../../components/cards/ChatCard.vue";
 import Icon from "../../components/Icon.vue";
+import BrandMark from "../../components/BrandMark.vue";
+import DuoIcon from "../../components/DuoIcon.vue";
 import PlanPanel from "../../components/PlanPanel.vue";
 import Shell from "../../components/Shell.vue";
 import { useWide } from "../../utils/screen";
@@ -169,6 +175,8 @@ interface UiMessage {
   error?: string;
   /** 用户消息带的附件 */
   files?: Attached[];
+  /** 回答下面的快捷回复，只在最新一条回答下显示 */
+  suggestions?: string[];
 }
 
 /** 输入框上方待发送的附件：上传完就已经识别好了 */
@@ -230,14 +238,14 @@ async function openFile(id: string) {
   window.open(fileUrl(id), "_blank");
 }
 
-/** 示例问题，城市用顶栏选的当前城市 */
+/** 示例问题，城市用顶栏选的当前城市；icon 是前面的双色图标 */
 const city = currentCity();
 const suggestions = [
-  `帮我规划${city} 4 天 3 晚行程`,
-  `带父母去${city}，有哪些适合的景点？`,
-  `${city}有哪些必吃的美食？`,
-  `${city}这周天气怎么样？`,
-  `帮我找去${city}的机票`,
+  { text: `帮我规划${city} 4 天 3 晚行程`, icon: "calendar" },
+  { text: `带父母去${city}，有哪些适合的景点？`, icon: "mountain" },
+  { text: `${city}有哪些必吃的美食？`, icon: "food" },
+  { text: `${city}这周天气怎么样？`, icon: "weather" },
+  { text: `帮我找去${city}的机票`, icon: "plane" },
 ];
 
 const wide = useWide();
@@ -291,6 +299,12 @@ function notYet(what: string) {
 const conversations = ref<Conversation[]>([]);
 const currentId = ref<string | null>(null);
 const messages = ref<UiMessage[]>([]);
+
+/** 电脑上的右侧面板：会话里有行程或方案才显示，平时对话居中占满；用户收起后，来了新的行程或方案再自动展开 */
+const panelClosed = ref(false);
+const hasPanel = computed(() => !!(latestTrip.value || latestPlans.value?.options?.length));
+const showPanel = computed(() => wide.value && hasPanel.value && !panelClosed.value);
+watch([latestTrip, latestPlans], () => (panelClosed.value = false));
 
 // 记下最近的方案，方案对比页从本地读
 watch(latestPlans, (plans) => {
@@ -356,6 +370,17 @@ function cardsOf(m: ChatMessage): Card[] {
   }
 }
 
+/** 历史消息 metadata 里存的快捷回复 */
+function suggestionsOf(m: ChatMessage): string[] {
+  if (!m.metadata) return [];
+  try {
+    const meta = typeof m.metadata === "string" ? JSON.parse(m.metadata) : m.metadata;
+    return Array.isArray(meta?.suggestions) ? meta.suggestions : [];
+  } catch {
+    return [];
+  }
+}
+
 function skillName(id: string) {
   return SKILL_NAMES[id] || id;
 }
@@ -388,6 +413,7 @@ async function open(c: Conversation) {
         role: m.role === "USER" ? "user" : "assistant",
         ...(m.role === "USER" ? splitAttachments(m.content) : { text: m.content }),
         cards: cardsOf(m),
+        suggestions: m.role === "ASSISTANT" ? suggestionsOf(m) : undefined,
         skillId: m.role === "ASSISTANT" && c.skillId ? c.skillId : undefined,
         status: "done",
       }));
@@ -417,8 +443,8 @@ function remove(c: Conversation) {
   });
 }
 
-/** 发一条消息并流式显示回答；第一条消息时先建会话。 */
-async function send(raw: string, files: Attached[] = []) {
+/** 发一条消息并流式显示回答，第一条消息时先建会话；chip 表示点的是快捷回复（后端沿用当前技能、记下点了哪个）。 */
+async function send(raw: string, files: Attached[] = [], chip = false) {
   const text = raw.trim();
   if (!text || sending.value) return;
   input.value = "";
@@ -446,13 +472,16 @@ async function send(raw: string, files: Attached[] = []) {
         answer.cards.push(event.card);
         answer.status = "streaming";
         scrollToBottom();
+      } else if (event.type === "suggestions") {
+        answer.suggestions = event.suggestions || [];
+        scrollToBottom();
       } else if (event.type === "error") {
         answer.status = "error";
         answer.error = event.message || "这次回答出错了";
       } else if (event.type === "done" && answer.status !== "error") {
         answer.status = "done";
       }
-    }, controller.signal, files.map((f) => f.id));
+    }, controller.signal, { files: files.map((f) => f.id), chip });
     if (answer.status === "waiting" || answer.status === "streaming") {
       answer.status = "done";
     }
@@ -544,6 +573,7 @@ function scrollToBottom() {
   background: var(--surface);
 }
 .toolbar .btn { margin: 0; }
+.tb-btn { display: inline-flex; align-items: center; gap: 4px; }
 .toolbar-title {
   flex: 1;
   min-width: 0;
@@ -573,16 +603,6 @@ function scrollToBottom() {
   padding: 10px 14px;
   font-size: 14px;
 }
-.avatar {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: var(--accent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
 .suggestions { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
 .suggestion {
   display: flex;
@@ -597,6 +617,7 @@ function scrollToBottom() {
   cursor: pointer;
 }
 .suggestion:hover { border-color: var(--accent); }
+.suggestion-text { flex: 1; min-width: 0; }
 
 .msg.user { display: flex; justify-content: flex-end; }
 .bubble {
@@ -616,7 +637,6 @@ function scrollToBottom() {
   padding: 12px 16px;
 }
 .answer-head { display: flex; align-items: center; gap: 8px; margin-bottom: -2px; }
-.answer-head .avatar { width: 24px; height: 24px; }
 .status { color: var(--muted); font-size: 14px; }
 .error {
   margin-top: 6px;
@@ -680,10 +700,11 @@ function scrollToBottom() {
 .aside.open { transform: translateX(0); }
 .mask { display: block; position: fixed; z-index: 39; inset: 0; background: rgba(0, 0, 0, 0.3); }
 
-/* 电脑：左边对话、右边方案面板 */
-.chat.wide { height: calc(100vh - 59px); }
-.chat.wide .main { flex: 0 0 460px; border-right: 1px solid var(--line); background: var(--surface); }
-.chat.wide .thread { padding-left: 16px; padding-right: 16px; }
+/* 电脑：平时对话居中占满顶栏下面的空间；有行程或方案时左边对话、右边面板 */
+.chat.wide { height: auto; flex: 1; min-height: 0; }
+.chat.wide .main { background: var(--surface); }
+.chat.wide.split .main { flex: 0 0 min(560px, 42%); border-right: 1px solid var(--line); }
+.chat.wide.split .thread { padding-left: 16px; padding-right: 16px; }
 .side-panel { flex: 1; min-width: 0; height: 100%; }
 
 /* 进度 */
@@ -698,7 +719,6 @@ function scrollToBottom() {
 .pdetail { font-size: 12px; color: var(--muted); }
 
 /* 头部和输入框 */
-.bot-logo { width: 34px; height: 34px; border-radius: 50%; background: var(--accent); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .bot-name { font-size: 16px; font-weight: 800; color: var(--ink); }
 .beta { font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 6px; background: var(--accent-soft); color: var(--accent); margin-left: 4px; }
 .bot-sub { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -707,6 +727,10 @@ function scrollToBottom() {
 .msg.user { gap: 8px; align-items: flex-start; }
 .composer-box { max-width: 760px; margin: 0 auto; border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px 8px; background: var(--surface); }
 .composer-box .composer-input { border: none; background: transparent; padding: 2px 0; width: 100%; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip-btn { font-size: 13px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
+.chip-btn.first { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.chip-btn:active { opacity: 0.7; }
 .att-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
 .att { display: flex; align-items: center; gap: 8px; max-width: 100%; padding: 6px 8px 6px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
 .att.error { border-color: var(--price); }
@@ -722,6 +746,6 @@ function scrollToBottom() {
 .model { display: flex; align-items: center; gap: 4px; font-size: 12px; padding: 4px 8px; border-radius: 8px; background: var(--surface-2); margin-left: auto; }
 .send { width: 38px; height: 38px; border-radius: 50%; background: var(--accent); display: flex; align-items: center; justify-content: center; cursor: pointer; }
 .send.off { opacity: 0.45; cursor: default; }
-.stop-btn { margin: 0; }
+.stop-btn { background: var(--danger); }
 @media (prefers-reduced-motion: reduce) { .aside { transition: none; } }
 </style>

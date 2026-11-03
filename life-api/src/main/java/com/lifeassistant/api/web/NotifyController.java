@@ -39,7 +39,7 @@ public class NotifyController {
     @PostMapping("/test")
     public ApiResponse<Void> test() {
         notificationService.send(authFacade.current().userId(),
-                new Notice("生活助手", "推送设置成功", "系统", null, "active"), null);
+                new Notice("星络", "推送设置成功", "系统", null, "active"), null);
         return ApiResponse.ok();
     }
 }

@@ -103,7 +103,7 @@ public class SearchController {
                                                    @RequestParam(required = false) Double maxPrice) {
         boolean wholeCity = place == null || place.isBlank() || place.equals(city);
         return ApiResponse.ok(hotelPriceTools.findAndCompareHotels(wholeCity ? city : place + " " + city,
-                wholeCity ? "城市" : "景点", city, checkIn, checkOut, maxPrice, null, 5));
+                wholeCity ? "城市" : "景点", city, checkIn, checkOut, maxPrice, null, 5, null));
     }
 
     /**

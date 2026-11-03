@@ -6,6 +6,8 @@
       <text class="ed-title">{{ trip?.title }} 行程编辑</text>
       <text class="tag" :class="trip?.status === 'DRAFT' ? '' : 'ok'">{{ trip?.status === "DRAFT" ? "草稿" : "已确认" }}</text>
       <text v-if="!isCurrent" class="tag">正在看第 {{ detail?.version.version }} 版</text>
+      <button v-if="!isCurrent" class="btn small" @click="useVersion">用这一版</button>
+      <button v-if="versions.length > 1" class="btn danger small" @click="removeVersion">删除第 {{ detail?.version.version }} 版</button>
       <view class="ed-actions">
         <view class="ghost-act" @click="notYet('分享')"><Icon name="send" :size="15" color="var(--ink)" />分享</view>
         <view class="ghost-act" @click="downloadPdf"><Icon name="layers" :size="15" color="var(--ink)" />下载PDF</view>
@@ -220,6 +222,7 @@
       <view class="title-row">
         <text class="title">{{ trip.title }}</text>
         <text class="tag" :class="trip.status === 'DRAFT' ? '' : 'ok'">{{ trip.status === "DRAFT" ? "草稿" : "已确认" }}</text>
+        <text v-if="!isCurrent" class="tag">正在看第 {{ detail?.version.version }} 版</text>
       </view>
       <view class="meta">{{ trip.destination }} · {{ cnDate(trip.startDate) }} – {{ cnDate(trip.endDate) }}</view>
       <view class="m-pdf" @click="downloadPdf"><Icon name="layers" :size="14" color="var(--accent)" />导出 PDF</view>
@@ -329,8 +332,9 @@
     <view v-if="versions.length > 1" class="versions">
       <text class="muted small">历史版本：</text>
       <text v-for="v in versions" :key="v.version" class="version" :class="{ active: detail && v.version === detail.version.version }" @click="load(v.version)">
-        第 {{ v.version }} 版
+        第 {{ v.version }} 版{{ v.version === trip?.currentVer ? "（在用）" : "" }}
       </text>
+      <text class="muted small">点版本号切换，删除只删正在看的那一版</text>
     </view>
 
     <view v-if="events.length" class="card reminders">
@@ -342,8 +346,10 @@
     </view>
 
     <view v-if="trip" class="bottom">
-      <button v-if="trip.status === 'DRAFT'" class="btn" @click="confirmTrip">确认这个行程</button>
-      <button class="btn danger" @click="removeTrip">删除</button>
+      <button v-if="!isCurrent" class="btn" @click="useVersion">用这一版</button>
+      <button v-else-if="trip.status === 'DRAFT'" class="btn" @click="confirmTrip">确认这个行程</button>
+      <button v-if="versions.length > 1" class="btn danger" @click="removeVersion">删除第 {{ detail?.version.version }} 版</button>
+      <button v-else class="btn danger" @click="removeTrip">删除行程</button>
     </view>
   </view>
   </Shell>
@@ -835,10 +841,11 @@ async function confirmTrip() {
   }
 }
 
+/** 只剩一个版本时才在这里删整个行程；有多个版本时按钮只删正在看的那一版 */
 function removeTrip() {
   uni.showModal({
     title: "删除行程",
-    content: events.value.length ? `行程和 ${events.value.length} 条关联提醒都会删掉。` : "删除这个行程？",
+    content: events.value.length ? `行程和 ${events.value.length} 条关联提醒都会删掉，找不回来。` : "删除这个行程？删掉后找不回来。",
     confirmText: "删除",
     confirmColor: "#B4442F",
     success: async (res) => {
@@ -846,6 +853,44 @@ function removeTrip() {
       try {
         await api.deleteTrip(tripId.value);
         goBack();
+      } catch (e) {
+        showError(e);
+      }
+    },
+  });
+}
+
+/** 把正在看的历史版本存成新的当前版本，原来的版本都还在 */
+async function useVersion() {
+  const v = detail.value?.version.version;
+  if (!v) return;
+  try {
+    const d = await api.restoreVersion(tripId.value, v);
+    await load();
+    await loadVersions();
+    uni.showToast({ title: `已换回第 ${v} 版的内容（存为第 ${d.version.version} 版）`, icon: "none" });
+  } catch (e) {
+    showError(e);
+  }
+}
+
+/** 只删正在看的这一版；删的是正在用的版本时，行程退回剩下的最新一版 */
+function removeVersion() {
+  const v = detail.value?.version.version;
+  if (!v) return;
+  const back = versions.value.find((x) => x.version !== v)?.version;
+  uni.showModal({
+    title: `删除第 ${v} 版`,
+    content: isCurrent.value && back ? `只删这一版，行程退回到第 ${back} 版，其他版本都还在。` : "只删这一版，行程和其他版本都还在。",
+    confirmText: "删除",
+    confirmColor: "#B4442F",
+    success: async (res) => {
+      if (!res.confirm) return;
+      try {
+        await api.deleteTripVersion(tripId.value, v);
+        await load();
+        await loadVersions();
+        uni.showToast({ title: `已删除第 ${v} 版`, icon: "none" });
       } catch (e) {
         showError(e);
       }
@@ -1116,6 +1161,7 @@ async function loadVersions() {
 .bottom { display: flex; gap: 10px; margin-top: 18px; }
 .bottom .btn { margin: 0; flex: 1; }
 .bottom .btn.danger { flex: 0 0 auto; }
+.ed-head .btn { margin: 0; }
 .m-stay { margin-top: 14px; padding: 12px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
 .m-stay-title { display: flex; align-items: center; gap: 6px; font-weight: 700; font-size: 14px; }
 .m-pdf { display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; font-size: 13px; color: var(--accent); cursor: pointer; }

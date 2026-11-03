@@ -16,6 +16,10 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
+
+import java.time.Duration;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -35,6 +39,7 @@ public class ChatOrchestrator {
     private final ConversationService conversationService;
     private final SkillRegistry skillRegistry;
     private final CardHub cardHub;
+    private final SuggestionService suggestionService;
 
     /**
      * 以会话 id 作为图的 thread 运行一轮，流式输出事件，正常结束时补一个 done；
@@ -44,11 +49,14 @@ public class ChatOrchestrator {
      * @param ctx 必须在请求线程里取好，图里的节点拿不到登录态
      */
     public Flux<ChatEvent> chat(UserCtx ctx, String conversationId, String input) {
-        return chat(ctx, conversationId, input, input);
+        return chat(ctx, conversationId, input, input, false);
     }
 
-    /** 带附件的消息：input 是拼上附件内容的完整消息，typed 是用户自己打的字，用来起会话标题。 */
-    public Flux<ChatEvent> chat(UserCtx ctx, String conversationId, String input, String typed) {
+    /**
+     * 带附件的消息：input 是拼上附件内容的完整消息，typed 是用户自己打的字，用来起会话标题和生成快捷回复。
+     * followUp 表示用户点的是上一条回答下面的快捷回复，沿用上一轮的技能，不再重新路由。
+     */
+    public Flux<ChatEvent> chat(UserCtx ctx, String conversationId, String input, String typed, boolean followUp) {
         Conversation conversation = conversationService.getOwned(ctx, conversationId);
         String firstInput = conversation.getTitle() == null ? typed : null;
 
@@ -57,6 +65,7 @@ public class ChatOrchestrator {
         inputs.put(LifeGraphConfig.USER_ID, ctx.userId());
         inputs.put(LifeGraphConfig.SPACE_ID, ctx.spaceId());
         inputs.put(LifeGraphConfig.CONVERSATION_ID, conversationId);
+        inputs.put(LifeGraphConfig.FOLLOW_UP, followUp);
         RunnableConfig config = RunnableConfig.builder().threadId(conversationId).build();
 
         CardHub.Turn turn = cardHub.open(conversationId);
@@ -68,11 +77,13 @@ public class ChatOrchestrator {
                 .doFinally(signal -> turn.close());
 
         AtomicInteger textLength = new AtomicInteger();
+        StringBuilder answer = new StringBuilder();
         List<Card> shown = new ArrayList<>();
         return Flux.merge(graphEvents, turn.cards().map(ChatEvent::card))
                 .map(event -> {
                     if (event.text() != null) {
                         textLength.addAndGet(event.text().length());
+                        answer.append(event.text());
                     }
                     if (event.card() == null) {
                         return event;
@@ -81,10 +92,17 @@ public class ChatOrchestrator {
                     shown.add(placed);
                     return ChatEvent.card(placed);
                 })
-                .concatWith(Flux.defer(() -> {
-                    conversationService.attachCards(conversationId, shown);
-                    return Flux.just(ChatEvent.done());
-                }))
+                // 回答完再生成快捷回复（小模型，一两秒），和卡片一起存到这条回答上，翻历史时还在
+                .concatWith(Mono.fromCallable(() -> suggestionService.suggest(typed, answer.toString(), shown, ctx.userId(),
+                                conversationId))
+                        .subscribeOn(Schedulers.boundedElastic())
+                        .timeout(Duration.ofSeconds(8))
+                        .onErrorReturn(List.of())
+                        .flatMapMany(chips -> {
+                            conversationService.attachMeta(conversationId, shown, chips);
+                            return chips.isEmpty() ? Flux.just(ChatEvent.done())
+                                    : Flux.just(ChatEvent.suggestions(chips), ChatEvent.done());
+                        }))
                 .onErrorResume(e -> {
                     log.error("对话 {} 出错", conversationId, e);
                     String message = e instanceof BizException biz ? biz.getMessage() : "这次回答出错了，请稍后再试";

@@ -1,6 +1,10 @@
 <template>
   <scroll-view scroll-y class="panel-scroll">
     <view class="pp">
+      <view class="pp-bar">
+        <text class="pp-title">{{ trip ? "这次对话的行程" : "这次对话的方案" }}</text>
+        <view class="pp-close" @click="emit('close')"><text>收起</text><Icon name="close" :size="14" color="var(--muted)" /></view>
+      </view>
       <!-- 当前会话已经生成了行程：显示这个行程 -->
       <template v-if="trip">
         <view class="hero">
@@ -85,34 +89,6 @@
         </view>
       </template>
 
-      <!-- 还没有行程和方案：说明能做什么 -->
-      <template v-else>
-        <view class="hero">
-          <image v-if="cover" class="hero-img" :src="cover" mode="aspectFill" />
-          <view v-else class="hero-img blank" />
-          <view class="hero-shade" />
-          <view class="hero-text">
-            <view class="hero-title">说出想去哪，AI 帮你规划</view>
-            <view class="hero-sub">规划好的行程和方案会显示在这里，可以直接打开编辑</view>
-          </view>
-        </view>
-        <view class="block">
-          <view class="block-title"><Icon name="sparkle" :size="16" color="var(--accent)" /> 我能帮你</view>
-          <view class="abilities">
-            <view v-for="a in ABILITIES" :key="a.label" class="ability">
-              <Icon :name="a.icon" :size="18" color="var(--accent)" />
-              <view><view class="ab-name">{{ a.label }}</view><view class="ab-desc">{{ a.desc }}</view></view>
-            </view>
-          </view>
-        </view>
-        <view class="block">
-          <view class="block-title">试试这样问</view>
-          <view v-for="q in examples" :key="q" class="example" @click="emit('send', q)">
-            <text>{{ q }}</text>
-            <Icon name="right" :size="16" color="var(--muted)" />
-          </view>
-        </view>
-      </template>
     </view>
   </scroll-view>
 </template>
@@ -128,24 +104,17 @@ import { cityOf, currentCity, dayMapUrl, dayTravel, duration, located } from "..
 
 /**
  * 对话页右侧（电脑）：当前会话生成过行程时显示这个行程（逐日安排、亮点照片、第一天路线图）；
- * 给过三套方案时显示方案概要和逐日对比，选中后把选择发到对话里；都没有时说明能做什么、给几个示例问题。
- * trip 是会话里最后一张行程卡的数据，plans 是最后一张 plan_options 卡的数据。
+ * 给过三套方案时显示方案概要和逐日对比，选中后把选择发到对话里。都没有时对话页不显示这个面板。
+ * trip 是会话里最后一张行程卡的数据，plans 是最后一张 plan_options 卡的数据；点"收起"发 close。
  */
 const props = defineProps<{ trip: any | null; plans?: any | null }>();
-const emit = defineEmits<{ (e: "send", text: string): void }>();
+const emit = defineEmits<{ (e: "send", text: string): void; (e: "close"): void }>();
 
 const TABS = ["推荐方案", "逐日对比"];
 const TONES = ["green", "blue", "violet"];
 const ICONS = ["wallet", "star", "crown"];
-const ABILITIES = [
-  { label: "定制行程", desc: "先问清需求，再按天排好路线", icon: "route" },
-  { label: "机票酒店比价", desc: "多个平台同时查，按价格排", icon: "plane" },
-  { label: "美食推荐", desc: "大众点评和携程的评分合在一起看", icon: "food" },
-  { label: "天气提醒", desc: "出发前看天气，提醒带什么", icon: "weather" },
-];
 const tab = ref(TABS[0]);
 const city = currentCity();
-const examples = [`帮我规划${city} 3 天 2 晚，预算每人 3000`, `${city}有哪些适合带老人去的景点？`, `${city}本地人常去的小吃店有哪些？`];
 
 const cover = ref("");
 /** 从后端取到的结构化行程（带坐标和照片），比卡片里的数据全 */
@@ -209,7 +178,11 @@ function openMap() {
 
 <style scoped>
 .panel-scroll { height: 100%; }
-.pp { padding: 16px 20px 24px; display: flex; flex-direction: column; gap: 16px; }
+.pp { padding: 12px 20px 24px; display: flex; flex-direction: column; gap: 16px; }
+.pp-bar { display: flex; align-items: center; justify-content: space-between; }
+.pp-title { font-size: 14px; font-weight: 600; color: var(--muted); }
+.pp-close { display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--muted); cursor: pointer; padding: 4px 8px; border-radius: 8px; }
+.pp-close:hover { background: var(--surface-2); color: var(--ink); }
 .hero { position: relative; border-radius: 18px; overflow: hidden; min-height: 200px; }
 .hero-img { position: absolute; inset: 0; width: 100%; height: 100%; }
 .hero-shade { position: absolute; inset: 0; background: linear-gradient(90deg, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.55) 50%, rgba(255, 255, 255, 0)); }
@@ -220,7 +193,7 @@ function openMap() {
 .tabs { display: flex; gap: 10px; }
 .tab { padding: 7px 18px; border-radius: 999px; font-size: 14px; background: var(--surface); border: 1px solid var(--line); cursor: pointer; }
 .tab.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
-.plans { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
 .plan { --tone: #16a34a; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 16px; display: flex; flex-direction: column; gap: 6px; }
 .plan.blue { --tone: #2563eb; }
 .plan.violet { --tone: #7c3aed; }
@@ -246,13 +219,6 @@ function openMap() {
 .outline-day { font-size: 13px; font-weight: 700; color: var(--accent); }
 .outline-text { font-size: 12px; color: var(--ink); }
 .map-note { font-size: 13px; color: var(--muted); }
-.abilities { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
-.ability { display: flex; gap: 10px; align-items: flex-start; }
-.ab-name { font-weight: 600; font-size: 14px; }
-.ab-desc { font-size: 12px; color: var(--muted); }
-.example { display: flex; align-items: center; justify-content: space-between; padding: 10px 2px; border-bottom: 1px solid var(--line); font-size: 14px; cursor: pointer; }
-.example:last-child { border-bottom: none; }
-.example:hover { color: var(--accent); }
 .mini-map { width: 220px; height: 120px; border-radius: 12px; flex-shrink: 0; cursor: pointer; }
 .open-btn { margin: 12px 0 0; }
 .compare { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }

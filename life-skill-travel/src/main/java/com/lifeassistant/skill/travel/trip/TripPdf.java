@@ -103,7 +103,7 @@ public class TripPdf {
                 .append("</title><style>").append(CSS).append("</style></head><body>");
 
         // 标题和概要
-        h.append("<div class=\"cover\"><div class=\"brand\">生活助手 · 行程单</div><h1>").append(esc(trip.getTitle())).append("</h1>")
+        h.append("<div class=\"cover\"><div class=\"brand\">星络 · 行程单</div><h1>").append(esc(trip.getTitle())).append("</h1>")
                 .append("<div class=\"meta\">").append(esc(trip.getDestination())).append(" · ")
                 .append(dateLabel(str(trip.getStartDate()))).append(" – ").append(dateLabel(str(trip.getEndDate())));
         if (it != null && it.days() != null) {

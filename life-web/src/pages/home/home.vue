@@ -25,7 +25,7 @@
         <view class="col-main">
           <view class="panel entries-row">
             <view v-for="e in deskEntries" :key="e.label" class="d-entry" @click="e.go()">
-              <view class="d-entry-icon" :style="{ background: e.bg }"><Icon :name="e.icon" :size="24" :color="e.color" /></view>
+              <DuoIcon class="d-entry-icon" :name="e.icon" :size="30" :tile="48" />
               <text class="d-entry-label">{{ e.label }}</text>
               <text class="d-entry-sub">{{ e.sub }}</text>
             </view>
@@ -154,8 +154,8 @@
     <view v-else class="home">
     <view class="topbar">
       <view class="brand">
-        <view class="logo"><Icon name="chat" :size="16" color="#fff" /></view>
-        <text class="brand-name">生活助手</text>
+        <BrandMark :size="28" />
+        <text class="brand-name">星络</text>
       </view>
       <view class="topbar-right">
         <view class="city-chip" @click="picking = true"><Icon name="pin" :size="14" color="var(--ink)" /><text>{{ city }}</text><Icon name="down" :size="12" color="var(--muted)" /></view>
@@ -189,7 +189,7 @@
 
       <view class="entries">
         <view v-for="e in entries" :key="e.label" class="entry" @click="e.go()">
-          <view class="entry-icon" :style="{ background: e.bg }"><Icon :name="e.icon" :size="22" :color="e.color" /></view>
+          <DuoIcon class="entry-icon" :name="e.icon" :size="28" :tile="48" />
           <text class="entry-label">{{ e.label }}</text>
           <text class="entry-sub">{{ e.sub }}</text>
         </view>
@@ -252,6 +252,8 @@ import { locate, locationAllowed } from "../../utils/location";
 import type { ItineraryDay, Place, Trip } from "../../api/types";
 import CityPicker from "../../components/CityPicker.vue";
 import Icon from "../../components/Icon.vue";
+import BrandMark from "../../components/BrandMark.vue";
+import DuoIcon from "../../components/DuoIcon.vue";
 import Shell from "../../components/Shell.vue";
 import { cityCover, citySpots } from "../../utils/cover";
 import { addDays, shortDate, weekday, ymd } from "../../utils/format";
@@ -358,22 +360,22 @@ const popular = computed(() => [
 ]);
 
 const deskEntries = [
-  { label: "行程规划", sub: "AI 定制路线", icon: "umbrella", color: "#16a34a", bg: "#e7f6ec", go: () => openChat(`帮我规划${city}的旅行`) },
-  { label: "机票比价", sub: "多平台价格对比", icon: "plane", color: "#2563eb", bg: "#e6eefd", go: () => go("/pages/search/flight") },
-  { label: "酒店比价", sub: "多平台房价对比", icon: "bed", color: "#7c3aed", bg: "#f0e9fd", go: () => go("/pages/search/flight?tab=hotel") },
-  { label: "景点推荐", sub: "热门景点攻略", icon: "pin", color: "#e11d48", bg: "#fde8ec", go: () => openChat(`${city}有哪些值得去的景点？`) },
-  { label: "美食推荐", sub: "地道本地美食", icon: "food", color: "#ea580c", bg: "#fff1e6", go: () => go("/pages/search/food") },
-  { label: "地图路线", sub: "可视化行程", icon: "nav", color: "#0d9488", bg: "#e2f5f2", go: () => go(trip.value ? `/pages/plan/map?id=${trip.value.id}&day=1` : "/pages/plan/map") },
-  { label: "天气查询", sub: "实时天气建议", icon: "weather", color: "#0284c7", bg: "#e3f2fb", go: () => openChat(`${city}这周天气怎么样？`) },
+  { label: "行程规划", sub: "AI 定制路线", icon: "calendar", go: () => openChat(`帮我规划${city}的旅行`) },
+  { label: "机票比价", sub: "多平台价格对比", icon: "flyCloud", go: () => go("/pages/search/flight") },
+  { label: "酒店比价", sub: "多平台房价对比", icon: "suitcase", go: () => go("/pages/search/flight?tab=hotel") },
+  { label: "景点推荐", sub: "热门景点攻略", icon: "mountain", go: () => openChat(`${city}有哪些值得去的景点？`) },
+  { label: "美食推荐", sub: "地道本地美食", icon: "cloche", go: () => go("/pages/search/food") },
+  { label: "地图路线", sub: "可视化行程", icon: "map", go: () => go(trip.value ? `/pages/plan/map?id=${trip.value.id}&day=1` : "/pages/plan/map") },
+  { label: "天气查询", sub: "实时天气建议", icon: "weather", go: () => openChat(`${city}这周天气怎么样？`) },
 ];
 
 const entries = [
-  { label: "旅行规划", sub: "智能生成行程", icon: "umbrella", color: "#16a34a", bg: "#e7f6ec", go: () => openChat(`帮我规划${city}的旅行`) },
-  { label: "机票比价", sub: "多平台价格对比", icon: "plane", color: "#2563eb", bg: "#e6eefd", go: () => go("/pages/search/flight") },
-  { label: "酒店比价", sub: "多平台房价对比", icon: "bed", color: "#7c3aed", bg: "#f0e9fd", go: () => go("/pages/search/flight?tab=hotel") },
-  { label: "美食推荐", sub: "当地特色美食", icon: "pin", color: "#e11d48", bg: "#fde8ec", go: () => go("/pages/search/food") },
-  { label: "地图出行", sub: "路线规划导航", icon: "nav", color: "#0d9488", bg: "#e2f5f2", go: () => go(trip.value ? `/pages/plan/map?id=${trip.value.id}&day=1` : "/pages/plan/map") },
-  { label: "天气查询", sub: "实时天气提醒", icon: "weather", color: "#0284c7", bg: "#e3f2fb", go: () => openChat(`${city}这周天气怎么样，适合出去玩吗？`) },
+  { label: "旅行规划", sub: "智能生成行程", icon: "calendar", go: () => openChat(`帮我规划${city}的旅行`) },
+  { label: "机票比价", sub: "多平台价格对比", icon: "flyCloud", go: () => go("/pages/search/flight") },
+  { label: "酒店比价", sub: "多平台房价对比", icon: "suitcase", go: () => go("/pages/search/flight?tab=hotel") },
+  { label: "美食推荐", sub: "当地特色美食", icon: "cloche", go: () => go("/pages/search/food") },
+  { label: "地图出行", sub: "路线规划导航", icon: "map", go: () => go(trip.value ? `/pages/plan/map?id=${trip.value.id}&day=1` : "/pages/plan/map") },
+  { label: "天气查询", sub: "实时天气提醒", icon: "weather", go: () => openChat(`${city}这周天气怎么样，适合出去玩吗？`) },
 ];
 
 onMounted(() => {
@@ -503,7 +505,7 @@ function changeCity(c: string) {
 .entries-row { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
 .d-entry { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 12px; border-radius: 12px; cursor: pointer; }
 .d-entry:hover { background: var(--surface-2); }
-.d-entry-icon { width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; margin-bottom: 4px; }
+.d-entry-icon { margin-bottom: 4px; }
 .d-entry-label { font-weight: 700; font-size: 15px; }
 .d-entry-sub { font-size: 12px; color: var(--muted); }
 
@@ -597,15 +599,6 @@ function changeCity(c: string) {
   background: var(--surface);
 }
 .brand { display: flex; align-items: center; gap: 8px; }
-.logo {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: var(--accent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
 .brand-name { font-weight: 700; font-size: 16px; }
 .topbar-link { padding: 4px; cursor: pointer; }
 
@@ -660,7 +653,6 @@ function changeCity(c: string) {
   padding: 14px 6px;
 }
 .entry { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 2px; cursor: pointer; }
-.entry-icon { width: 46px; height: 46px; border-radius: 14px; display: flex; align-items: center; justify-content: center; }
 .entry-label { font-size: 14px; font-weight: 600; margin-top: 2px; }
 .entry-sub { font-size: 11px; color: var(--muted); }
 

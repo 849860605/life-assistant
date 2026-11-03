@@ -193,6 +193,8 @@ export function legHint(leg: ItineraryLeg | undefined, day: ItineraryDay | null 
 export function needsGeo(it?: { geo?: boolean; days: ItineraryDay[] } | null): boolean {
   if (!it) return false;
   if (!it.geo) return true;
+  // 景点、餐厅还没坐标的再找一次（早先目的地名不规范时会找不到）
+  if (it.days.some((d) => d.items.some((i) => (i.type === "SPOT" || i.type === "FOOD") && i.lng == null))) return true;
   return it.days.some((d) => d.legs?.some((l) => l.mode !== "WALK" && (!l.transit || (l.mode === "DRIVE" && l.taxi == null))));
 }
 

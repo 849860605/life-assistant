@@ -32,6 +32,10 @@ page {
   --ok-soft: #e3f4ea;
   --skill-schedule: #7a4fc7;
   --skill-schedule-soft: #f0eafb;
+  /* 双色图标底下的浅色圆角方块 */
+  --tile-bg: linear-gradient(145deg, #ffffff, #e4ecff);
+  --tile-shadow: 0 2px 6px rgba(47, 107, 242, 0.10), inset 0 0 0 1px rgba(47, 107, 242, 0.10);
+  --brand-shadow: 0 4px 12px rgba(47, 107, 242, 0.16), inset 0 0 0 1px rgba(47, 107, 242, 0.16);
   --radius: 12px;
   --font: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
   --mono: "SF Mono", Menlo, Consolas, monospace;
@@ -61,6 +65,9 @@ page {
     --ok-soft: #173326;
     --skill-schedule: #b9a0ea;
     --skill-schedule-soft: #2a2140;
+    --tile-bg: linear-gradient(145deg, #27324c, #1b2438);
+    --tile-shadow: inset 0 0 0 1px rgba(122, 167, 255, 0.18);
+    --brand-shadow: 0 4px 12px rgba(0, 0, 0, 0.25), inset 0 0 0 1px rgba(122, 167, 255, 0.28);
   }
 }
 

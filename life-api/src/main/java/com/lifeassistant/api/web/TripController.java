@@ -344,6 +344,12 @@ public class TripController {
                 .body(tripPdf.render(detail));
     }
 
+    /** DELETE /api/v1/trips/{id}/versions/{version}：只删一个版本；删的是正在用的版本时行程退回剩下的最新一版。 */
+    @DeleteMapping("/{id}/versions/{version}")
+    public ApiResponse<Trip> deleteVersion(@PathVariable long id, @PathVariable int version) {
+        return ApiResponse.ok(tripService.deleteVersion(authFacade.current(), id, version));
+    }
+
     /** GET /api/v1/trips/{id}/versions：行程的全部历史版本。 */
     @GetMapping("/{id}/versions")
     public ApiResponse<List<TripVersion>> versions(@PathVariable long id) {

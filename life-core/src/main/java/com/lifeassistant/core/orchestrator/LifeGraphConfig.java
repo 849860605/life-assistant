@@ -34,6 +34,8 @@ import static com.alibaba.cloud.ai.graph.action.AsyncNodeAction.node_async;
 public class LifeGraphConfig {
 
     public static final String INPUT = "input";
+    /** 用户点的是快捷回复：沿用上一轮的技能 */
+    public static final String FOLLOW_UP = "followUp";
     public static final String USER_ID = "userId";
     public static final String SPACE_ID = "spaceId";
     public static final String CONVERSATION_ID = "conversationId";
@@ -66,13 +68,17 @@ public class LifeGraphConfig {
                                    BaseCheckpointSaver graphCheckpointSaver) throws GraphStateException {
         StateGraph graph = new StateGraph("life", () -> {
             Map<String, KeyStrategy> strategies = new HashMap<>();
-            for (String key : Set.of(INPUT, USER_ID, SPACE_ID, CONVERSATION_ID, SKILL_ID, ANSWER, "messages")) {
+            for (String key : Set.of(INPUT, USER_ID, SPACE_ID, CONVERSATION_ID, SKILL_ID, ANSWER, FOLLOW_UP, "messages")) {
                 strategies.put(key, KeyStrategy.REPLACE);
             }
             return strategies;
         });
 
         graph.addNode(NODE_ROUTE, node_async(state -> {
+            String last = state.value(SKILL_ID, String.class).orElse(null);
+            if (state.value(FOLLOW_UP, Boolean.class).orElse(false) && last != null && skillRegistry.contains(last)) {
+                return Map.of(SKILL_ID, last);
+            }
             RouterService.RouteDecision decision = routerService.route(
                     state.value(INPUT, ""),
                     state.value(SKILL_ID, String.class).orElse(null),

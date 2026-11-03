@@ -50,6 +50,36 @@
       <button class="btn ghost small self-start" @click="testPush">发一条测试推送</button>
     </view>
 
+    <!-- 每日简报 -->
+    <view class="section-title">每日简报</view>
+    <view class="card stack">
+      <view class="muted small">每天早上推一条：天气、今天的日程、快出发的行程（倒计时、目的地天气、还没订的机票酒店）。内容直接来自数据，不是 AI 写的。</view>
+      <view class="row between">
+        <text>每天推送</text>
+        <switch :checked="brief.enabled" color="#2563EB" @change="toggleBrief" />
+      </view>
+      <view class="row between">
+        <text>推送时间</text>
+        <picker mode="time" :value="brief.sendTime" @change="brief.sendTime = $event.detail.value; saveBrief()">
+          <view class="input picker">{{ brief.sendTime }}</view>
+        </picker>
+      </view>
+      <view class="row">
+        <input id="brief-city" v-model="brief.city" class="input grow" :placeholder="brief.suggestedCity ? `看天气的城市（不填用 ${brief.suggestedCity}）` : '看天气的城市，比如：深圳'" />
+        <button class="btn small" @click="saveBrief">保存</button>
+      </view>
+      <view v-if="!brief.hasChannel" class="small warn-t">还没填 Bark Key，填好上面的推送才能收到</view>
+      <view v-if="todayBrief" class="brief">
+        <view class="b-title">{{ todayBrief.title }}</view>
+        <view v-for="s in todayBrief.sections" :key="s.key" class="b-sec" @click="s.url && go(s.url)">
+          <view class="b-head">{{ s.title }}</view>
+          <view v-for="l in s.lines" :key="l" class="b-line">{{ l }}</view>
+        </view>
+        <view v-if="!todayBrief.sections.length" class="muted small">今天没有日程和行程</view>
+      </view>
+      <button class="btn ghost small self-start" :disabled="!brief.hasChannel || pushing" @click="pushBrief">{{ pushing ? "推送中…" : "现在推一条试试" }}</button>
+    </view>
+
     <!-- 日历订阅 -->
     <view class="section-title">日历订阅</view>
     <view class="card stack">
@@ -78,7 +108,7 @@ import { reactive, ref } from "vue";
 import { onShow } from "@dcloudio/uni-app";
 import { api } from "../../api";
 import { showError, toLogin } from "../../api/http";
-import type { MemoryCategory, MemoryItem, TokenView, UserView } from "../../api/types";
+import type { Brief, BriefSettings, MemoryCategory, MemoryItem, TokenView, UserView } from "../../api/types";
 
 const CATEGORY: Record<MemoryCategory, string> = {
   PROFILE: "基本信息",
@@ -96,6 +126,48 @@ const tokens = ref<TokenView[]>([]);
 const barkKey = ref("");
 const feedUrl = ref("");
 const memoryForm = reactive({ categoryIndex: 1, content: "" });
+const brief = reactive<BriefSettings>({ enabled: true, sendTime: "07:30", city: "", hasChannel: false });
+const todayBrief = ref<Brief | null>(null);
+const pushing = ref(false);
+
+/** 读简报设置和今天的内容；简报出错不影响页面其他部分 */
+async function loadBrief() {
+  try {
+    const [s, b] = await Promise.all([api.briefSettings(), api.brief()]);
+    Object.assign(brief, s, { city: s.city || "" });
+    todayBrief.value = b;
+  } catch (e) {
+    showError(e);
+  }
+}
+
+function toggleBrief(e: any) {
+  brief.enabled = e.detail.value;
+  saveBrief();
+}
+
+async function saveBrief() {
+  try {
+    const s = await api.saveBriefSettings({ enabled: brief.enabled, sendTime: brief.sendTime, city: brief.city?.trim() || null });
+    Object.assign(brief, s, { city: s.city || "" });
+    todayBrief.value = await api.brief();
+    uni.showToast({ title: "已保存", icon: "success" });
+  } catch (e) {
+    showError(e);
+  }
+}
+
+async function pushBrief() {
+  pushing.value = true;
+  try {
+    todayBrief.value = await api.pushBrief();
+    uni.showToast({ title: "已推送，看看手机", icon: "none" });
+  } catch (e) {
+    showError(e);
+  } finally {
+    pushing.value = false;
+  }
+}
 
 onShow(async () => {
   try {
@@ -106,6 +178,7 @@ onShow(async () => {
   } catch (e) {
     showError(e);
   }
+  loadBrief();
 });
 
 /** 手动添加一条记忆；键用时间戳生成，同类同键才会覆盖，所以不会冲掉别的记忆。 */
@@ -134,6 +207,7 @@ async function saveBark() {
   try {
     await api.configureBark(barkKey.value.trim());
     uni.showToast({ title: "已保存", icon: "success" });
+    brief.hasChannel = true;
   } catch (e) {
     showError(e);
   }
@@ -227,6 +301,13 @@ function go(url: string) {
 .self-start { align-self: flex-start; }
 .row { display: flex; gap: 8px; align-items: center; }
 .row .btn { margin: 0; }
+.between { justify-content: space-between; }
+.warn-t { color: var(--price); }
+.brief { background: var(--surface-2); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.b-title { font-weight: 600; font-size: 14px; }
+.b-sec { cursor: pointer; }
+.b-head { font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+.b-line { font-size: 13px; line-height: 1.6; color: var(--ink); }
 .feed { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; background: var(--surface-2); padding: 10px; border-radius: 8px; }
 .feed .btn { margin: 0; }
 .feed-url { flex: 1; min-width: 0; font-family: var(--mono); font-size: 12px; word-break: break-all; }

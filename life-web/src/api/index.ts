@@ -1,5 +1,7 @@
 import { request, upload } from "./http";
 import type {
+  Brief,
+  BriefSettings,
   UploadView,
   BookingState, ChangeReason, ChatMessage, Conversation, DayPreview, FlightPick, FlightPreview, FlightRules, FlightSearch, FoodResult, DayTickets, HotelComparison, HotelSearchResult, SpotRules, TicketProduct, TuniuTicket, TicketSpot, TuniuCabin, StayPick, StayPreview, Meal, MealPreview, MemoryCategory, MemoryItem, OptimizeGoal, Place, PlacePick,
   ScheduleEvent, TokenView,
@@ -25,6 +27,11 @@ export const api = {
   conversations: () => request<Conversation[]>("GET", "/api/v1/conversations?limit=50"),
   createConversation: () => request<Conversation>("POST", "/api/v1/conversations"),
   deleteConversation: (id: string) => request<void>("DELETE", `/api/v1/conversations/${id}`),
+  brief: () => request<Brief>("GET", "/api/v1/brief"),
+  briefSettings: () => request<BriefSettings>("GET", "/api/v1/brief/settings"),
+  saveBriefSettings: (s: { enabled: boolean; sendTime: string; city?: string | null }) =>
+    request<BriefSettings>("PUT", "/api/v1/brief/settings", s),
+  pushBrief: () => request<Brief>("POST", "/api/v1/brief/push"),
   /** 上传文件并识别，图片和扫描件要十几秒 */
   uploadFile: (file: { path: string; name?: string; file?: File }) => upload<UploadView>("/api/v1/files", file),
   messages: (id: string) => request<ChatMessage[]>("GET", `/api/v1/conversations/${id}/messages?limit=200`),
@@ -37,6 +44,7 @@ export const api = {
   confirmTrip: (id: number) => request<Trip>("POST", `/api/v1/trips/${id}/confirm`),
   deleteTrip: (id: number) => request<void>("DELETE", `/api/v1/trips/${id}`),
   copyTrip: (id: number, start?: string) => request<TripDetail>("POST", `/api/v1/trips/${id}/copy` + qs({ start })),
+  deleteTripVersion: (id: number, version: number) => request<void>("DELETE", `/api/v1/trips/${id}/versions/${version}`),
   restoreVersion: (id: number, version: number) =>
     request<TripDetail>("POST", `/api/v1/trips/${id}/versions/${version}/restore`),
   setBooking: (id: number, targetId: string, status: BookingState) =>

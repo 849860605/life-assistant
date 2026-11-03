@@ -1,20 +1,23 @@
 <template>
-  <view class="shell" :class="{ wide }">
+  <view class="shell" :class="{ wide, fill: fill && wide }">
     <view v-if="wide" class="sidebar">
       <view class="brand" @click="goKey('home')">
-        <view class="logo"><Icon name="chat" :size="16" color="#fff" /></view>
-        <text class="brand-name">生活助手</text>
+        <BrandMark :size="40" />
+        <view class="brand-text">
+          <view class="brand-name">星络 <text class="brand-en">Xinglo</text></view>
+          <view class="brand-sub">旅行 · 日程 · 出行</view>
+        </view>
       </view>
       <view class="nav">
         <template v-for="n in NAV" :key="n.key">
           <view class="nav-item" :class="{ on: n.key === active || (n.children && !opened(n) && n.children.some((c) => c.key === active)) }" @click="n.children ? toggleGroup(n.key) : go(n)">
-            <Icon :name="n.icon" :size="18" :color="n.key === active || n.children?.some((c) => c.key === active) ? 'var(--accent)' : 'var(--ink)'" />
+            <DuoIcon :name="n.icon" :size="20" :tile="30" />
             <text>{{ n.label }}</text>
             <Icon v-if="n.children" class="nav-caret" :class="{ open: opened(n) }" name="down" :size="14" color="var(--muted)" />
           </view>
           <template v-if="n.children && opened(n)">
             <view v-for="c in n.children" :key="c.key" class="nav-item sub" :class="{ on: c.key === active }" @click="go(c)">
-              <Icon :name="c.icon" :size="16" :color="c.key === active ? 'var(--accent)' : 'var(--ink)'" />
+              <DuoIcon :name="c.icon" :size="17" :tile="26" />
               <text>{{ c.label }}</text>
             </view>
           </template>
@@ -68,6 +71,8 @@ import { api } from "../api";
 import { getToken } from "../api/http";
 import CityPicker from "./CityPicker.vue";
 import Icon from "./Icon.vue";
+import BrandMark from "./BrandMark.vue";
+import DuoIcon from "./DuoIcon.vue";
 import { cityCover } from "../utils/cover";
 import { cityOf, currentCity, setCurrentCity } from "../utils/place";
 import { useWide } from "../utils/screen";
@@ -75,11 +80,13 @@ import { useWide } from "../utils/screen";
 /**
  * 页面外壳：宽屏（电脑）时左边是导航栏和最近行程，上面是搜索和城市天气；窄屏（手机）时只显示内容，
  * 导航交给底部标签栏。每个页面都包一层，active 是当前高亮的导航项。
+ * fill 为 true 时（电脑）整个外壳正好一屏高，内容区填满顶栏下面的空间，给对话这类自己滚动的页面用。
  */
-const props = withDefaults(defineProps<{ active?: string; showRecent?: boolean; hideTopbar?: boolean }>(), {
+const props = withDefaults(defineProps<{ active?: string; showRecent?: boolean; hideTopbar?: boolean; fill?: boolean }>(), {
   active: "",
   showRecent: true,
   hideTopbar: false,
+  fill: false,
 });
 
 interface NavItem {
@@ -98,11 +105,11 @@ const latestId = ref<number | null>(null);
 const NAV = computed<NavItem[]>(() => [
   { key: "home", label: "首页", icon: "home", url: "/pages/home/home" },
   { key: "chat", label: "AI 对话", icon: "chat", url: "/pages/chat/chat" },
-  { key: "plan", label: "旅行规划", icon: "users", url: latestId.value ? `/pages/trips/detail?id=${latestId.value}` : "/pages/chat/chat" },
+  { key: "plan", label: "旅行规划", icon: "calendar", url: latestId.value ? `/pages/trips/detail?id=${latestId.value}` : "/pages/chat/chat" },
   {
     key: "travel",
     label: "机票酒店",
-    icon: "plane",
+    icon: "suitcase",
     url: "",
     children: [
       { key: "flight", label: "机票比价", icon: "plane", url: latestId.value ? `/pages/search/flight?trip=${latestId.value}` : "/pages/search/flight" },
@@ -110,10 +117,10 @@ const NAV = computed<NavItem[]>(() => [
     ],
   },
   { key: "food", label: "美食推荐", icon: "food", url: latestId.value ? `/pages/plan/food?id=${latestId.value}` : "/pages/search/food" },
-  { key: "ticket", label: "景点门票", icon: "ticket", url: latestId.value ? `/pages/search/ticket?trip=${latestId.value}` : "/pages/search/ticket" },
-  { key: "map", label: "地图出行", icon: "nav", url: "/pages/plan/map" },
+  { key: "ticket", label: "景点门票", icon: "mountain", url: latestId.value ? `/pages/search/ticket?trip=${latestId.value}` : "/pages/search/ticket" },
+  { key: "map", label: "地图出行", icon: "map", url: "/pages/plan/map" },
   { key: "weather", label: "天气查询", icon: "weather", url: `/pages/weather/weather?city=${encodeURIComponent(city)}` + (latestId.value ? `&trip=${latestId.value}` : "") },
-  { key: "trips", label: "我的行程", icon: "trip", url: "/pages/trips/trips" },
+  { key: "trips", label: "我的行程", icon: "route", url: "/pages/trips/trips" },
   { key: "fav", label: "我的收藏", icon: "heart", url: "/pages/discover/discover" },
 ]);
 
@@ -211,14 +218,16 @@ function search() {
   display: flex;
   flex-direction: column;
 }
-.brand { display: flex; align-items: center; gap: 8px; padding: 4px 8px 18px; cursor: pointer; }
-.logo { width: 30px; height: 30px; border-radius: 9px; background: var(--accent); display: flex; align-items: center; justify-content: center; }
-.brand-name { font-size: 17px; font-weight: 800; }
+.brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px 18px; cursor: pointer; }
+.brand-text { min-width: 0; }
+.brand-name { font-size: 17px; font-weight: 800; line-height: 1.2; }
+.brand-en { font-size: 14px; font-weight: 700; color: var(--accent); }
+.brand-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
 .nav { display: flex; flex-direction: column; gap: 2px; }
-.nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; font-size: 14px; cursor: pointer; }
+.nav-item { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 12px; font-size: 14px; cursor: pointer; }
 .nav-item:hover { background: var(--surface-2); }
 .nav-item.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
-.nav-item.sub { padding-left: 34px; font-size: 13px; }
+.nav-item.sub { padding-left: 24px; font-size: 13px; }
 .nav-caret { margin-left: auto; transition: transform 0.15s; }
 .nav-caret.open { transform: rotate(180deg); }
 .recent { margin-top: auto; padding-top: 18px; }
@@ -270,4 +279,7 @@ function search() {
   justify-content: center;
 }
 .content { flex: 1; min-width: 0; }
+.shell.fill { height: 100vh; min-height: 0; }
+.shell.fill .main { min-height: 0; }
+.shell.fill .content { min-height: 0; display: flex; flex-direction: column; }
 </style>

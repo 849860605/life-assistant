@@ -2,6 +2,8 @@ package com.lifeassistant.skill.travel.trip;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lifeassistant.common.auth.UserCtx;
 import com.lifeassistant.common.error.BizException;
 import com.lifeassistant.common.error.ErrorCode;
@@ -25,6 +27,7 @@ public class TripService {
     private final TripMapper tripMapper;
     private final TripVersionMapper versionMapper;
     private final ScheduleService scheduleService;
+    private final ObjectMapper objectMapper;
 
     /** 出游技能建的日程在 t_schedule_event.source 里的取值，source_ref 是行程 id */
     public static final String SCHEDULE_SOURCE = "TRAVEL";
@@ -122,6 +125,61 @@ public class TripService {
         Trip trip = getOwned(ctx, tripId);
         scheduleService.deleteBySource(ctx, SCHEDULE_SOURCE, trip.getId().toString());
         tripMapper.deleteById(trip.getId());
+    }
+
+    /**
+     * 只删一个版本，行程和其他版本都还在；只剩这一版时不能删（要删就删整个行程）。
+     * 删的是正在用的版本时，行程退回到剩下的最新一版，出发和结束日期也按那一版改回来。
+     */
+    @Transactional
+    public Trip deleteVersion(UserCtx ctx, long tripId, int version) {
+        Trip trip = getOwned(ctx, tripId);
+        List<TripVersion> rest = versionMapper.selectList(new LambdaQueryWrapper<TripVersion>()
+                .select(TripVersion::getVersion, TripVersion::getItinerary)
+                .eq(TripVersion::getTripId, tripId)
+                .ne(TripVersion::getVersion, version)
+                .orderByDesc(TripVersion::getVersion));
+        if (rest.isEmpty()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "只剩这一个版本了，要删就删整个行程");
+        }
+        int deleted = versionMapper.delete(new LambdaQueryWrapper<TripVersion>()
+                .eq(TripVersion::getTripId, tripId)
+                .eq(TripVersion::getVersion, version));
+        if (deleted == 0) {
+            throw BizException.notFound("行程版本");
+        }
+        int oldVer = trip.getCurrentVer();
+        if (oldVer != version) {
+            return trip;
+        }
+        TripVersion back = rest.get(0);
+        trip.setCurrentVer(back.getVersion());
+        applyDates(trip, back.getItinerary());
+        trip.setUpdatedAt(OffsetDateTime.now());
+        // 和保存新版本一样按旧版本号条件更新，同时有人在改就让这次删除失败回滚
+        int updated = tripMapper.update(trip, new LambdaUpdateWrapper<Trip>()
+                .eq(Trip::getId, tripId)
+                .eq(Trip::getCurrentVer, oldVer));
+        if (updated == 0) {
+            throw new BizException(ErrorCode.CONFLICT, "行程刚被修改过，请刷新后再删");
+        }
+        return trip;
+    }
+
+    /** 按结构化行程第一天和最后一天改出发、结束日期；没有结构化行程或日期不对就不动。 */
+    private void applyDates(Trip trip, String itinerary) {
+        if (itinerary == null) {
+            return;
+        }
+        try {
+            JsonNode days = objectMapper.readTree(itinerary).path("days");
+            if (days.isArray() && !days.isEmpty()) {
+                trip.setStartDate(LocalDate.parse(days.get(0).path("date").asText()));
+                trip.setEndDate(LocalDate.parse(days.get(days.size() - 1).path("date").asText()));
+            }
+        } catch (Exception e) {
+            // 日期解析不了就沿用原来的
+        }
     }
 
     /** 行程关联的日程（出游技能建提醒时带了 tripId 的那些）。 */

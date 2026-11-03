@@ -116,6 +116,10 @@ public class TravelSkill implements LifeSkill {
                 5. 酒店：
                    - 按地点找酒店并比价：直接调用一次 findAndCompareHotels（内部会用 RollingGo 选候选，再并行查飞猪、
                      携程、美团），不要先 searchHotels 再 compareHotelPrices。它返回 error 时，用地图工具找酒店再 compareHotelPrices。
+                     用户在对话里提过住宿要求（安静、有窗、早餐、带娃、离地铁近等）就填 needs。
+                   - findAndCompareHotels 的结果已经按网上口碑和用户要求排好序：逐家点评时顺序和 results 完全一致，
+                     理由引用 review 里的出处和亮点（例如"美团 4.8 分、5000 多条评价，住客说安静干净"），不要自己编评分，
+                     也不要因为价格或名气调换顺序；用户明确说只看便宜的，再按价格挑。
                    - 用户点名了具体酒店：用 compareHotelPrices。只想看看有哪些酒店、不比价时，用 searchHotels。
                    - 同一轮里互不依赖的查询（比如天气、路线、酒店）一起发起，它们会并行执行。
                    - 点评时提一句各平台价格口径不同、以预订页为准；平台匹配到的酒店名和查询名不一致时要指出来。

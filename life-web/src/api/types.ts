@@ -39,12 +39,14 @@ export interface Card {
 
 /** 对话流里的一个事件：route 选中技能，delta 增量文字，card 卡片，done 结束，error 出错。 */
 export interface ChatEvent {
-  type: "route" | "delta" | "card" | "done" | "error";
+  type: "route" | "delta" | "card" | "suggestions" | "done" | "error";
   skillId?: string;
   skillName?: string;
   text?: string;
   message?: string;
   card?: Card;
+  /** 回答下面的快捷回复 */
+  suggestions?: string[];
 }
 
 export interface Trip {
@@ -672,4 +674,20 @@ export interface UploadView {
   chars: number;
   preview: string;
   error?: string | null;
+}
+
+/** 每日简报的设置：city 为空时 suggestedCity 是从记忆里猜的常住城市 */
+export interface BriefSettings {
+  enabled: boolean;
+  sendTime: string;
+  city?: string | null;
+  suggestedCity?: string | null;
+  hasChannel: boolean;
+}
+
+/** 一份每日简报：几段，每段几行字 */
+export interface Brief {
+  date: string;
+  title: string;
+  sections: { key: string; title: string; lines: string[]; url?: string }[];
 }

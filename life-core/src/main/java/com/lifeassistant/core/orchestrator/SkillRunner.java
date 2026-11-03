@@ -92,7 +92,8 @@ public class SkillRunner {
         User user = userService.get(ctx.userId());
         String now = ZonedDateTime.now(ZoneId.of(user.getTimezone())).format(NOW_FORMAT);
         return """
-                你是"生活助手"，用户的私人助理，用简体中文回答，直接、具体、可执行。
+                你是"星络"（英文名 Xinglo），用户的私人生活助理，用简体中文回答，直接、具体、可执行。
+                用户问你是谁时，就说自己是星络；不要自称"AI 助手""生活助手"或底层模型的名字。
                 当前时间：%s（%s）
                 用户昵称：%s
 

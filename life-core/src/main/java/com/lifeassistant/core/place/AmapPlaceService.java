@@ -91,12 +91,43 @@ public class AmapPlaceService {
         return StringUtils.hasText(key);
     }
 
-    /** 关键字搜地点，city 限定在城市内；types 是高德分类编码，可空。 */
+    /**
+     * 关键字搜地点，city 限定在城市内；types 是高德分类编码，可空。
+     * city 先换成高德的 citycode：高德不认识的地名（"深圳梧桐山""蒙东（沈阳进·赤峰出）"）会被忽略，变成全国搜，排在前面的全是北京。
+     */
     public List<Place> search(String keywords, String city, String types, int size) {
-        return cached("search|" + keywords + "|" + city + "|" + types + "|" + size, () -> places(get("/v5/place/text",
-                "keywords", nullToEmpty(keywords), "types", nullToEmpty(types), "region", nullToEmpty(city),
-                "city_limit", StringUtils.hasText(city) ? "true" : "false", "page_size", String.valueOf(size),
+        String region = region(city).orElse(null);
+        return cached("search|" + keywords + "|" + region + "|" + types + "|" + size, () -> places(get("/v5/place/text",
+                "keywords", nullToEmpty(keywords), "types", nullToEmpty(types), "region", nullToEmpty(region),
+                "city_limit", region != null ? "true" : "false", "page_size", String.valueOf(size),
                 "show_fields", "photos,business")));
+    }
+
+    /**
+     * 把行程目的地这类不规范的地名换成高德的 citycode：去掉括号里的说明，取第一段（"深圳·梧桐山" → 深圳），
+     * 整串和第一段都试；已经是数字编码的原样返回。都查不到返回空，调用方自己决定要不要全国搜。
+     */
+    public Optional<String> region(String city) {
+        if (!StringUtils.hasText(city)) {
+            return Optional.empty();
+        }
+        String raw = city.trim();
+        if (raw.matches("\\d{3,6}")) {
+            return Optional.of(raw);
+        }
+        String clean = raw.replaceAll("[(（].*?[)）]", "").trim();
+        String first = clean.split("[·・,，、/\\s]")[0].trim();
+        for (String name : List.of(clean, first)) {
+            try {
+                Optional<String> code = cityCode(name).filter(c -> c.matches("\\d{3,6}"));
+                if (code.isPresent()) {
+                    return code;
+                }
+            } catch (RuntimeException e) {
+                log.debug("城市 {} 的 citycode 查询失败：{}", name, e.getMessage());
+            }
+        }
+        return Optional.empty();
     }
 
     /** 周边搜索：以坐标为中心、半径 radius 米内，按综合热度排。 */

@@ -26,6 +26,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
@@ -113,10 +114,15 @@ public class TripEditor {
             types = null;
         }
         String city = detail.trip().getDestination();
+        double[] anchor = anchor(itinerary, item, city);
+        if (anchor == null && places.region(city).isEmpty()) {
+            // 不知道在哪：宁可不给候选，也不要全国搜出一堆北京的地点
+            return List.of();
+        }
         Map<String, AmapPlaceService.Place> merged = new LinkedHashMap<>();
         for (String word : words.isEmpty() ? java.util.Collections.<String>singletonList(null) : words) {
-            List<AmapPlaceService.Place> found = item.located()
-                    ? places.around(item.lng(), item.lat(), word, types, AROUND_RADIUS, 25)
+            List<AmapPlaceService.Place> found = anchor != null
+                    ? places.around(anchor[0], anchor[1], word, types, AROUND_RADIUS, 25)
                     : places.search(word == null ? "景点" : word, city, types, 25);
             found.forEach(p -> merged.putIfAbsent(p.id() == null ? p.name() : p.id(), p));
         }
@@ -129,6 +135,29 @@ public class TripEditor {
                 .sorted(Comparator.comparing(AmapPlaceService.Place::rating, Comparator.nullsLast(Comparator.reverseOrder())))
                 .limit(MAX_ALTERNATIVES)
                 .toList();
+    }
+
+    /**
+     * 找候选时以哪里为中心：这一项有坐标就用它；没有就按名称在目的地城市里找一次；
+     * 还找不到用同一天第一个有坐标的地点。都没有返回 null。
+     */
+    private double[] anchor(Itinerary itinerary, Itinerary.Item item, String city) {
+        if (item.located()) {
+            return new double[]{item.lng(), item.lat()};
+        }
+        try {
+            if (places.region(city).isPresent()) {
+                Optional<AmapPlaceService.Place> found = places.find(item.name(), city);
+                if (found.isPresent() && found.get().lng() != null) {
+                    return new double[]{found.get().lng(), found.get().lat()};
+                }
+            }
+        } catch (RuntimeException e) {
+            log.warn("找 {} 的位置失败：{}", item.name(), e.getMessage());
+        }
+        return itinerary.days().stream().filter(d -> d.items().contains(item)).findFirst()
+                .flatMap(d -> d.items().stream().filter(Itinerary.Item::located).findFirst())
+                .map(i -> new double[]{i.lng(), i.lat()}).orElse(null);
     }
 
     /** 把某项换成选中的地点，时间不变，重算当天路程。 */
@@ -1425,10 +1454,15 @@ public class TripEditor {
                 return known;
             }
             Itinerary itinerary = parse(detail.version().getItinerary());
-            if (itinerary == null || Boolean.TRUE.equals(itinerary.geo()) && !missingRoutes(itinerary)) {
+            if (itinerary == null || Boolean.TRUE.equals(itinerary.geo()) && !missingRoutes(itinerary)
+                    && !TripGeo.missingPlaces(itinerary)) {
                 return detail;
             }
+            // 还没坐标的地点每次打开都再找一次（高德查询有缓存）；结果没变就不写库
             String json = json(geo.enrich(itinerary, detail.trip().getDestination()));
+            if (json.equals(json(itinerary))) {
+                return detail;
+            }
             tripService.updateItinerary(tripId, version, json);
             detail.version().setItinerary(json);
             return detail;

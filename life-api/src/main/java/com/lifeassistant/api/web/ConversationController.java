@@ -2,6 +2,8 @@ package com.lifeassistant.api.web;
 
 import com.lifeassistant.common.api.ApiResponse;
 import com.lifeassistant.common.auth.UserCtx;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.lifeassistant.core.audit.ToolCallLogMapper;
 import com.lifeassistant.core.auth.AuthFacade;
 import com.lifeassistant.core.conversation.ChatMessageEntity;
 import com.lifeassistant.core.conversation.Conversation;
@@ -26,6 +28,7 @@ import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Flux;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 会话接口：会话的增删查、历史消息查询，以及流式发送消息。
@@ -39,9 +42,15 @@ public class ConversationController {
     private final ConversationService conversationService;
     private final ChatOrchestrator chatOrchestrator;
     private final UploadService uploadService;
+    private final ToolCallLogMapper callLog;
+    private final ObjectMapper objectMapper;
 
-    /** 发消息请求体：内容最长 4000 字；files 是这条消息带的上传文件 id，最多 5 个。 */
-    public record SendMessageRequest(@NotBlank @Size(max = 4000) String content, @Size(max = 5) List<String> files) {
+    /**
+     * 发消息请求体：内容最长 4000 字；files 是这条消息带的上传文件 id，最多 5 个；
+     * chip 为 true 表示点的是上一条回答下面的快捷回复。
+     */
+    public record SendMessageRequest(@NotBlank @Size(max = 4000) String content, @Size(max = 5) List<String> files,
+                                     Boolean chip) {
     }
 
     /** POST /api/v1/conversations：新建一个无标题会话，标题在首轮对话后自动生成。 */
@@ -72,7 +81,17 @@ public class ConversationController {
         // 身份必须在请求线程里取，后面的图和工具都在其他线程执行
         UserCtx ctx = authFacade.current();
         String input = uploadService.compose(ctx, request.content(), request.files());
-        return chatOrchestrator.chat(ctx, id, input, request.content())
+        boolean chip = Boolean.TRUE.equals(request.chip());
+        if (chip) {
+            // 记下点了哪个快捷回复，以后看哪些有用
+            try {
+                callLog.insert(new ToolCallLogMapper.Row(ctx.userId(), id, null, "CHIP", "suggestion",
+                        objectMapper.writeValueAsString(Map.of("text", request.content())), null, null, true, null));
+            } catch (Exception e) {
+                // 统计失败不影响发消息
+            }
+        }
+        return chatOrchestrator.chat(ctx, id, input, request.content(), chip)
                 .map(event -> ServerSentEvent.builder(event).event(event.type()).build());
     }
 

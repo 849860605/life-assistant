@@ -24,7 +24,7 @@ public class RouterService {
 
     /** 简短确认的开头词，配合长度上限使用 */
     private static final Pattern FOLLOW_UP = Pattern.compile(
-            "^(可以|好的?|行|嗯|ok|OK|确认|没问题|就这样|就按|按这个|同意|对的?|是的|保存|存|都存|只存|记录|记一下|记下|帮我记|帮我存)");
+            "^(可以|好的?|行|嗯|ok|OK|确认|确定|没问题|就这样|就按|按这个|同意|对的?|是的|保存|存|都存|只存|记录|记一下|记下|帮我记|帮我存)");
 
     private final ChatModelRegistry chatModels;
     private final SkillRegistry skillRegistry;

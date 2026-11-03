@@ -7,7 +7,7 @@ import type { ChatEvent } from "./types";
  */
 export async function streamMessage(conversationId: string, content: string,
                                     onEvent: (event: ChatEvent) => void, signal?: AbortSignal,
-                                    files: string[] = []): Promise<void> {
+                                    extra: { files?: string[]; chip?: boolean } = {}): Promise<void> {
   const res = await fetch(`${API_BASE}/api/v1/conversations/${conversationId}/messages`, {
     method: "POST",
     headers: {
@@ -15,7 +15,7 @@ export async function streamMessage(conversationId: string, content: string,
       "Content-Type": "application/json",
       Accept: "text/event-stream",
     },
-    body: JSON.stringify({ content, files }),
+    body: JSON.stringify({ content, files: extra.files || [], chip: !!extra.chip }),
     signal,
   });
   if (res.status === 401) {

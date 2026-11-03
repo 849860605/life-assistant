@@ -6,7 +6,7 @@
 		},
 		{
 			"path": "pages/chat/chat",
-			"style": { "navigationBarTitleText": "生活助手" }
+			"style": { "navigationBarTitleText": "星络" }
 		},
 		{
 			"path": "pages/login/login",
@@ -94,7 +94,7 @@
 	},
 	"globalStyle": {
 		"navigationBarTextStyle": "black",
-		"navigationBarTitleText": "生活助手",
+		"navigationBarTitleText": "星络",
 		"navigationBarBackgroundColor": "#FFFFFF",
 		"backgroundColor": "#F4F6FA"
 	}

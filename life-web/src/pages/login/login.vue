@@ -1,15 +1,15 @@
 <template>
   <view class="login">
     <view class="topbar">
-      <view class="logo"><Icon name="send" :size="18" color="#fff" /></view>
-      <text class="logo-text">生活助手</text>
+      <BrandMark :size="32" />
+      <text class="logo-text">星络 Xinglo</text>
     </view>
 
     <view class="main">
       <!-- 左侧介绍：背景图放在 static/login/hero.jpg，没有就只显示渐变 -->
       <view class="intro">
         <view class="intro-head">
-          <view class="title">生活助手</view>
+          <view class="title">星络</view>
           <view class="slogan"><text class="ai">AI</text> 帮你规划行程、比价预订、轻松出行</view>
         </view>
         <view class="features">
@@ -46,7 +46,7 @@
 
       <!-- 右侧登录卡片 -->
       <view class="panel">
-        <view class="panel-title">登录生活助手</view>
+        <view class="panel-title">登录星络</view>
         <view class="panel-sub">登录后可保存行程、继续编辑与查看预订信息</view>
 
         <view class="tabs">
@@ -119,6 +119,7 @@ import { api } from "../../api";
 import { setToken } from "../../api/http";
 import { clearMediaTicket } from "../../utils/media";
 import Icon from "../../components/Icon.vue";
+import BrandMark from "../../components/BrandMark.vue";
 
 /** 左侧三条功能介绍 */
 const FEATURES = [
@@ -203,7 +204,6 @@ function forgetOtherUser(userId: number) {
   background: rgba(255, 255, 255, 0.7);
   backdrop-filter: blur(8px);
 }
-.logo { width: 32px; height: 32px; border-radius: 9px; background: var(--accent); display: flex; align-items: center; justify-content: center; }
 .logo-text { font-size: 20px; font-weight: 800; color: #142046; }
 .main {
   flex: 1;

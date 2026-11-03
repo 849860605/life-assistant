@@ -103,6 +103,12 @@ public class TripGeo {
         return new double[]{lngs.get(lngs.size() / 2), lats.get(lats.size() / 2)};
     }
 
+    /** 有没有该有坐标、却还没找到坐标的地点（早先目的地名不规范时会找不到）。 */
+    public static boolean missingPlaces(Itinerary itinerary) {
+        return itinerary.days().stream().flatMap(d -> d.items().stream())
+                .anyMatch(i -> PLACE_TYPES.contains(i.type()) && !i.located() && !"HOTEL".equals(i.type()));
+    }
+
     /** 住宿按酒店名在高德找，补坐标、照片、评分、地址。 */
     public Itinerary.Stay locate(Itinerary.Stay stay, String city) {
         if (stay.located()) {

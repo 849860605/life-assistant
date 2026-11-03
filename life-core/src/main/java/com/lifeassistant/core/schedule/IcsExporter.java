@@ -31,7 +31,7 @@ public class IcsExporter {
         line(ics, "VERSION:2.0");
         line(ics, "PRODID:-//life-assistant//CN");
         line(ics, "CALSCALE:GREGORIAN");
-        line(ics, "X-WR-CALNAME:生活助手");
+        line(ics, "X-WR-CALNAME:星络");
         String stamp = UTC.format(OffsetDateTime.now(ZoneOffset.UTC));
         for (ScheduleEvent event : events) {
             line(ics, "BEGIN:VEVENT");

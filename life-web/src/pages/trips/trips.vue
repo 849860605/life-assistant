@@ -47,10 +47,10 @@
             <text class="menu-item" @click="edit(r.id)">继续编辑</text>
             <text class="menu-item" @click="copy(r.id)">{{ copying === r.id ? "复制中…" : "复制行程" }}</text>
             <text class="menu-item" @click="share">分享</text>
-            <text class="menu-item danger" @click="askDelete(r.id)">删除</text>
+            <text class="menu-item danger" @click="askDelete(r.id)">删除行程</text>
           </view>
           <view v-if="deleting === r.id" class="confirm" @click.stop>
-            <text>删除后找不回来，确定删除「{{ r.title }}」？</text>
+            <text>整个行程连同所有版本都会删掉，找不回来。确定删除「{{ r.title }}」？</text>
             <view class="confirm-acts">
               <button class="btn small danger-btn" @click="doDelete(r.id)">删除</button>
               <button class="btn ghost small" @click="deleting = 0">取消</button>
