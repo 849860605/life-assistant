@@ -63,7 +63,7 @@
                   <view v-else class="tl-img ph" :class="item.type"><Icon :name="TYPE_ICON[item.type] || 'pin'" :size="24" color="#fff" /></view>
                   <view class="tl-body">
                     <view class="tl-name">
-                      <text :class="{ link: item.url }" @click="openUrl(item.url)">{{ item.name }}</text>
+                      <text :class="{ link: itemLink(item) }" @click="openUrl(itemLink(item))">{{ item.name }}</text>
                       <text v-if="item.type === 'SPOT' && (item.rating || 0) >= 4.8" class="must">高分景点</text>
                       <text v-if="item.locked" class="kept-tag">已保留</text>
                       <text v-if="isBooked(item.id)" class="booked-tag">已预约</text>
@@ -75,6 +75,7 @@
                       <text v-if="item.rating" class="star">★ {{ item.rating }}</text>
                       <text v-if="item.address"><Icon name="pin" :size="12" color="var(--muted)" /> {{ item.address }}</text>
                       <text v-if="item.cost" class="cost">¥{{ item.cost }}/人</text>
+                      <text v-if="item.type === 'HOTEL' && itemPrice(item)" class="cost" :class="{ quiet: itemPrice(item)?.price == null }">{{ priceText(itemPrice(item)) }}</text>
                     </view>
                     <view v-if="EDITABLE.includes(item.type)" class="amap-links">
                       <text class="amap" @click.stop="openUrl(amapUrl(item, city))"><Icon name="pin" :size="12" color="var(--accent)" /> 高德地图</text>
@@ -161,6 +162,7 @@
                 <view class="food-name">{{ h.name }}</view>
                 <view class="food-meta"><text v-if="h.rating" class="star">★ {{ h.rating }}</text> <text class="muted">{{ h.category }}</text></view>
                 <view v-if="h.distance != null" class="muted small">距离 {{ distanceText(h.distance) }}</view>
+                <view v-if="nearbyPrice(h)" class="small" :class="nearbyPrice(h)?.price != null ? 'cost' : 'muted'">{{ priceText(nearbyPrice(h)) }}</view>
               </view>
               <button v-if="isCurrent" class="btn ghost small add" :class="{ done: added[h.id] }" :disabled="added[h.id]" @click="addPlace(h, 'HOTEL')">{{ added[h.id] ? "已加入" : "加入行程" }}</button>
             </view>
@@ -214,7 +216,7 @@
       </view>
     </view>
 
-    <ReplaceModal v-if="replacing" :trip-id="tripId" :item="replacing" :day-no="dayIndex + 1" :reason="replaceReason" @close="replacing = null" @saved="onSaved" />
+    <ReplaceModal v-if="replacing" :trip-id="tripId" :item="replacing" :day-no="dayIndex + 1" :reason="replaceReason" :city="city" :check-in="replaceDates[0]" :check-out="replaceDates[1]" @close="replacing = null" @saved="onSaved" />
   </view>
 
   <view v-else class="page">
@@ -370,6 +372,7 @@ import LegRow from "../../components/LegRow.vue";
 import Shell from "../../components/Shell.vue";
 import { useWide } from "../../utils/screen";
 import { doneable, doneText, hm, mdw, openUrl, shortDate } from "../../utils/format";
+import { hotelPrice, loadHotelPrices, priceText, stayDates, type HotelPrice } from "../../utils/hotelPrice";
 import { amapNavUrl, amapUrl, cityOf, dayMapUrl, dayTravel, distanceText, duration as duration2, legFrom, located, needsGeo } from "../../utils/place";
 
 /**
@@ -448,6 +451,47 @@ const dayStay = computed(() => {
   if (!date) return undefined;
   return stays.value.find((st) => st.checkIn <= date && date < st.checkOut) || stays.value.find((st) => st.checkOut === date);
 });
+/** 时间线上酒店项对应的那段住宿：同一个高德地点，或者名字互相包含 */
+function stayOfItem(it: ItineraryItem): Stay | undefined {
+  return stays.value.find((st) => st.poiId && st.poiId === it.poiId) || stays.value.find((st) => it.name.includes(st.name) || st.name.includes(it.name));
+}
+
+/** 酒店项的价格：住宿比过价就用住宿的，没有就按当天入住去各平台现查 */
+function itemPrice(it: ItineraryItem): HotelPrice | undefined {
+  const st = stayOfItem(it);
+  if (st?.price != null) return { loading: false, price: st.price, platform: st.platform, url: st.url };
+  const [checkIn, checkOut] = stayDates(st, day.value?.date);
+  return hotelPrice(it.name, city.value, checkIn, checkOut);
+}
+
+/** 名字上的链接：酒店优先用住宿的预订链接（比价后会更新），其次是这一项自己的、现查到的最低价链接 */
+function itemLink(it: ItineraryItem): string | undefined {
+  if (it.type !== "HOTEL") return it.url;
+  return stayOfItem(it)?.url || it.url || itemPrice(it)?.url;
+}
+
+/** 行程没定住宿时推荐的附近酒店：按当天入住一晚查价 */
+function nearbyPrice(h: Place) {
+  const [checkIn, checkOut] = stayDates(null, day.value?.date);
+  return hotelPrice(h.name, city.value, checkIn, checkOut);
+}
+
+/** 换酒店弹窗查价用的入住、离店日期 */
+const replaceDates = computed(() => (replacing.value ? stayDates(stayOfItem(replacing.value) || dayStay.value, day.value?.date) : [undefined, undefined]));
+
+// 当天的酒店项没有比价过的住宿、或者推荐了附近酒店时，去各平台查价
+watch([day, stays, hotels], () => {
+  for (const it of day.value?.items || []) {
+    if (it.type !== "HOTEL") continue;
+    const st = stayOfItem(it);
+    if (st?.price != null) continue;
+    const [checkIn, checkOut] = stayDates(st, day.value?.date);
+    loadHotelPrices([it.name], city.value, checkIn, checkOut);
+  }
+  const [checkIn, checkOut] = stayDates(null, day.value?.date);
+  loadHotelPrices(hotels.value.slice(0, 2).map((h) => h.name), city.value, checkIn, checkOut);
+}, { immediate: true });
+
 /** 住宿合计：每段每晚价格 × 晚数 */
 const stayCost = computed(() => stays.value.reduce((s, st) => s + (st.price || 0) * nightsOf(st), 0));
 
@@ -1111,6 +1155,7 @@ async function loadVersions() {
 .stop-name { font-weight: 700; }
 .stop-time { font-size: 12px; color: var(--muted); margin-top: 1px; font-variant-numeric: tabular-nums; }
 .cost { color: var(--price); }
+.cost.quiet { color: var(--muted); }
 .stop-note { font-size: 13px; margin-top: 2px; color: var(--ink); opacity: 0.85; }
 .stop-actions { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
 .act {

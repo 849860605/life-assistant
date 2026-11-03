@@ -85,6 +85,7 @@
               </view>
               <view v-if="r.distance != null" class="cand-meta">距原地点 {{ distanceText(r.distance) }} · {{ travelGuess(r.distance) }}</view>
               <view class="cand-meta"><text v-if="r.rating" class="star">★ {{ r.rating }}</text><text v-if="r.rating"> 高德评分</text><text v-if="r.cost"> · 人均 ¥{{ r.cost }}</text></view>
+              <view v-if="isHotel" class="cand-price" :class="{ none: priceOf(r)?.price == null }">{{ priceText(priceOf(r)) }}</view>
               <view v-if="r.address" class="cand-desc">{{ r.address }}</view>
               <text class="amap" @click.stop="openUrl(amapUrl(r))">在高德地图里看 ›</text>
             </view>
@@ -106,6 +107,8 @@
               <text class="swap-name">{{ picked?.name || "请在中间选一个地点" }}</text>
             </view>
             <view class="muted small">{{ item.start }} – {{ item.end }}，时间段不变</view>
+            <view v-if="isHotel && picked" class="swap-price">{{ priceText(priceOf(picked)) }}</view>
+            <view v-if="isHotel" class="muted small">住宿会一起换成新酒店，其他天回酒店的路线也按新酒店重算</view>
           </view>
           <view class="impact">
             <view class="box-title">对当天路线的影响</view>
@@ -141,12 +144,22 @@ import Icon from "./Icon.vue";
 import { amapUrl, compareTotals, distanceText, mapUrl, travelGuess, type CompareRow } from "../utils/place";
 import { openUrl } from "../utils/format";
 import { PREFS, pickOf, sortPlaces, type PlaceSort } from "../utils/replace";
+import { hotelPrice, loadHotelPrices, priceText } from "../utils/hotelPrice";
 
 /**
  * 替换弹窗（电脑行程编辑页）：左边当前项、原因和筛选，中间高德候选，右边替换前后对当天路线的影响。
  * 影响按高德实际路线算（不保存）；确认后存成新版本，把新的行程交给页面。
  */
-const props = defineProps<{ tripId: number; item: ItineraryItem; dayNo: number; reason?: ChangeReason | null }>();
+const props = defineProps<{
+  tripId: number;
+  item: ItineraryItem;
+  dayNo: number;
+  reason?: ChangeReason | null;
+  /** 换酒店时查价用：城市和入住、离店日期 */
+  city?: string;
+  checkIn?: string;
+  checkOut?: string;
+}>();
 const emit = defineEmits<{ (e: "close"): void; (e: "saved", detail: TripDetail): void }>();
 
 const KIND: Record<string, string> = { SPOT: "景点", FOOD: "餐厅", HOTEL: "酒店" };
@@ -174,9 +187,19 @@ const previewError = ref("");
 const impact = ref<CompareRow[]>([]);
 let previewSeq = 0;
 
+const isHotel = computed(() => props.item.type === "HOTEL");
+/** 候选酒店的各平台最低价（换酒店时才查） */
+function priceOf(p: Place) {
+  return hotelPrice(p.name, props.city || "", props.checkIn, props.checkOut);
+}
+
 const prefOptions = computed(() => PREFS[props.item.type] || PREFS.SPOT);
 /** 按范围筛（没有距离的、按城市搜的都留着），再排序 */
 const shown = computed(() => sortPlaces(list.value.filter((p) => p.distance == null || p.distance <= range.value * 1000), sort.value).slice(0, 10));
+// 换酒店时，列出来的候选都去各平台查价（排队查，同时三家）
+watch(shown, (l) => {
+  if (isHotel.value) loadHotelPrices(l.map((p) => p.name), props.city || "", props.checkIn, props.checkOut);
+});
 /** 地图上的字母按距离排，和列表怎么排序无关 */
 const lettered = computed(() => [...shown.value].sort((a, b) => (a.distance ?? 1e9) - (b.distance ?? 1e9)));
 const nearMap = computed(() => {
@@ -232,7 +255,7 @@ async function loadImpact(p: Place) {
   const seq = ++previewSeq;
   previewing.value = true;
   try {
-    const r = await api.previewReplace(props.tripId, props.item.id, pickOf(p));
+    const r = await api.previewReplace(props.tripId, props.item.id, pickOf(p, isHotel.value ? priceOf(p) : undefined));
     if (seq === previewSeq) impact.value = compareTotals(r.beforeTotals, r.afterTotals);
   } catch (e) {
     if (seq === previewSeq) previewError.value = e instanceof Error ? e.message : String(e);
@@ -255,7 +278,7 @@ async function confirm() {
   if (!p || saving.value) return;
   saving.value = true;
   try {
-    emit("saved", await api.replaceItem(props.tripId, props.item.id, pickOf(p), why.value));
+    emit("saved", await api.replaceItem(props.tripId, props.item.id, pickOf(p, isHotel.value ? priceOf(p) : undefined), why.value));
   } catch (e) {
     showError(e);
   } finally {
@@ -322,6 +345,9 @@ async function removeIt() {
 .cand { display: flex; gap: 12px; align-items: center; padding: 10px; border: 1px solid var(--line); border-radius: 14px; margin-bottom: 10px; cursor: pointer; }
 .cand.picked { border: 2px solid var(--accent); background: var(--accent-soft); }
 .cand-img-wrap { position: relative; flex-shrink: 0; }
+.cand-price { font-size: 14px; font-weight: 700; color: var(--price); }
+.cand-price.none { font-weight: 400; font-size: 12px; color: var(--muted); }
+.swap-price { font-size: 13px; font-weight: 700; color: var(--price); }
 .cand-img { width: 130px; height: 96px; border-radius: 10px; }
 .cand-no:empty { display: none; }
 .cand-no { position: absolute; left: 6px; top: 6px; width: 20px; height: 20px; border-radius: 50%; background: #f97316; color: #fff; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; }

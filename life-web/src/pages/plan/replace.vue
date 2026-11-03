@@ -41,6 +41,7 @@
             <view class="tags"><text v-for="t in (r.tags?.length ? r.tags : [r.category])" :key="t" class="tag">{{ t }}</text></view>
             <view class="meta"><text v-if="r.rating" class="rating">★ {{ r.rating }}</text><text v-if="r.cost" class="muted"> · 人均 ¥{{ r.cost }}</text></view>
             <view v-if="r.distance != null" class="meta muted">距原地点 {{ distanceText(r.distance) }} · {{ travelGuess(r.distance) }}</view>
+            <view v-if="isHotel" class="meta" :class="priceOf(r)?.price != null ? 'price' : 'muted'">{{ priceText(priceOf(r)) }}</view>
           </view>
           <button class="btn ghost small pick">选这个</button>
         </view>
@@ -55,6 +56,7 @@
         <view class="sheet-bar" />
         <view class="sheet-title">换成「{{ picked.name }}」</view>
         <view class="swap muted small">{{ item?.name }} → {{ picked.name }} · {{ item?.start }}–{{ item?.end }} 时间不变</view>
+        <view v-if="isHotel" class="swap small"><text class="price">{{ priceText(priceOf(picked)) }}</text><text class="muted"> · 住宿会一起换成新酒店</text></view>
         <view v-if="previewing" class="muted small">正在用高德计算对当天路线的影响…</view>
         <view v-else-if="previewError" class="muted small">{{ previewError }}</view>
         <view v-else class="cmp">
@@ -76,13 +78,14 @@
 
 <script setup lang="ts">
 import Shell from "../../components/Shell.vue";
-import { computed, reactive, ref } from "vue";
+import { computed, reactive, ref, watch } from "vue";
 import { onLoad } from "@dcloudio/uni-app";
 import { api } from "../../api";
 import { showError } from "../../api/http";
 import type { ChangeReason, ItineraryItem, Place } from "../../api/types";
 import Icon from "../../components/Icon.vue";
-import { compareTotals, distanceText, travelGuess, type CompareRow } from "../../utils/place";
+import { cityOf, compareTotals, distanceText, travelGuess, type CompareRow } from "../../utils/place";
+import { hotelPrice, loadHotelPrices, priceText, stayDates } from "../../utils/hotelPrice";
 import { PREFS, pickOf, sortPlaces, type PlaceSort } from "../../utils/replace";
 
 /**
@@ -117,6 +120,18 @@ let previewSeq = 0;
 const prefOptions = computed(() => PREFS[item.value?.type || "SPOT"] || PREFS.SPOT);
 const sorted = computed(() => sortPlaces(list.value, sort.value));
 
+/** 换酒店时查价用：城市、入住和离店日期（对应住宿的，没有就按当天住一晚） */
+const isHotel = computed(() => item.value?.type === "HOTEL");
+const hotelCity = ref("");
+const hotelDates = ref<[string?, string?]>([undefined, undefined]);
+function priceOf(p: Place) {
+  return hotelPrice(p.name, hotelCity.value, hotelDates.value[0], hotelDates.value[1]);
+}
+// 换酒店时，前 10 个候选去各平台查价（排队查，同时三家）
+watch(sorted, (l) => {
+  if (isHotel.value) loadHotelPrices(l.slice(0, 10).map((p) => p.name), hotelCity.value, hotelDates.value[0], hotelDates.value[1]);
+});
+
 onLoad(async (query) => {
   tripId.value = Number(query?.id) || 0;
   itemId.value = query?.item || "";
@@ -129,6 +144,15 @@ onLoad(async (query) => {
     const d = await api.trip(tripId.value);
     version.value = d.version.version;
     item.value = d.version.itinerary?.days.flatMap((x) => x.items).find((x) => x.id === itemId.value) || null;
+    const it = item.value;
+    if (it?.type === "HOTEL") {
+      const date = d.version.itinerary?.days.find((x) => x.items.some((y) => y.id === it.id))?.date;
+      const stays = d.version.itinerary?.stays || [];
+      const stay = stays.find((st) => st.poiId && st.poiId === it.poiId) || stays.find((st) => it.name.includes(st.name) || st.name.includes(it.name))
+        || stays.find((st) => !!date && st.checkIn <= date && date <= st.checkOut);
+      hotelCity.value = cityOf(d.trip.destination);
+      hotelDates.value = stayDates(stay, date);
+    }
   } catch (e) {
     showError(e);
   }
@@ -170,7 +194,7 @@ async function choose(p: Place) {
   const seq = ++previewSeq;
   previewing.value = true;
   try {
-    const r = await api.previewReplace(tripId.value, itemId.value, pickOf(p));
+    const r = await api.previewReplace(tripId.value, itemId.value, pickOf(p, isHotel.value ? priceOf(p) : undefined));
     if (seq === previewSeq) impact.value = compareTotals(r.beforeTotals, r.afterTotals);
   } catch (e) {
     if (seq === previewSeq) previewError.value = e instanceof Error ? e.message : String(e);
@@ -184,7 +208,7 @@ async function confirmPick() {
   if (!p) return;
   saving.value = true;
   try {
-    const d = await api.replaceItem(tripId.value, itemId.value, pickOf(p), why.value);
+    const d = await api.replaceItem(tripId.value, itemId.value, pickOf(p, isHotel.value ? priceOf(p) : undefined), why.value);
     uni.redirectTo({ url: `/pages/plan/updated?id=${tripId.value}&from=${version.value}&to=${d.version.version}` });
   } catch (e) {
     showError(e);
@@ -244,6 +268,7 @@ function toChat() {
 .tag { font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--accent-soft); color: var(--accent); }
 .meta { font-size: 12px; }
 .rating { color: var(--price); font-weight: 700; }
+.price { color: var(--price); font-weight: 700; }
 .pick { margin: 0; flex-shrink: 0; color: var(--accent); border-color: var(--accent); }
 .note { font-size: 12px; color: var(--muted); text-align: center; margin-top: 12px; }
 .sheet-mask { position: fixed; inset: 0; z-index: 100; background: rgba(15, 23, 42, 0.45); display: flex; align-items: flex-end; }

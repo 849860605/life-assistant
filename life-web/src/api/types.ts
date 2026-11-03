@@ -239,6 +239,11 @@ export interface PlacePick {
   cost?: number | null;
   type?: string;
   note?: string;
+  /** 只有酒店有：各平台最低价、所在平台、预订链接和各平台报价 */
+  price?: number | null;
+  platform?: string | null;
+  url?: string | null;
+  quotes?: StayQuote[] | null;
 }
 
 export type ChangeReason = "VISITED" | "DISLIKE";

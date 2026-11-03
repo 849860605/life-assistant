@@ -69,9 +69,18 @@ public class TripEditor {
         }
     }
 
-    /** 用户选中的地点（来自候选列表或搜索结果）。type 只在加入行程时用。 */
+    /**
+     * 用户选中的地点（来自候选列表或搜索结果）。type 只在加入行程时用。
+     * price、platform、url、quotes 只有酒店有：页面查到的各平台最低价、所在平台、预订链接和各平台报价。
+     */
     public record PlacePick(String name, String poiId, String address, Double lng, Double lat, String photo,
-                            Double rating, Integer cost, String type, String note) {
+                            Double rating, Integer cost, String type, String note, Integer price, String platform,
+                            String url, List<Itinerary.StayQuote> quotes) {
+
+        public PlacePick(String name, String poiId, String address, Double lng, Double lat, String photo,
+                         Double rating, Integer cost, String type, String note) {
+            this(name, poiId, address, lng, lat, photo, rating, cost, type, note, null, null, null, null);
+        }
     }
 
     /** 换掉、删掉某项的原因：去过了、不感兴趣；空表示只是想换。 */
@@ -160,7 +169,10 @@ public class TripEditor {
                 .map(i -> new double[]{i.lng(), i.lat()}).orElse(null);
     }
 
-    /** 把某项换成选中的地点，时间不变，重算当天路程。 */
+    /**
+     * 把某项换成选中的地点，时间不变，重算当天路程。换的是酒店、并且能对上一段住宿（或行程还没有住宿）时，
+     * 连住宿一起换：价格、预订链接、其他天"回酒店"的路程都跟着新酒店走，不然时间线和住宿会对不上、也没有价格。
+     */
     public TripService.TripDetail replace(UserCtx ctx, long tripId, String itemId, PlacePick pick, Reason reason) {
         PlacePick place = clean(pick);
         return locked(tripId, () -> {
@@ -170,16 +182,48 @@ public class TripEditor {
             Itinerary.Item old = found.item();
             Itinerary.Item fresh = replaced(old, place);
             remember(ctx, old.name(), reason);
+            if ("HOTEL".equals(old.type())) {
+                List<Itinerary.Stay> stays = itinerary.stays() == null ? List.of() : itinerary.stays();
+                Itinerary.Stay stay = stays.stream().filter(s -> linked(old, s)).findFirst()
+                        .orElseGet(() -> TripGeo.stayFor(stays, itinerary.days().get(found.day()).date(), old.start()));
+                if (stay != null || stays.isEmpty()) {
+                    return replaceStay(ctx, detail, itinerary, found, fresh, stay, place);
+                }
+            }
             return save(ctx, detail, unbook(itinerary, old.id()), found.day(), items(itinerary, found.day(), old.id(), fresh),
                     "把「" + old.name() + "」换成「" + place.name() + "」");
         });
     }
 
-    /** 换上的新项：时间、类型沿用原来的，其余用选中的地点。 */
+    /** 换上的新项：时间、类型沿用原来的，其余用选中的地点（酒店带上预订链接）。 */
     private static Itinerary.Item replaced(Itinerary.Item old, PlacePick place) {
         return new Itinerary.Item(old.id(), old.start(), old.end(), old.type(), place.name(), place.address(),
-                place.note(), place.cost(), null, null, place.poiId(), place.lng(), place.lat(), place.photo(),
+                place.note(), place.cost(), place.url(), null, place.poiId(), place.lng(), place.lat(), place.photo(),
                 place.rating());
+    }
+
+    /**
+     * 时间线上换酒店：先把这一项换掉，再把它对应的那段住宿（stay 为空时新加一段）换成新酒店，
+     * 价格、平台、预订链接用页面查到的，存成一个新版本。
+     */
+    private TripService.TripDetail replaceStay(UserCtx ctx, TripService.TripDetail detail, Itinerary itinerary,
+                                               Found found, Itinerary.Item fresh, Itinerary.Stay stay, PlacePick place) {
+        Itinerary.Item old = found.item();
+        Itinerary.Day day = itinerary.days().get(found.day());
+        Itinerary swapped = unbook(withDay(itinerary, found.day(), new Itinerary.Day(day.date(), day.theme(),
+                items(itinerary, found.day(), old.id(), fresh), day.legs())), old.id());
+        // 其他天写着同一家旧酒店的项（"回酒店休息"这类）也改成新酒店，去掉坐标，下面按新住宿重新关联
+        swapped = swapped.withDays(swapped.days().stream().map(d -> new Itinerary.Day(d.date(), d.theme(),
+                d.items().stream().map(i -> "HOTEL".equals(i.type()) && !i.id().equals(old.id())
+                        && i.name().equals(old.name()) ? new Itinerary.Item(i.id(), i.start(), i.end(), i.type(),
+                        place.name(), null, i.note(), i.cost(), null, i.locked()) : i).toList(), d.legs())).toList());
+        StayPick hotel = cleanStay(new StayPick(place.name(), place.address(), place.lng(), place.lat(), place.photo(),
+                place.rating(), place.price(), place.platform(), place.url(), place.quotes()));
+        Itinerary updated = planStay(detail, swapped, stay == null ? null : stay.id(), hotel).itinerary();
+        String note = "把「" + old.name() + "」换成「" + place.name() + "」" + (place.price() == null ? ""
+                : "，每晚 ¥" + place.price() + "（" + place.platform() + "）");
+        return tripService.saveVersion(ctx, detail.trip().getId(), new TripService.TripDraft(null, null, null, null,
+                null, updated.toMarkdown(), note, json(updated), false), "USER", detail.version().getVersion());
     }
 
     /**
@@ -1498,7 +1542,8 @@ public class TripEditor {
         String type = pick.type() == null ? null : pick.type().trim().toUpperCase();
         return new PlacePick(cut(pick.name().trim(), MAX_NAME), cut(pick.poiId(), 40), cut(pick.address(), MAX_TEXT),
                 pick.lng(), pick.lat(), safePhoto(pick.photo()), pick.rating(), pick.cost(),
-                type == null || !Itinerary.TYPES.contains(type) ? null : type, cut(pick.note(), MAX_TEXT));
+                type == null || !Itinerary.TYPES.contains(type) ? null : type, cut(pick.note(), MAX_TEXT),
+                pick.price(), pick.platform(), pick.url(), pick.quotes());
     }
 
     /** 只收高德图床（*.autonavi.com、*.amap.com）的 https 照片地址，其余当没有照片。 */

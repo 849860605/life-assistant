@@ -1,4 +1,5 @@
 import type { Place, PlacePick } from "../api/types";
+import type { HotelPrice } from "./hotelPrice";
 
 /** 替换时可选的偏好（多选，分别查高德再合并），按要换的类型给 */
 export const PREFS: Record<string, string[]> = {
@@ -22,7 +23,11 @@ export function sortPlaces(list: Place[], sort: PlaceSort): Place[] {
   return sorted;
 }
 
-/** 候选地点转成换上去的项 */
-export function pickOf(p: Place): PlacePick {
-  return { name: p.name, poiId: p.id, address: p.address, lng: p.lng, lat: p.lat, photo: p.photo, rating: p.rating, cost: p.cost };
+/** 候选地点转成换上去的项；酒店带上查到的最低价和预订链接，换进行程后住宿就有价格 */
+export function pickOf(p: Place, price?: HotelPrice): PlacePick {
+  const pick: PlacePick = { name: p.name, poiId: p.id, address: p.address, lng: p.lng, lat: p.lat, photo: p.photo, rating: p.rating, cost: p.cost };
+  if (price?.price != null) {
+    Object.assign(pick, { price: price.price, platform: price.platform, url: price.url, quotes: price.quotes });
+  }
+  return pick;
 }
