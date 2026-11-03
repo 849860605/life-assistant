@@ -283,8 +283,9 @@ async function removeIt() {
 .m-title { font-size: 22px; font-weight: 800; }
 .m-sub { font-size: 13px; color: var(--muted); margin-top: 2px; }
 .m-close { cursor: pointer; padding: 4px; }
-.cols { flex: 1; min-height: 0; display: grid; grid-template-columns: 300px minmax(0, 1fr) 320px; gap: 14px; padding: 14px; }
-.col { height: 100%; }
+/* 行高要定死（minmax(0, 1fr)），否则网格行会被内容撑高，三栏的 scroll-view 超出弹窗被裁掉、没法滚动 */
+.cols { flex: 1; min-height: 0; display: grid; grid-template-columns: 300px minmax(0, 1fr) 320px; grid-template-rows: minmax(0, 1fr); gap: 14px; padding: 14px; }
+.col { height: 100%; min-height: 0; }
 .box { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 10px; }
 .box-title { font-weight: 700; font-size: 15px; }
 .current { display: flex; gap: 10px; }

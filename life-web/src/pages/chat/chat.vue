@@ -93,6 +93,12 @@
               <view v-if="m.status === 'streaming'" class="caret" />
               <view v-if="m.status === 'stopped'" class="status">已停止</view>
               <view v-if="m.status === 'error'" class="error">{{ m.error }}</view>
+              <view v-if="m.text && (m.status === 'done' || m.status === 'stopped')" class="answer-actions">
+                <view class="act-btn" :class="{ ok: copiedKey === m.key }" @click="copyAnswer(m)">
+                  <Icon :name="copiedKey === m.key ? 'check' : 'copy'" :size="14" color="currentColor" />
+                  <text>{{ copiedKey === m.key ? "已复制" : "复制" }}</text>
+                </view>
+              </view>
               <view v-if="m.suggestions?.length && m === messages[messages.length - 1] && !sending && m.status === 'done'" class="chips">
                 <text v-for="(c, i) in m.suggestions" :key="c" class="chip-btn" :class="{ first: i === 0 }" @click="send(c, [], true)">{{ c }}</text>
               </view>
@@ -157,7 +163,7 @@ import Shell from "../../components/Shell.vue";
 import { useWide } from "../../utils/screen";
 import { savePlans } from "../../utils/plans";
 import { currentCity } from "../../utils/place";
-import { relativeTime, SKILL_NAMES } from "../../utils/format";
+import { markdownToPlain, relativeTime, SKILL_NAMES } from "../../utils/format";
 import { ensureMediaTicket } from "../../utils/media";
 import { fileIcon, fileUrl, splitAttachments, UPLOAD_EXTS, type Attached } from "../../utils/attach";
 import type { UploadView } from "../../api/types";
@@ -295,6 +301,23 @@ function steps(m: UiMessage): { title: string; detail?: string; state: "done" | 
     if (!live.length) out.push({ title: m.cards.length ? "整理结果中…" : "正在查询…", state: "doing" });
   }
   return out.length > 1 || m.status !== "done" ? out : [];
+}
+
+/** 刚复制的是哪条回答，按钮显示"已复制"两秒 */
+const copiedKey = ref<number | null>(null);
+
+/** 复制一条回答：转成纯文本（去掉加粗、井号这些 Markdown 记号），粘到微信、备忘录里也干净。 */
+function copyAnswer(m: UiMessage) {
+  uni.setClipboardData({
+    data: markdownToPlain(m.text),
+    success: () => {
+      copiedKey.value = m.key;
+      setTimeout(() => {
+        if (copiedKey.value === m.key) copiedKey.value = null;
+      }, 2000);
+    },
+    fail: () => uni.showToast({ title: "复制失败，可以选中文字手动复制", icon: "none" }),
+  });
 }
 
 function notYet(what: string) {
@@ -686,6 +709,7 @@ function scrollToBottom() {
   flex: 1;
   min-height: 24px;
   max-height: 160px;
+  overflow-y: auto;
   padding: 9px 12px;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -739,6 +763,10 @@ function scrollToBottom() {
 .msg.user { gap: 8px; align-items: flex-start; }
 .composer-box { max-width: 760px; margin: 0 auto; border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px 8px; background: var(--surface); }
 .composer-box .composer-input { border: none; background: transparent; padding: 2px 0; width: 100%; }
+.answer-actions { display: flex; gap: 6px; margin-top: -2px; }
+.act-btn { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); padding: 4px 8px; border-radius: 8px; cursor: pointer; }
+.act-btn:hover { background: var(--surface-2); color: var(--ink); }
+.act-btn.ok { color: var(--ok); }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip-btn { font-size: 13px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
 .chip-btn.first { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }

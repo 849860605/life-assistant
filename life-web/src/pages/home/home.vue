@@ -12,7 +12,17 @@
             <view v-for="f in FEATURES" :key="f.label" class="feature"><Icon :name="f.icon" :size="14" color="#fff" /><text>{{ f.label }}</text></view>
           </view>
           <view class="big-ask">
-            <input id="desk-ask" v-model="question" class="big-input" confirm-type="send" :placeholder="`例如：帮我规划${city}4天3晚，预算5000元，带父母，想看历史文化和美食`" @confirm="ask" />
+            <textarea
+              id="desk-ask"
+              v-model="question"
+              class="big-input"
+              :auto-height="true"
+              :maxlength="2000"
+              :show-confirm-bar="false"
+              confirm-type="send"
+              :placeholder="`例如：帮我规划${city}4天3晚，预算5000元，带父母，想看历史文化和美食`"
+              @confirm="ask"
+            />
             <view class="big-send" @click="ask"><Icon name="send" :size="20" color="#fff" /></view>
           </view>
           <view class="quick">
@@ -175,10 +185,13 @@
           <view class="hero-sub tight">剩下的交给 AI</view>
         </view>
         <view class="ask">
-          <input
+          <textarea
             id="home-ask"
             v-model="question"
             class="ask-input"
+            :auto-height="true"
+            :maxlength="2000"
+            :show-confirm-bar="false"
             confirm-type="send"
             :placeholder="`例如：帮我规划${city}4天3晚，带父母，预算每人5000元`"
             @confirm="ask"
@@ -490,9 +503,10 @@ function changeCity(c: string) {
 .banner-sub { font-size: 17px; opacity: 0.92; }
 .features { display: flex; flex-wrap: wrap; gap: 10px; }
 .feature { display: flex; align-items: center; gap: 6px; font-size: 13px; padding: 6px 12px; border-radius: 999px; background: rgba(255, 255, 255, 0.16); border: 1px solid rgba(255, 255, 255, 0.3); }
-.big-ask { display: flex; align-items: center; gap: 10px; background: #fff; border-radius: 16px; padding: 10px 10px 10px 20px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25); }
-.big-input { flex: 1; font-size: 16px; color: #111827; height: 40px; }
-.big-send { width: 48px; height: 48px; border-radius: 50%; background: var(--accent); display: flex; align-items: center; justify-content: center; cursor: pointer; }
+/* 问题框是多行输入：一行时和原来一样高，长了往下长，最多 5 行，再多在框里滚动；发送按钮贴底 */
+.big-ask { display: flex; align-items: flex-end; gap: 10px; background: #fff; border-radius: 16px; padding: 10px 10px 10px 20px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25); }
+.big-input { flex: 1; width: auto; font-size: 16px; line-height: 24px; color: #111827; min-height: 24px; max-height: 120px; overflow-y: auto; padding: 12px 0; }
+.big-send { flex-shrink: 0; width: 48px; height: 48px; border-radius: 50%; background: var(--accent); display: flex; align-items: center; justify-content: center; cursor: pointer; }
 .quick { display: flex; flex-wrap: wrap; gap: 10px; }
 .quick-chip { font-size: 13px; padding: 7px 14px; border-radius: 999px; background: rgba(255, 255, 255, 0.92); color: #1b2333; cursor: pointer; }
 
@@ -623,15 +637,17 @@ function changeCity(c: string) {
   right: 14px;
   bottom: 14px;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 8px;
   background: #fff;
   border-radius: 14px;
   padding: 8px 8px 8px 14px;
   box-shadow: 0 6px 20px rgba(15, 23, 42, 0.15);
 }
-.ask-input { flex: 1; min-width: 0; font-size: 14px; color: #111827; height: 36px; }
+/* 手机上最多 4 行，框贴着图片底部往上长 */
+.ask-input { flex: 1; min-width: 0; width: auto; font-size: 14px; line-height: 20px; color: #111827; min-height: 20px; max-height: 80px; overflow-y: auto; padding: 8px 0; }
 .ask-send {
+  flex-shrink: 0;
   width: 36px;
   height: 36px;
   border-radius: 50%;

@@ -147,3 +147,18 @@ export function doneText(type: string, done: boolean) {
   const word = type === "FOOD" ? "已吃" : "已去";
   return done ? word : "标记" + word;
 }
+
+/** Markdown 转纯文本（复制回答用）：去掉加粗、标题井号、引用号、行内代码和代码围栏，链接写成"文字 网址"，列表统一成"- "。 */
+export function markdownToPlain(md: string): string {
+  return md
+    .replace(/```[a-zA-Z]*\n?/g, "")
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1 $2")
+    .replace(/(\*\*|__)(.+?)\1/g, "$2")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^>\s?/gm, "")
+    .replace(/^(\s*)[*+]\s+/gm, "$1- ")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
