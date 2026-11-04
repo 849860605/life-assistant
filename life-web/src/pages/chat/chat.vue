@@ -59,10 +59,19 @@
 
           <view v-for="m in messages" :key="m.key" class="msg" :class="m.role">
             <template v-if="m.role === 'user'">
-              <view class="bubble">
-                <text v-if="m.text">{{ m.text }}</text>
-                <view v-if="m.files?.length" class="b-files">
-                  <view v-for="f in m.files" :key="f.id" class="b-file" @click="openFile(f.id)"><Icon :name="fileIcon(f.name)" :size="13" color="currentColor" /><text>{{ f.name }}</text></view>
+              <view class="u-col">
+                <view class="bubble">
+                  <text v-if="m.text">{{ m.text }}</text>
+                  <view v-if="m.files?.length" class="b-files">
+                    <view v-for="f in m.files" :key="f.id" class="b-file" @click="openFile(f.id)"><Icon :name="fileIcon(f.name)" :size="13" color="currentColor" /><text>{{ f.name }}</text></view>
+                  </view>
+                </view>
+                <view v-if="m.addState" class="add-note">
+                  <template v-if="m.addState === 'waiting'">
+                    <text>等星络看到…</text>
+                    <text class="link" @click="restartNow">不等了，马上重来</text>
+                  </template>
+                  <text v-else class="seen"><Icon name="check" :size="11" color="var(--ok)" /> 星络已看到</text>
                 </view>
               </view>
               <view class="me-avatar">{{ myInitial }}</view>
@@ -127,14 +136,14 @@
             :maxlength="4000"
             :show-confirm-bar="false"
             confirm-type="send"
-            placeholder="你可以继续补充需求，例如：更换航班、增加景点…"
+            :placeholder="sending ? '可以随时补充，星络下一步就会看到' : '你可以继续补充需求，例如：更换航班、增加景点…'"
             @confirm="sendInput"
           />
           <view class="composer-tools">
             <view class="tool" @click="pickFiles"><Icon name="plus" :size="14" color="var(--muted)" /><text>上传文件</text></view>
             <view class="tool" @click="notYet('深度搜索')"><Icon name="search" :size="14" color="var(--muted)" /><text>深度搜索</text></view>
             <ModelPicker class="model" :wide="wide" />
-            <view v-if="sending" class="send stop-btn" title="停止" @click="stop"><Icon name="stop" :size="14" color="#fff" fill /></view>
+            <view v-if="sending && !input.trim()" class="send stop-btn" title="停止" @click="stop"><Icon name="stop" :size="14" color="#fff" fill /></view>
             <view v-else class="send" :class="{ off: !canSend }" @click="sendInput"><Icon name="send" :size="18" color="#fff" /></view>
           </view>
         </view>
@@ -186,6 +195,9 @@ interface UiMessage {
   suggestions?: string[];
   /** 工具执行中的实时进度（比价查到第几家），按 id 覆盖；回答结束后不再显示 */
   progress?: Progress[];
+  /** 回答过程中补充的话：waiting 等星络看到，seen 已看到；addId 是发给后端的编号 */
+  addState?: "waiting" | "seen";
+  addId?: string;
 }
 
 /** 输入框上方待发送的附件：上传完就已经识别好了 */
@@ -233,6 +245,10 @@ function pickFiles() {
 
 /** 输入框发送：带上识别好的附件；只发了文件没打字时补一句。 */
 function sendInput() {
+  if (sending.value) {
+    interject();
+    return;
+  }
   if (!canSend.value) return;
   const ok = pending.value.filter((a) => a.state === "ok" && a.view);
   const text = input.value.trim() || (ok.length > 1 ? "帮我看看这几个文件" : "帮我看看这个文件");
@@ -261,11 +277,14 @@ const wide = useWide();
 const myInitial = ref("我");
 api.me().then((u) => (myInitial.value = (u.nickname || u.username).slice(0, 1).toUpperCase())).catch(() => {});
 
-/** 当前会话里最后一张行程卡，电脑上的右侧面板显示它 */
+/** 当前会话里最后一张行程卡，电脑上的右侧面板显示它；之后在对话里局部改过的，版本号用最新改动卡上的，面板会重新加载 */
 const latestTrip = computed(() => {
+  let changed: { tripId: number; version: number } | null = null;
   for (let i = messages.value.length - 1; i >= 0; i--) {
-    const card = [...messages.value[i].cards].reverse().find((c) => c.kind === "trip");
-    if (card) return card.data;
+    for (const c of [...messages.value[i].cards].reverse()) {
+      if (c.kind === "trip_change" && !changed) changed = c.data;
+      if (c.kind === "trip") return changed && changed.tripId === c.data.tripId ? { ...c.data, version: changed.version } : c.data;
+    }
   }
   return null;
 });
@@ -293,9 +312,11 @@ function steps(m: UiMessage): { title: string; detail?: string; state: "done" | 
     else if (c.kind === "hotels") out.push({ title: "查询酒店信息", detail: `比价 ${d.results?.length ?? 0} 家酒店`, state: "done" });
     else if (c.kind === "restaurants") out.push({ title: "查询美食", detail: `找到 ${d.restaurants?.length ?? 0} 家餐厅`, state: "done" });
     else if (c.kind === "trip") out.push({ title: "生成行程方案", detail: `${d.title}（${d.days?.length ?? 0} 天）`, state: "done" });
+    else if (c.kind === "trip_change") out.push({ title: "修改行程", detail: (d.changes || [])[0] || d.title, state: "done" });
     else if (c.kind === "plan_options") out.push({ title: "生成三套方案", detail: (d.options || []).map((o: any) => o.title).join("、"), state: "done" });
     else if (c.kind === "requirement") out.push({ title: "整理需求", detail: "请在卡片上确认", state: "done" });
   }
+  for (const p of m.progress || []) if (p.id.startsWith("interject:")) out.push({ title: "收到补充，按补充调整", detail: p.detail, state: "done" });
   if (m.status === "waiting" || m.status === "streaming") {
     const live = (m.progress || []).filter((p) => !p.done);
     for (const p of live) out.push({ title: p.title, detail: p.detail, state: "doing" });
@@ -503,6 +524,10 @@ async function send(raw: string, files: Attached[] = [], chip = false) {
         answer.cards.push(event.card);
         answer.status = "streaming";
         scrollToBottom();
+      } else if (event.type === "progress" && event.progress?.id.startsWith("interject:")) {
+        const added = messages.value.find((x) => x.addId === event.progress!.id.slice("interject:".length));
+        if (added) added.addState = "seen";
+        (answer.progress || (answer.progress = [])).push(event.progress);
       } else if (event.type === "progress" && event.progress) {
         const list = answer.progress || (answer.progress = []);
         const i = list.findIndex((p) => p.id === event.progress!.id);
@@ -533,7 +558,36 @@ async function send(raw: string, files: Attached[] = [], chip = false) {
     controller = null;
     scrollToBottom();
     loadConversations();
+    // 星络这一轮没来得及看到的补充：从原位置拿掉，合成一条正常发出去
+    const left = messages.value.filter((x) => x.addState === "waiting");
+    for (const x of messages.value) if (x.addState === "seen") x.addState = undefined;
+    if (left.length) {
+      messages.value = messages.value.filter((x) => x.addState !== "waiting");
+      send(left.map((x) => x.text).join("\n"));
+    }
   }
+}
+
+/** 回答过程中补充：插在这条回答前面显示，交给后端，星络下一次工具调用结束后看到。 */
+async function interject() {
+  const text = input.value.trim();
+  if (!text || !sending.value) return;
+  input.value = "";
+  const addId = String(++seq);
+  const at = messages.value.length - 1;
+  messages.value.splice(at, 0, { key: ++seq, role: "user", text, cards: [], addState: "waiting", addId });
+  scrollToBottom();
+  try {
+    // 会话还没建好时先留着，这轮结束后正常发送
+    if (currentId.value) await api.interject(currentId.value, addId, text);
+  } catch (e) {
+    // 没交上去的同样留着，回答结束后正常发送
+  }
+}
+
+/** 不等了：停掉当前回答，补充的话在回答结束时自动合成一条重新发 */
+function restartNow() {
+  stop();
 }
 
 /** 停止接收当前回答。后端已经生成的部分仍会存进记录。 */
@@ -780,6 +834,11 @@ function scrollToBottom() {
 .att-state { font-size: 11px; color: var(--muted); }
 .att.error .att-state { color: var(--price); }
 .att-x { padding: 4px; cursor: pointer; }
+.u-col { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; max-width: 85%; min-width: 0; }
+.u-col .bubble { max-width: 100%; }
+.add-note { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 10px; font-size: 12px; color: var(--muted); }
+.add-note .link { cursor: pointer; }
+.add-note .seen { display: inline-flex; align-items: center; gap: 3px; }
 .b-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .b-file { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 3px 8px; border-radius: 8px; background: rgba(255, 255, 255, 0.18); cursor: pointer; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .composer-tools { display: flex; align-items: center; gap: 8px; margin-top: 6px; }

@@ -6,6 +6,7 @@ import com.lifeassistant.core.auth.ToolContexts;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.model.ToolContext;
@@ -30,6 +31,7 @@ import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.function.Function;
 
 /**
  * 并行执行工具调用。Spring AI 默认的 DefaultToolCallingManager 把模型一次返回的多个工具调用按顺序逐个执行；
@@ -43,14 +45,18 @@ public class ParallelToolCallingManager implements ToolCallingManager {
     /** 工具定义的解析逻辑不变，直接交给默认实现 */
     private final DefaultToolCallingManager definitions;
     private final CallRecorder recorder;
+    /** 按会话 id 取走用户在回答过程中补充的话 */
+    private final Function<String, List<String>> interjections;
 
     public ParallelToolCallingManager(ToolCallbackResolver toolCallbackResolver) {
-        this(toolCallbackResolver, CallRecorder.NOOP);
+        this(toolCallbackResolver, CallRecorder.NOOP, conversationId -> List.of());
     }
 
-    public ParallelToolCallingManager(ToolCallbackResolver toolCallbackResolver, CallRecorder recorder) {
+    public ParallelToolCallingManager(ToolCallbackResolver toolCallbackResolver, CallRecorder recorder,
+                                      Function<String, List<String>> interjections) {
         this.toolCallbackResolver = toolCallbackResolver;
         this.recorder = recorder;
+        this.interjections = interjections;
         this.exceptionProcessor = DefaultToolExecutionExceptionProcessor.builder().build();
         this.definitions = DefaultToolCallingManager.builder().toolCallbackResolver(toolCallbackResolver).build();
     }
@@ -106,6 +112,15 @@ public class ParallelToolCallingManager implements ToolCallingManager {
         List<Message> history = new ArrayList<>(prompt.getInstructions());
         history.add(assistantMessage);
         history.add(ToolResponseMessage.builder().responses(responses).build());
+        // 用户在等的时候补充了话，跟在工具结果后面交给模型，它下一步就能按补充调整，不用等这一轮结束
+        CallRecorder.Scope scope = scope(toolContext);
+        List<String> added = scope == null ? List.of() : interjections.apply(scope.conversationId());
+        if (!added.isEmpty()) {
+            history.add(new UserMessage("（你处理的过程中，用户补充了）" + String.join("\n", added)
+                    + "\n请把补充考虑进去：小改动（加个地方、换个档次）就接着做，已经查到的结果还能用的继续用，只补查新的；"
+                    + "改了目的地、日期这类大前提，就别再按原来的做，按新需求重新安排。回答里用一句话说明按补充改了什么。"));
+            returnDirect = false;
+        }
         return ToolExecutionResult.builder().conversationHistory(history).returnDirect(returnDirect).build();
     }
 

@@ -673,6 +673,99 @@ public class TripEditor {
         }
     }
 
+    /**
+     * 对话里局部改的结果：fromVersion、after 是改之前的版本号和改之后的行程；changes 是改动摘要，dates 是改过的日期；
+     * problems 不为空时没有保存（after 为空），要按它改好再调。
+     */
+    public record Patched(int fromVersion, TripService.TripDetail after, List<String> changes, List<String> dates,
+                          List<String> problems) {
+
+        static Patched rejected(int fromVersion, List<String> problems) {
+            return new Patched(fromVersion, null, List.of(), List.of(), problems);
+        }
+    }
+
+    /**
+     * 对话里局部改行程：days 是改过的几天（同一日期整天换掉，其余天不动），start、end 给了就改行程日期，
+     * stays 为空表示住宿不变。只重算改过的天的路程（换了住宿时全部重算），存成一个新版本。
+     */
+    public Patched patch(UserCtx ctx, long tripId, List<Itinerary.Day> days, LocalDate start, LocalDate end,
+                         List<Itinerary.Stay> stays, String note) {
+        return locked(tripId, () -> {
+            TripService.TripDetail detail = tripService.get(ctx, tripId, null);
+            Itinerary before = itinerary(detail);
+            int fromVersion = detail.version().getVersion();
+            String city = detail.trip().getDestination();
+            List<Itinerary.Stay> located = stays == null ? null
+                    : stays.stream().map(st -> st.located() ? st : geo.locate(st, city)).toList();
+            TripPatch.Result merged = TripPatch.apply(before, days, start, end, located);
+            if (!merged.problems().isEmpty()) {
+                return Patched.rejected(fromVersion, merged.problems());
+            }
+            Itinerary it = merged.itinerary();
+            List<Itinerary.Day> relinked = it.days().stream()
+                    .map(d -> located != null || merged.changedDates().contains(d.date())
+                            ? geo.relink(d, city, it.stays()) : d)
+                    .toList();
+            Itinerary updated = it.withDays(relinked);
+            List<String> changes = TripPatch.changes(before, updated);
+            if (changes.isEmpty()) {
+                return Patched.rejected(fromVersion, List.of("和当前版本一样，没有改动"));
+            }
+            LocalDate newStart = merged.rangeChanged() ? dateOrNull(updated.days().get(0).date()) : null;
+            LocalDate newEnd = merged.rangeChanged() ? dateOrNull(updated.days().get(updated.days().size() - 1).date()) : null;
+            TripService.TripDetail saved = tripService.saveVersion(ctx, tripId, new TripService.TripDraft(null, null,
+                    null, newStart, newEnd, updated.toMarkdown(), note(note, changes), json(updated), false), "AI",
+                    fromVersion);
+            ensureGeoLater(tripId, saved.version().getVersion());
+            return new Patched(fromVersion, saved, changes, List.copyOf(merged.changedDates()), List.of());
+        });
+    }
+
+    /**
+     * 对话里换酒店：stayId 为空时行程只有一段住宿就换那段、没有住宿就新加一段；和页面上换酒店走同一套逻辑
+     * （关联到原酒店的入住、回酒店等项跟着改，原来那家放回候选），返回改动摘要。
+     */
+    public Patched patchStay(UserCtx ctx, long tripId, String stayId, StayPick pick) {
+        StayPick hotel = cleanStay(pick);
+        return locked(tripId, () -> {
+            TripService.TripDetail detail = tripService.get(ctx, tripId, null);
+            Itinerary before = itinerary(detail);
+            int fromVersion = detail.version().getVersion();
+            if (stayId != null && before.isBooked(stayId)) {
+                return Patched.rejected(fromVersion, List.of("这段住宿已预约，不能换；用户坚持要换先提醒去原平台取消"));
+            }
+            StayPreview preview = planStay(detail, before, stayId, hotel).preview();
+            if (preview.replacesId() != null && before.isBooked(preview.replacesId())) {
+                return Patched.rejected(fromVersion, List.of("「" + preview.replacesName() + "」已预约，不能换；用户坚持要换先提醒去原平台取消"));
+            }
+            TripService.TripDetail saved = saveStay(ctx, tripId, stayId, hotel, preview.replacesId());
+            Itinerary after = itinerary(saved);
+            List<String> changes = TripPatch.changes(before, after);
+            List<String> dates = after.stays() == null ? List.of() : after.days().stream().map(Itinerary.Day::date)
+                    .filter(d -> after.stays().stream().anyMatch(st -> st.name().equals(preview.stay().name()) && st.covers(d)))
+                    .toList();
+            return new Patched(fromVersion, saved, changes.isEmpty() ? List.of("住宿换成 " + preview.stay().name()) : changes,
+                    dates, List.of());
+        });
+    }
+
+    /** 版本说明：模型写了就用它，没写就用改动摘要的前两条。 */
+    private static String note(String note, List<String> changes) {
+        if (note != null && !note.isBlank()) {
+            return cut(note.trim(), MAX_TEXT);
+        }
+        return cut(String.join("；", changes.subList(0, Math.min(2, changes.size()))), MAX_TEXT);
+    }
+
+    private static LocalDate dateOrNull(String date) {
+        try {
+            return date == null ? null : LocalDate.parse(date);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
     /** 恢复到某个历史版本：把那一版的内容存成新版本，历史不删。 */
     public TripService.TripDetail restore(UserCtx ctx, long tripId, int version) {
         return locked(tripId, () -> {
@@ -681,7 +774,12 @@ public class TripEditor {
                 throw new BizException(ErrorCode.BAD_REQUEST, "这已经是当前版本了");
             }
             TripService.TripDetail old = tripService.get(ctx, tripId, version);
-            return tripService.saveVersion(ctx, tripId, new TripService.TripDraft(null, null, null, null, null,
+            // 那一版的日期范围可能不一样（对话里加过天、改过日期），出发和结束日期跟着那一版走
+            Itinerary was = parse(old.version().getItinerary());
+            LocalDate start = was == null || was.days() == null || was.days().isEmpty() ? null
+                    : dateOrNull(was.days().get(0).date());
+            LocalDate end = start == null ? null : dateOrNull(was.days().get(was.days().size() - 1).date());
+            return tripService.saveVersion(ctx, tripId, new TripService.TripDraft(null, null, null, start, end,
                     old.version().getContent(), "恢复到第 " + version + " 版", old.version().getItinerary(), false), "USER",
                     current.version().getVersion());
         });
@@ -731,8 +829,10 @@ public class TripEditor {
             }
             String type = place.type() == null ? "SPOT" : place.type();
             String[] slot = slot(items, type);
-            int next = items.stream().map(i -> i.id().replaceAll(".*-", "")).filter(s -> s.matches("\\d+"))
-                    .mapToInt(Integer::parseInt).max().orElse(0) + 1;
+            String prefix = "d" + (dayIndex + 1) + "-";
+            int next = itinerary.days().stream().flatMap(d -> d.items().stream()).map(Itinerary.Item::id)
+                    .filter(id -> id.startsWith(prefix)).map(id -> id.substring(prefix.length()))
+                    .filter(s -> s.matches("\\d+")).mapToInt(Integer::parseInt).max().orElse(0) + 1;
             items.add(new Itinerary.Item("d" + (dayIndex + 1) + "-" + next, slot[0], slot[1], type, place.name(),
                     place.address(), place.note(), place.cost(), null, null, place.poiId(), place.lng(), place.lat(), place.photo(),
                     place.rating()));
@@ -1566,7 +1666,7 @@ public class TripEditor {
     }
 
     /** 去过的、不感兴趣的记进偏好记忆，规划时会读到。 */
-    private void remember(UserCtx ctx, String name, Reason reason) {
+    void remember(UserCtx ctx, String name, Reason reason) {
         if (reason == Reason.VISITED) {
             memory.upsert(ctx, MemoryCategory.PREFERENCE, VISITED + name, "去过" + name + "，不用再推荐",
                     MemorySource.USER_STATED, null);

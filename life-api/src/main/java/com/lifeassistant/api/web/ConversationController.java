@@ -5,6 +5,7 @@ import com.lifeassistant.common.auth.UserCtx;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lifeassistant.core.audit.ToolCallLogMapper;
 import com.lifeassistant.core.auth.AuthFacade;
+import com.lifeassistant.core.card.CardHub;
 import com.lifeassistant.core.conversation.ChatMessageEntity;
 import com.lifeassistant.core.conversation.Conversation;
 import com.lifeassistant.core.conversation.ConversationService;
@@ -44,6 +45,7 @@ public class ConversationController {
     private final UploadService uploadService;
     private final ToolCallLogMapper callLog;
     private final ObjectMapper objectMapper;
+    private final CardHub cardHub;
 
     /**
      * 发消息请求体：内容最长 4000 字；files 是这条消息带的上传文件 id，最多 5 个；
@@ -93,6 +95,20 @@ public class ConversationController {
         }
         return chatOrchestrator.chat(ctx, id, input, request.content(), chip)
                 .map(event -> ServerSentEvent.builder(event).event(event.type()).build());
+    }
+
+    /** 回答过程中补充的一句话：id 是前端给的编号，星络看到后用它回一个进度事件。 */
+    public record InterjectRequest(@NotBlank @Size(max = 64) String id, @NotBlank @Size(max = 2000) String content) {
+    }
+
+    /**
+     * POST /api/v1/conversations/{id}/interject：回答还没结束时补充一句，星络在下一次工具调用结束后看到并调整。
+     * accepted 为 false 表示这个会话现在没有正在进行的回答，前端改成正常发送。
+     */
+    @PostMapping("/{id}/interject")
+    public ApiResponse<Map<String, Boolean>> interject(@PathVariable String id, @Valid @RequestBody InterjectRequest request) {
+        conversationService.getOwned(authFacade.current(), id);
+        return ApiResponse.ok(Map.of("accepted", cardHub.interject(id, request.id(), request.content().trim())));
     }
 
     /** DELETE /api/v1/conversations/{id}：删除自己的会话，不属于自己时报错。 */

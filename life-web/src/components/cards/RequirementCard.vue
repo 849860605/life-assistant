@@ -72,11 +72,18 @@
         </view>
       </view>
     </view>
-    <view v-if="!locked" class="actions">
-      <button class="btn go" :disabled="!form.destination.trim()" @click="submit">开始生成方案</button>
-      <text class="skip link" @click="emit('submit', '跳过，直接生成方案')">跳过，直接生成</text>
+    <view v-if="editing" class="actions">
+      <button class="btn go" :disabled="!form.destination.trim() || !changes.length" @click="submit">{{ changes.length ? "按修改重新生成" : "还没改动" }}</button>
+      <text class="skip link" @click="editing = false">取消</text>
     </view>
-    <view v-else class="muted done">{{ submitted ? "已提交" : "这张需求卡已过期" }}</view>
+    <view v-else-if="!locked" class="actions">
+      <button class="btn go" :disabled="!form.destination.trim()" @click="submit">开始生成方案</button>
+      <text class="skip link" @click="skip">按已选的直接生成，没填的你定</text>
+    </view>
+    <view v-else class="muted done">
+      <text>{{ submitted ? "已提交" : "这张需求卡已过期" }}</text>
+      <text class="link redo" @click="startEdit">修改需求</text>
+    </view>
   </view>
 </template>
 
@@ -86,7 +93,8 @@ import Icon from "../Icon.vue";
 
 /**
  * 需求卡：出游技能 askTripRequirements 发来的，已知信息预先填好；提交时拼成一句话当作用户消息发出去。
- * active 为 false（不是最新一条回答，或正在发送）时只读。
+ * active 为 false（不是最新一条回答，或正在发送）时只读；提交过或过期的卡片可以点"修改需求"改了再发，
+ * 发出去的话里带上"这次改了什么"，星络按新需求重新生成。
  */
 const props = defineProps<{ data: any; active: boolean }>();
 const emit = defineEmits<{ (e: "submit", text: string): void }>();
@@ -102,7 +110,9 @@ const PACES = ["轻松", "适中", "紧凑"];
 const TRANSFERS = ["尽量直飞", "中转也行", "只要直飞"];
 
 const submitted = ref(false);
-const locked = computed(() => !props.active || submitted.value);
+/** 提交过或过期后，用户点了"修改需求"，正在改 */
+const editing = ref(false);
+const locked = computed(() => !editing.value && (!props.active || submitted.value));
 const form = reactive({
   destination: props.data.destination || "",
   origin: props.data.origin || "",
@@ -163,25 +173,66 @@ function toggle(option: string) {
   else form.interests.push(option);
 }
 
-/** 拼成"需求确认：目的地 成都；日期 …"发出去，没填的项不写。 */
-function submit() {
+/** 各项需求的文字，key 是项目名（"日期""节奏"…），没填的项不写。 */
+function fields(): Record<string, string> {
   const people = [`${form.adults} 位成人`];
   if (form.children) people.push(`${form.children} 个小孩`);
   if (form.elders) people.push(`${form.elders} 位老人`);
-  const parts = [`目的地 ${form.destination.trim()}`];
-  if (form.origin.trim()) parts.push(`出发地 ${form.origin.trim()}`);
-  if (form.startDate) parts.push(`日期 ${form.startDate}${form.endDate ? " 至 " + form.endDate : ""}`);
-  else parts.push(days ? `日期未定，玩 ${days} 天` : "日期未定");
-  parts.push(`同行 ${people.join("、")}`);
-  if (form.budget) parts.push(`预算 每人 ${form.budget} 元`);
-  if (form.interests.length) parts.push(`偏好 ${form.interests.join("、")}`);
-  parts.push(`节奏 ${form.pace}`);
-  parts.push(`大交通 ${form.transfer}（要中转、换城市进出先给我选）`);
+  const out: Record<string, string> = { 目的地: form.destination.trim() };
+  if (form.origin.trim()) out["出发地"] = form.origin.trim();
+  if (form.startDate) out["日期"] = `${form.startDate}${form.endDate ? " 至 " + form.endDate : ""}`;
+  else out["日期"] = days ? `日期未定，玩 ${days} 天` : "日期未定";
+  out["同行"] = people.join("、");
+  if (form.budget) out["预算"] = `每人 ${form.budget} 元`;
+  if (form.interests.length) out["偏好"] = form.interests.join("、");
+  out["节奏"] = form.pace;
+  out["大交通"] = `${form.transfer}（要中转、换城市进出先给我选）`;
+  if (form.visited.length) out["去过"] = `${form.visited.join("、")}（不要再安排）`;
+  return out;
+}
+
+/** 上次发出去的需求；没发过时用卡片刚弹出来时的内容，修改时和它比 */
+const initial = fields();
+const lastSent = ref<Record<string, string> | null>(null);
+
+/** 和上次相比改了哪几项，如"节奏 适中 → 紧凑" */
+const changes = computed(() => {
+  const now = fields();
+  const before = lastSent.value || initial;
+  return [...new Set([...Object.keys(before), ...Object.keys(now)])]
+    .filter((k) => before[k] !== now[k])
+    .map((k) => (now[k] ? `${k} ${before[k] ? before[k] + " → " : ""}${now[k]}` : `去掉${k}`));
+});
+
+function text(f: Record<string, string>) {
+  return Object.entries(f).map(([k, v]) => `${k} ${v}`).join("；");
+}
+
+/** 提交：第一次发完整需求；修改时也发完整需求，再说清这次改了什么，免得星络沿用旧的 */
+function submit() {
   addVisited();
-  const visited = form.visited;
-  if (visited.length) parts.push(`去过 ${visited.join("、")}（不要再安排）`);
+  const f = fields();
+  const msg = editing.value
+    ? `需求修改：${text(f)}。这次改了：${changes.value.join("；")}。请按新需求重新生成方案。`
+    : `需求确认：${text(f)}。请按这个生成方案。`;
+  lastSent.value = f;
   submitted.value = true;
-  emit("submit", `需求确认：${parts.join("；")}。请按这个生成方案。`);
+  editing.value = false;
+  emit("submit", msg);
+}
+
+/** 跳过：已选的照样带上，没填的让星络自己定 */
+function skip() {
+  addVisited();
+  const f = fields();
+  lastSent.value = f;
+  submitted.value = true;
+  emit("submit", `需求确认：${text(f)}。没填的你看着定，直接生成方案。`);
+}
+
+/** 提交过或过期的卡片重新打开编辑 */
+function startEdit() {
+  editing.value = true;
 }
 </script>
 
@@ -206,5 +257,6 @@ function submit() {
 .actions { display: flex; flex-direction: column; align-items: stretch; gap: 10px; padding: 14px; }
 .go { margin: 0; height: 44px; }
 .skip { text-align: center; font-size: 14px; }
-.done { text-align: center; font-size: 13px; padding: 12px; }
+.done { display: flex; justify-content: center; gap: 12px; font-size: 13px; padding: 12px; }
+.redo { cursor: pointer; }
 </style>

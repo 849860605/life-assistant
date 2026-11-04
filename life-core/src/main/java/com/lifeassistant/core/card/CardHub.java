@@ -6,9 +6,13 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
+import java.util.Queue;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
  * 卡片中转：编排器每轮对话开一个通道，工具查到结构化结果时往当前会话的通道里发卡片（还有长任务的进度），编排器把它合进 SSE 流。
@@ -23,6 +27,8 @@ public class CardHub {
     public final class Turn {
         private final String conversationId;
         private final Sinks.Many<Object> sink = Sinks.many().unicast().onBackpressureBuffer();
+        /** 回答过程中用户补充的话，等下一次工具调用结束时交给模型 */
+        private final Queue<Interjection> inbox = new ConcurrentLinkedQueue<>();
 
         private Turn(String conversationId) {
             this.conversationId = conversationId;
@@ -52,6 +58,37 @@ public class CardHub {
         Turn turn = new Turn(conversationId);
         turns.put(conversationId, turn);
         return turn;
+    }
+
+    /** 用户在回答过程中补充的一句话；id 是前端给的，用来对上是哪一条。 */
+    public record Interjection(String id, String text) {
+    }
+
+    /** 回答过程中收到用户补充，放进这一轮的收件箱；这个会话没有正在进行的回答时返回 false，前端改成正常发送。 */
+    public boolean interject(String conversationId, String id, String text) {
+        Turn turn = turns.get(conversationId);
+        if (turn == null) {
+            return false;
+        }
+        turn.inbox.add(new Interjection(id, text));
+        return true;
+    }
+
+    /**
+     * 取走这一轮还没交给模型的补充，每条发一个已完成的进度（id 是 interject:前端 id），前端据此知道星络已经看到；
+     * 没有正在进行的回答或没有补充时返回空列表。
+     */
+    public List<String> takeInterjections(String conversationId) {
+        Turn turn = conversationId == null ? null : turns.get(conversationId);
+        if (turn == null) {
+            return List.of();
+        }
+        List<String> texts = new ArrayList<>();
+        for (Interjection i; (i = turn.inbox.poll()) != null; ) {
+            texts.add(i.text());
+            turn.emit(new Progress("interject:" + i.id(), "收到补充", i.text(), true));
+        }
+        return texts;
     }
 
     /** 告诉模型卡片已经展示了，放进工具返回值里，模型就不再重复列表格。 */

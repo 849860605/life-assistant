@@ -1,5 +1,9 @@
 package com.lifeassistant.core.config;
 
+import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.memory.ChatMemory;
+import com.lifeassistant.core.card.CardHub;
 import com.baomidou.mybatisplus.annotation.DbType;
 import com.baomidou.mybatisplus.extension.plugins.MybatisPlusInterceptor;
 import com.baomidou.mybatisplus.extension.plugins.inner.PaginationInnerInterceptor;
@@ -43,13 +47,22 @@ public class CoreConfig {
 
     /**
      * 模型一次要求多个工具调用时并行执行（Spring AI 默认是逐个执行），替换自动配置里的 ToolCallingManager；
-     * 每次工具调用写调用日志。
+     * 每次工具调用写调用日志。工具执行完顺便取走用户在回答过程中补充的话，先存进对话记录再交给模型。
      */
     @Bean
     public ToolCallingManager toolCallingManager(ObjectProvider<ToolCallbackResolver> toolCallbackResolver,
-                                                 CallRecorder callRecorder) {
+                                                 CallRecorder callRecorder, CardHub cardHub,
+                                                 ObjectProvider<ChatMemory> chatMemory) {
         return new ParallelToolCallingManager(
-                toolCallbackResolver.getIfAvailable(() -> new DelegatingToolCallbackResolver(List.of())), callRecorder);
+                toolCallbackResolver.getIfAvailable(() -> new DelegatingToolCallbackResolver(List.of())), callRecorder,
+                conversationId -> {
+                    List<String> added = cardHub.takeInterjections(conversationId);
+                    if (!added.isEmpty()) {
+                        chatMemory.getObject().add(conversationId,
+                                added.stream().<Message>map(UserMessage::new).toList());
+                    }
+                    return added;
+                });
     }
 
     /**

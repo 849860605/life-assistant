@@ -11,6 +11,7 @@ import com.lifeassistant.skill.travel.hiking.HikingTools;
 import com.lifeassistant.skill.travel.hotel.HotelLinkTools;
 import com.lifeassistant.skill.travel.hotel.HotelPriceTools;
 import com.lifeassistant.skill.travel.trip.RouteTools;
+import com.lifeassistant.skill.travel.trip.TripEditTools;
 import com.lifeassistant.skill.travel.trip.TripTools;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.tool.ToolCallback;
@@ -29,6 +30,7 @@ public class TravelSkill implements LifeSkill {
     private final WeatherTools weatherTools;
     private final HikingTools hikingTools;
     private final TripTools tripTools;
+    private final TripEditTools tripEditTools;
     private final ScheduleTools scheduleTools;
     private final HotelLinkTools hotelLinkTools;
     private final WebSearchTools webSearchTools;
@@ -39,12 +41,13 @@ public class TravelSkill implements LifeSkill {
     private final McpServerRegistry mcpServers;
 
     public TravelSkill(WeatherTools weatherTools, HikingTools hikingTools, TripTools tripTools,
-                       ScheduleTools scheduleTools, HotelLinkTools hotelLinkTools, WebSearchTools webSearchTools,
+                       TripEditTools tripEditTools, ScheduleTools scheduleTools, HotelLinkTools hotelLinkTools, WebSearchTools webSearchTools,
                        HotelPriceTools hotelPriceTools, FlightTools flightTools, FoodTools foodTools, RouteTools routeTools,
                        McpServerRegistry mcpServers) {
         this.weatherTools = weatherTools;
         this.hikingTools = hikingTools;
         this.tripTools = tripTools;
+        this.tripEditTools = tripEditTools;
         this.scheduleTools = scheduleTools;
         this.hotelLinkTools = hotelLinkTools;
         this.webSearchTools = webSearchTools;
@@ -88,7 +91,7 @@ public class TravelSkill implements LifeSkill {
                 - 单点问题（某段机票多少钱、某地附近的酒店价格、怎么去某地、某天天气适不适合爬山）：直接用对应工具查，
                   缺的参数优先用常识和记忆补（比如出发城市用常住城市、人数默认 1 间房 2 人），实在没法确定才问，一次问完。
                 - 完整的行程规划（去哪玩几天、怎么安排）：按下面的步骤做。
-                - 已保存的行程：查看用 listMyTrips / getTrip，修改按最后的修改规则。
+                - 已保存的行程：查看用 listMyTrips / getTrip，修改按最后的修改规则（局部改，不整份重写）。
                 工具返回值里有 card 字段时，结果已经以卡片展示给用户（价格、链接、逐日安排都在卡片上），
                 不要再用表格或列表重复一遍，只用一两句话点评、给出首选；没有 card 字段时才用表格列出。
                 1. 收集需求：完整规划时先调用 askTripRequirements，把已知的信息（目的地、日期、出发地、人数、预算、偏好，
@@ -151,8 +154,15 @@ public class TravelSkill implements LifeSkill {
                 上传的是机票行程单、酒店订单、火车票这类已经订好的单据时：先用一两句列出识别到的关键信息
                 （航班号、日期、起降时间、机场；酒店、入住离店日期、价格），再问要不要记进行程（有几个行程就列出来让用户选，
                 也可以先 listMyTrips 找日期对得上的那个）。用户同意后用 addBookedFlight / addBookedStay 记进去，
-                没问过不要写；火车、门票这类暂时没有专门工具，用 getTrip + saveTripPlan 改对应那天的安排。
-                修改已保存的行程时，先 getTrip 读出当前内容，只改需要改的部分，再用 saveTripPlan 带上 tripId 和完整的 days 保存。
+                没问过不要写；火车、门票这类暂时没有专门工具，用 rewriteTripDays 重写对应那天。
+                修改已保存的行程（只改相关的部分，不要整份重写）：
+                - 先 getTrip 读出当前内容，用里面的 id 和日期定位；工具返回 id 对不上时重新 getTrip 再改。
+                - 按改动大小选工具：换几项用 replaceTripItems，删几项用 removeTripItems，加一两项用 addTripItems，
+                  某天先后顺序用 reorderTripDay，两天对调用 swapTripDays，换酒店用 changeTripHotel（先比价）；
+                  某一天要整天重排、加天减天、改日期、加一段新目的地（连住宿）用 rewriteTripDays，只写变化的那几天。
+                - 同一处改动一次调用改完（几项一起换就放在一个 changes 里），不要拆成好几次保存。
+                - 只有用户要求整体推翻重来、或者改动涉及大半个行程时，才用 saveTripPlan 带上 tripId 重新生成。
+                - 改完会有改动卡（写了改了什么，能撤销），回答里用一两句说改了什么、为什么，不要把整份行程再写一遍。
                 用户已经说清楚改哪天、往哪个方向改（比如"太赶了，安排轻松点""直接按这个改好保存"），就直接改好保存，不要再反问；
                 说不清楚时才问，一次问完。
                 status 里有"用户要保留"的项，地点和时间都不要动。
@@ -162,10 +172,10 @@ public class TravelSkill implements LifeSkill {
                 用户记忆里"去过""不感兴趣"的地方，规划和推荐时都避开。""";
     }
 
-    /** 本地 @Tool 工具对象：天气、爬山计算、行程存取、日程、酒店和机票多平台比价、找餐厅、搜攻略。 */
+    /** 本地 @Tool 工具对象：天气、爬山计算、行程存取和局部修改、日程、酒店和机票多平台比价、找餐厅、搜攻略。 */
     @Override
     public List<Object> tools() {
-        return List.of(weatherTools, hikingTools, tripTools, scheduleTools, hotelLinkTools, hotelPriceTools,
+        return List.of(weatherTools, hikingTools, tripTools, tripEditTools, scheduleTools, hotelLinkTools, hotelPriceTools,
                 flightTools, foodTools, webSearchTools, routeTools);
     }
 

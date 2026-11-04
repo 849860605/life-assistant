@@ -179,7 +179,9 @@ public class TripTools {
      */
     @Tool(description = """
             保存行程并以行程卡展示给用户（新行程是草稿）。规划好后直接调用，不要先在回答里把逐日行程写一遍；
-            修改已保存的行程时传 tripId，会生成新版本。days 写完整的逐日安排；过夜行程在 stays 里写住哪家酒店（用比价结果里的酒店名，
+            整份重新生成已保存的行程时传 tripId，会生成新版本；只改其中几项、某一天、加减天时不要用它，
+            用 replaceTripItems、removeTripItems、addTripItems、reorderTripDay、swapTripDays、rewriteTripDays、changeTripHotel。
+            days 写完整的逐日安排；过夜行程在 stays 里写住哪家酒店（用比价结果里的酒店名，
             价格和链接后端会自动带上）；注意事项、装备清单、天气提醒写进 tips（Markdown）。
             返回 error 时按 problems 改好再调用一次。""")
     public Map<String, Object> saveTripPlan(
@@ -275,7 +277,7 @@ public class TripTools {
     }
 
     /** 读取行程当前版本：有结构化行程时返回 itinerary，早期的行程只有 Markdown 正文。 */
-    @Tool(description = "读取一个已保存行程的当前内容，修改行程前先读。status 标着用户要保留、已预约、已去过的项不要动。")
+    @Tool(description = "读取一个已保存行程的当前内容，修改行程前先读：每项的 id、每天的日期、stays 里住宿的 id 是局部修改工具定位用的。status 标着用户要保留、已预约、已去过的项不要动。")
     public Map<String, Object> getTrip(@ToolParam(description = "行程 id") long tripId, ToolContext toolContext) {
         TripService.TripDetail detail = tripService.get(ToolContexts.user(toolContext), tripId, null);
         Map<String, Object> out = new LinkedHashMap<>();
@@ -457,6 +459,7 @@ public class TripTools {
         if (it.stays() != null && !it.stays().isEmpty()) {
             out.put("stays", it.stays().stream().map(st -> {
                 Map<String, Object> m = new LinkedHashMap<>();
+                m.put("id", st.id());
                 m.put("hotel", st.name());
                 m.put("checkIn", st.checkIn());
                 m.put("checkOut", st.checkOut());

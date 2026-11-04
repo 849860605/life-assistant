@@ -140,10 +140,10 @@ watch(
   { immediate: true },
 );
 
-/** 行程卡变了就取完整行程；还没补坐标时让后端补上。 */
+/** 行程卡变了（换了行程或对话里改出了新版本）就取完整行程；还没补坐标时让后端补上。 */
 watch(
-  () => props.trip?.tripId,
-  async (id) => {
+  () => [props.trip?.tripId, props.trip?.version] as const,
+  async ([id]) => {
     loadedDays.value = null;
     if (!id) return;
     try {

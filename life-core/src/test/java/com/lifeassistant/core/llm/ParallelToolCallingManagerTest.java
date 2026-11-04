@@ -1,5 +1,6 @@
 package com.lifeassistant.core.llm;
 
+import com.lifeassistant.core.auth.ToolContexts;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
@@ -47,6 +48,31 @@ class ParallelToolCallingManagerTest {
                 .containsExactly("weather", "route", "hotel");
         assertThat(message.getResponses()).extracting(ToolResponseMessage.ToolResponse::responseData)
                 .containsExactly("weather:u1", "route:u1", "hotel:u1");
+    }
+
+    /** 回答过程中用户补充的话，跟在工具结果后面作为用户消息交给模型；没有补充时历史最后一条还是工具结果。 */
+    @Test
+    void appendsInterjectionsAfterToolResults() {
+        ToolCallingChatOptions options = ToolCallingChatOptions.builder()
+                .toolCallbacks(slowTool("hotel", 0))
+                .toolContext(Map.of("userCtx", "u1", ToolContexts.CONVERSATION_ID, "c1"))
+                .build();
+        Prompt prompt = new Prompt(List.of(new UserMessage("巴厘岛 8 天")), options);
+        AssistantMessage assistant = AssistantMessage.builder().content("").toolCalls(List.of(
+                new AssistantMessage.ToolCall("1", "function", "hotel", "{}"))).build();
+        ChatResponse response = new ChatResponse(List.of(new Generation(assistant)));
+        java.util.Deque<String> inbox = new java.util.ArrayDeque<>(List.of("还要去科莫多"));
+        ParallelToolCallingManager manager = new ParallelToolCallingManager(new DelegatingToolCallbackResolver(List.of()),
+                com.lifeassistant.core.audit.CallRecorder.NOOP,
+                id -> "c1".equals(id) && !inbox.isEmpty() ? List.of(inbox.poll()) : List.of());
+
+        List<org.springframework.ai.chat.messages.Message> first = manager.executeToolCalls(prompt, response).conversationHistory();
+        assertThat(first.getLast()).isInstanceOf(UserMessage.class);
+        assertThat(first.getLast().getText()).contains("还要去科莫多");
+        assertThat(first.get(first.size() - 2)).isInstanceOf(ToolResponseMessage.class);
+
+        List<org.springframework.ai.chat.messages.Message> second = manager.executeToolCalls(prompt, response).conversationHistory();
+        assertThat(second.getLast()).isInstanceOf(ToolResponseMessage.class);
     }
 
     /** 睡 millis 毫秒后返回"工具名:用户"，用来验证并行和 ToolContext。 */

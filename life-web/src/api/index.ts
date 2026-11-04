@@ -42,6 +42,9 @@ export const api = {
   /** 上传文件并识别，图片和扫描件要十几秒 */
   uploadFile: (file: { path: string; name?: string; file?: File }) => upload<UploadView>("/api/v1/files", file),
   messages: (id: string) => request<ChatMessage[]>("GET", `/api/v1/conversations/${id}/messages?limit=200`),
+  /** 回答还没结束时补充一句；accepted 为 false 表示没有正在进行的回答，要正常发送 */
+  interject: (conversationId: string, id: string, content: string) =>
+    request<{ accepted: boolean }>("POST", `/api/v1/conversations/${conversationId}/interject`, { id, content }),
 
   trips: () => request<Trip[]>("GET", "/api/v1/trips"),
   trip: (id: number, version?: number) =>
