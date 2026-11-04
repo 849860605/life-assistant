@@ -1,0 +1,66 @@
+/* 星络主色（和 App 一致）覆盖 Element Plus 的默认蓝 */
+:root {
+  --el-color-primary: #2f6bf2;
+  --el-color-primary-light-3: #6d97f6;
+  --el-color-primary-light-5: #97b5f9;
+  --el-color-primary-light-7: #c1d3fb;
+  --el-color-primary-light-8: #d5e1fc;
+  --el-color-primary-light-9: #eaf0fe;
+  --el-color-primary-dark-2: #2656c2;
+  --x-bg: #f4f6fb;
+  --x-ink: #1b2333;
+  --x-muted: #6b7486;
+  --x-line: #e4e8f0;
+  --x-tile: linear-gradient(145deg, #ffffff, #e4ecff);
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--x-bg);
+  color: var(--x-ink);
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.page-title {
+  font-size: 20px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.page-sub {
+  color: var(--x-muted);
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+.card {
+  background: #fff;
+  border: 1px solid var(--x-line);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.muted {
+  color: var(--x-muted);
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}

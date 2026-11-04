@@ -20,6 +20,7 @@ public class User {
     private String phoneEnc;
     private String timezone;
     private Integer status;
+    private OffsetDateTime lastLoginAt;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
 }

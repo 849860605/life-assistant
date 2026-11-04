@@ -123,6 +123,62 @@ class LifeApiIntegrationTest {
     }
 
     @Test
+    void adminManagesUsersAndAdmins() throws Exception {
+        String admin = adminLogin("admin", "admin-pass-123");
+        // 管理端 token 不能当用户 token 用，反过来也不行
+        assertThat(call(admin, HttpMethod.GET, "/api/v1/memories", null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(call(token, HttpMethod.GET, "/admin/api/v1/overview", null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+
+        // 弱密码建不了用户
+        assertThat(call(admin, HttpMethod.POST, "/admin/api/v1/users",
+                Map.of("username", "carol", "password", "short")).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        long bobId = body(call(admin, HttpMethod.POST, "/admin/api/v1/users",
+                Map.of("username", "carol", "password", "carol-pass-1234", "nickname", "卡罗尔"))).path("data").path("id").asLong();
+        String bobToken = loginAs("carol", "carol-pass-1234");
+
+        // 重置密码：旧 token 失效，新密码能登录
+        assertThat(call(admin, HttpMethod.POST, "/admin/api/v1/users/" + bobId + "/password",
+                Map.of("password", "carol-new-5678")).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(call(bobToken, HttpMethod.GET, "/api/v1/auth/me", null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        bobToken = loginAs("carol", "carol-new-5678");
+
+        // 停用：已登录的立即下线，再登录报"账号已被禁用"
+        assertThat(call(admin, HttpMethod.POST, "/admin/api/v1/users/" + bobId + "/status",
+                Map.of("enabled", false)).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(call(bobToken, HttpMethod.GET, "/api/v1/auth/me", null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(rest.postForEntity("/api/v1/auth/login", Map.of("username", "carol", "password", "carol-new-5678"),
+                String.class).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+
+        // 列表和概要只有计数，能搜到 bob
+        JsonNode page = body(call(admin, HttpMethod.GET, "/admin/api/v1/users?keyword=caro", null)).path("data");
+        assertThat(page.path("total").asLong()).isEqualTo(1);
+        assertThat(page.path("items").get(0).path("status").asInt()).isZero();
+        assertThat(body(call(admin, HttpMethod.GET, "/admin/api/v1/overview", null)).path("data").path("users").asLong())
+                .isGreaterThanOrEqualTo(2);
+
+        // 不能停用自己；普通管理员不能管管理员
+        long adminId = body(call(admin, HttpMethod.GET, "/admin/api/v1/auth/me", null)).path("data").path("id").asLong();
+        assertThat(call(admin, HttpMethod.POST, "/admin/api/v1/admins/" + adminId + "/status",
+                Map.of("enabled", false)).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(call(admin, HttpMethod.POST, "/admin/api/v1/admins",
+                Map.of("username", "ops", "password", "ops-pass-1234", "role", "ADMIN")).getStatusCode()).isEqualTo(HttpStatus.OK);
+        String ops = adminLogin("ops", "ops-pass-1234");
+        assertThat(call(ops, HttpMethod.GET, "/admin/api/v1/admins", null).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+
+        // 改自己密码要原密码；改完新密码能登录
+        assertThat(call(ops, HttpMethod.POST, "/admin/api/v1/auth/password",
+                Map.of("oldPassword", "wrong-pass-1", "newPassword", "ops-new-5678")).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(call(ops, HttpMethod.POST, "/admin/api/v1/auth/password",
+                Map.of("oldPassword", "ops-pass-1234", "newPassword", "ops-new-5678")).getStatusCode()).isEqualTo(HttpStatus.OK);
+        adminLogin("ops", "ops-new-5678");
+
+        // 操作都记了日志
+        JsonNode logs = body(call(admin, HttpMethod.GET, "/admin/api/v1/op-logs?size=50", null)).path("data").path("items");
+        assertThat(logs.findValuesAsText("action")).contains("CREATE_USER", "RESET_USER_PASSWORD", "DISABLE_USER",
+                "CREATE_ADMIN", "CHANGE_OWN_PASSWORD");
+    }
+
+    @Test
     void wrongPasswordIsRejected() {
         ResponseEntity<String> response = rest.postForEntity("/api/v1/auth/login",
                 Map.of("username", "alice", "password", "wrong"), String.class);
@@ -319,6 +375,22 @@ class LifeApiIntegrationTest {
                 Map.of("username", username, "password", password), String.class);
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         return objectMapper.readTree(response.getBody()).path("data").path("token").asText();
+    }
+
+    private String adminLogin(String username, String password) throws Exception {
+        ResponseEntity<String> response = rest.postForEntity("/admin/api/v1/auth/login",
+                Map.of("username", username, "password", password), String.class);
+        assertThat(response.getStatusCode()).as(response.getBody()).isEqualTo(HttpStatus.OK);
+        return objectMapper.readTree(response.getBody()).path("data").path("token").asText();
+    }
+
+    private ResponseEntity<String> call(String bearer, HttpMethod method, String path, Object body) {
+        return rest.exchange(path, method, new HttpEntity<>(body, headers(bearer)), String.class);
+    }
+
+    private JsonNode body(ResponseEntity<String> response) throws Exception {
+        assertThat(response.getStatusCode()).as(response.getBody()).isEqualTo(HttpStatus.OK);
+        return objectMapper.readTree(response.getBody());
     }
 
     private String streamChat(String conversationId, String content) {

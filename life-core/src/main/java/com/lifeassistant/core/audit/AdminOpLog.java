@@ -19,5 +19,6 @@ public class AdminOpLog {
     private String action;
     private String target;
     private String detail;
+    private String ip;
     private OffsetDateTime createdAt;
 }

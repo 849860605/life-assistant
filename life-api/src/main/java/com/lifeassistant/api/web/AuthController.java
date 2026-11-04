@@ -52,6 +52,7 @@ public class AuthController {
                 () -> userService.authenticate(request.username(), request.password()));
         StpUtil.login(user.getId(), new SaLoginParameter()
                 .setDeviceType(request.device() == null ? "WEB" : request.device()));
+        userService.markLogin(user.getId());
         return ApiResponse.ok(new LoginResponse(StpUtil.getTokenValue(), UserView.of(user)));
     }
 
