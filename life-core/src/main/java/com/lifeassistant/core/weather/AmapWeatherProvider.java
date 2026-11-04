@@ -3,7 +3,7 @@ package com.lifeassistant.core.weather;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.lifeassistant.common.error.BizException;
 import com.lifeassistant.common.error.ErrorCode;
-import com.lifeassistant.core.config.LifeProperties;
+import com.lifeassistant.core.integration.IntegrationSettings;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -28,10 +28,11 @@ public class AmapWeatherProvider implements WeatherProvider {
     private static final ZoneId CHINA = ZoneId.of("Asia/Shanghai");
 
     private final RestClient restClient;
-    private final String key;
+    private final IntegrationSettings settings;
 
-    public AmapWeatherProvider(RestClient.Builder externalRestClientBuilder, LifeProperties properties) {
-        this.key = properties.getAmap().getKey();
+    /** Key 和开关每次调用时从后台"高德 Web 服务"取（没在后台填就用 AMAP_KEY）。 */
+    public AmapWeatherProvider(RestClient.Builder externalRestClientBuilder, IntegrationSettings settings) {
+        this.settings = settings;
         this.restClient = externalRestClientBuilder.clone().baseUrl("https://restapi.amap.com").build();
     }
 
@@ -42,7 +43,7 @@ public class AmapWeatherProvider implements WeatherProvider {
 
     @Override
     public boolean available() {
-        return StringUtils.hasText(key);
+        return StringUtils.hasText(key());
     }
 
     /** 坐标走逆地理编码取区县编码；地名先地理编码，查不到再按关键字搜地点（景区名常常要走这一步）。 */
@@ -151,7 +152,7 @@ public class AmapWeatherProvider implements WeatherProvider {
         }
         try {
             JsonNode body = restClient.get().uri(b -> {
-                b.path(path).queryParam("key", key);
+                b.path(path).queryParam("key", key());
                 for (int i = 0; i + 1 < params.length; i += 2) {
                     b.queryParam(params[i], params[i + 1]);
                 }
@@ -166,5 +167,10 @@ public class AmapWeatherProvider implements WeatherProvider {
             log.warn("调用高德 {} 失败：{}", path, e.getMessage());
             throw new BizException(ErrorCode.EXTERNAL_SERVICE, "高德天气暂时不可用", e);
         }
+    }
+
+    /** 当前生效的高德 Web 服务 Key；没配或后台停用了返回 null。 */
+    private String key() {
+        return settings.value("amap", "key");
     }
 }

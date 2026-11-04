@@ -3,7 +3,8 @@ package com.lifeassistant.core.weather;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.lifeassistant.common.error.BizException;
 import com.lifeassistant.common.error.ErrorCode;
-import com.lifeassistant.core.config.LifeProperties;
+import com.lifeassistant.core.integration.ByConfig;
+import com.lifeassistant.core.integration.IntegrationSettings;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -23,18 +24,14 @@ import java.util.function.Function;
 @Component
 public class QWeatherProvider implements WeatherProvider {
 
-    private final RestClient restClient;
-    private final boolean configured;
+    private final RestClient.Builder builder;
+    private final IntegrationSettings settings;
+    private final ByConfig<RestClient> restClient = new ByConfig<>();
 
-    /** 没配 Host 或 Key 也能正常启动，到真正调用时才报错（见 get）。 */
-    public QWeatherProvider(RestClient.Builder externalRestClientBuilder, LifeProperties properties) {
-        LifeProperties.QWeather config = properties.getQweather();
-        this.configured = StringUtils.hasText(config.getApiHost()) && StringUtils.hasText(config.getApiKey());
-        String host = configured ? config.getApiHost().replaceFirst("^https?://", "") : "localhost";
-        this.restClient = externalRestClientBuilder.clone()
-                .baseUrl("https://" + host)
-                .defaultHeader("X-QW-Api-Key", configured ? config.getApiKey() : "")
-                .build();
+    /** Host、Key 和开关每次调用时从后台配置取；没配也能正常启动，到真正调用时才报错（见 get）。 */
+    public QWeatherProvider(RestClient.Builder externalRestClientBuilder, IntegrationSettings settings) {
+        this.builder = externalRestClientBuilder.clone();
+        this.settings = settings;
     }
 
     @Override
@@ -44,7 +41,8 @@ public class QWeatherProvider implements WeatherProvider {
 
     @Override
     public boolean available() {
-        return configured;
+        return StringUtils.hasText(settings.value("qweather", "api-host"))
+                && StringUtils.hasText(settings.value("qweather", "api-key"));
     }
 
     /** "经度,纬度" 直接构造位置（保留两位小数作为 id），否则调城市搜索取第一条结果。 */
@@ -124,11 +122,17 @@ public class QWeatherProvider implements WeatherProvider {
 
     /** 统一 GET 调用：带 lang=zh 并校验业务码 code=200；未配置、调用失败或返回错误码都抛 BizException。 */
     private JsonNode get(String path, String param, String value) {
-        if (!configured) {
-            throw new BizException(ErrorCode.EXTERNAL_SERVICE, "还没有配置和风天气（QWEATHER_API_HOST / QWEATHER_API_KEY）");
+        String host = settings.value("qweather", "api-host");
+        String key = settings.value("qweather", "api-key");
+        if (!StringUtils.hasText(host) || !StringUtils.hasText(key)) {
+            throw new BizException(ErrorCode.EXTERNAL_SERVICE, "还没有配置和风天气（QWEATHER_API_HOST / QWEATHER_API_KEY）或已在后台停用");
         }
+        RestClient client = restClient.get(host + "|" + key, () -> builder.clone()
+                .baseUrl("https://" + host.replaceFirst("^https?://", ""))
+                .defaultHeader("X-QW-Api-Key", key)
+                .build());
         try {
-            JsonNode body = restClient.get()
+            JsonNode body = client.get()
                     .uri(b -> b.path(path).queryParam(param, value).queryParam("lang", "zh").build())
                     .retrieve()
                     .body(JsonNode.class);

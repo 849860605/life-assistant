@@ -20,6 +20,6 @@ public class WeatherService {
     public WeatherProvider current() {
         return providers.stream().filter(WeatherProvider::available).findFirst()
                 .orElseThrow(() -> new BizException(ErrorCode.EXTERNAL_SERVICE,
-                        "天气没有配置：在 .env 里填和风天气或高德的 Key"));
+                        "天气没有可用的来源：在后台\"第三方平台\"里配置或启用和风天气、高德"));
     }
 }

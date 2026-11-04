@@ -38,15 +38,12 @@ public class VisionReader {
             看不清的写「看不清」，不要猜；不要加解释，只输出转写内容。""";
 
     private final ChatModelRegistry models;
-    private final LifeProperties properties;
     private final UsageRecorder usageRecorder;
     private final ObjectMapper objectMapper;
     private final RestClient http;
 
-    public VisionReader(ChatModelRegistry models, LifeProperties properties, UsageRecorder usageRecorder,
-                        ObjectMapper objectMapper) {
+    public VisionReader(ChatModelRegistry models, UsageRecorder usageRecorder, ObjectMapper objectMapper) {
         this.models = models;
-        this.properties = properties;
         this.usageRecorder = usageRecorder;
         this.objectMapper = objectMapper;
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
@@ -57,8 +54,8 @@ public class VisionReader {
 
     /** 一张图或几页扫描件（同一个文件）一起识别，返回转写的文字。images 是 JPEG/PNG 等的原始字节和类型。 */
     public String read(List<Image> images, Long userId) {
-        ModelSpec spec = models.resolve(properties.getModels().getVision());
-        LifeProperties.Provider provider = properties.getLlm().getProviders().get(spec.provider());
+        ModelSpec spec = models.resolve(models.models().getVision());
+        LifeProperties.Provider provider = models.provider(spec.provider());
         if (provider == null || provider.getApiKey() == null || provider.getApiKey().isBlank()) {
             throw new BizException(ErrorCode.INTERNAL, "看图模型没有配置 Key，识别不了图片");
         }
@@ -71,7 +68,10 @@ public class VisionReader {
         Map<String, Object> body = Map.of("model", spec.model(),
                 "messages", List.of(Map.of("role", "user", "content", content)));
         try {
-            String raw = http.post().uri(endpoint(provider)).header("Authorization", "Bearer " + provider.getApiKey())
+            boolean customHeader = provider.getAuthHeader() != null && !provider.getAuthHeader().isBlank();
+            String raw = http.post().uri(endpoint(provider))
+                    .header(customHeader ? provider.getAuthHeader().trim() : "Authorization",
+                            customHeader ? provider.getApiKey() : "Bearer " + provider.getApiKey())
                     .contentType(MediaType.APPLICATION_JSON).body(body).retrieve().body(String.class);
             JsonNode json = objectMapper.readTree(raw);
             JsonNode usage = json.path("usage");

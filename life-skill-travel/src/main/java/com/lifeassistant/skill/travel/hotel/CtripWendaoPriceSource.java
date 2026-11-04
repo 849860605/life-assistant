@@ -35,10 +35,10 @@ public class CtripWendaoPriceSource implements HotelPriceSource {
         return "携程";
     }
 
-    /** 匿名也能用，所以始终可用。 */
+    /** 匿名也能用，后台没停用就可用。 */
     @Override
     public boolean available() {
-        return true;
+        return client.available();
     }
 
     @Override

@@ -46,8 +46,19 @@ export const ACTION_LABELS: Record<string, string> = {
   RESET_ADMIN_PASSWORD: "重置管理员密码",
   ENABLE_ADMIN: "启用管理员",
   DISABLE_ADMIN: "停用管理员",
+  CREATE_LLM_PROVIDER: "新建模型提供方",
+  UPDATE_LLM_PROVIDER: "修改模型提供方",
+  DELETE_LLM_PROVIDER: "删除模型提供方",
+  CREATE_LLM_MODEL: "新建模型",
+  UPDATE_LLM_MODEL: "修改模型",
+  DELETE_LLM_MODEL: "删除模型",
+  ASSIGN_LLM_ROLE: "分配模型用途",
   EVAL_ROUTING: "运行路由评测",
   RETRY_REMINDER: "重发提醒",
+  UPDATE_INTEGRATION: "修改第三方平台",
+  ENABLE_INTEGRATION: "启用第三方平台",
+  DISABLE_INTEGRATION: "停用第三方平台",
+  TEST_INTEGRATION: "测试第三方平台",
 };
 
 export function actionLabel(a: string): string {

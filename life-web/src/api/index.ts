@@ -4,6 +4,7 @@ import type {
   TodayAgenda,
   BriefSettings,
   UploadView,
+  ModelChoices,
   BookingState, ChangeReason, ChatMessage, Conversation, DayPreview, FlightPick, FlightPreview, FlightRules, FlightSearch, FoodResult, DayTickets, HotelComparison, HotelSearchResult, SpotRules, TicketProduct, TuniuTicket, TicketSpot, TuniuCabin, StayPick, StayPreview, Meal, MealPreview, MemoryCategory, MemoryItem, OptimizeGoal, Place, PlacePick,
   ScheduleEvent, TokenView,
   TripDetail, TripVersion, Trip, UserView,
@@ -32,6 +33,8 @@ export const api = {
   today: (city: string) => request<TodayAgenda>("GET", "/api/v1/home/today" + qs({ city })),
   homeAddress: () => request<{ address: string | null }>("GET", "/api/v1/home/address"),
   saveHomeAddress: (address: string) => request<{ address: string | null }>("PUT", "/api/v1/home/address", { address }),
+  models: () => request<ModelChoices>("GET", "/api/v1/models"),
+  chooseModel: (modelId: number | null) => request<ModelChoices>("PUT", "/api/v1/me/model", { modelId }),
   briefSettings: () => request<BriefSettings>("GET", "/api/v1/brief/settings"),
   saveBriefSettings: (s: { enabled: boolean; sendTime: string; city?: string | null }) =>
     request<BriefSettings>("PUT", "/api/v1/brief/settings", s),

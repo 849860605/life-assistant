@@ -4,8 +4,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lifeassistant.common.error.BizException;
 import com.lifeassistant.common.error.ErrorCode;
-import com.lifeassistant.core.config.LifeProperties;
+import com.lifeassistant.core.integration.ByConfig;
+import com.lifeassistant.core.integration.IntegrationSettings;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
@@ -23,12 +25,15 @@ public class BarkNotifier implements Notifier {
 
     public static final String TYPE = "BARK";
 
-    private final RestClient restClient;
+    private final RestClient.Builder builder;
+    private final IntegrationSettings settings;
     private final ObjectMapper objectMapper;
+    private final ByConfig<RestClient> restClient = new ByConfig<>();
 
-    /** 服务地址取 life.bark.server，可指向自建的 bark-server。 */
-    public BarkNotifier(RestClient.Builder externalRestClientBuilder, LifeProperties properties, ObjectMapper objectMapper) {
-        this.restClient = externalRestClientBuilder.clone().baseUrl(properties.getBark().getServer()).build();
+    /** 服务地址和开关每次发送时从后台配置取（没在后台填就用 life.bark.server），可指向自建的 bark-server。 */
+    public BarkNotifier(RestClient.Builder externalRestClientBuilder, IntegrationSettings settings, ObjectMapper objectMapper) {
+        this.builder = externalRestClientBuilder.clone();
+        this.settings = settings;
         this.objectMapper = objectMapper;
     }
 
@@ -40,6 +45,11 @@ public class BarkNotifier implements Notifier {
     /** 调 Bark 的 /push 接口；配置里缺 deviceKey、HTTP 调用失败或 Bark 返回非 200 都抛 BizException。 */
     @Override
     public void send(String channelConfig, Notice notice) {
+        String server = settings.value("bark", "server");
+        if (!StringUtils.hasText(server)) {
+            throw new BizException(ErrorCode.EXTERNAL_SERVICE, "Bark 推送已在后台停用");
+        }
+        RestClient client = restClient.get(server, () -> builder.clone().baseUrl(server).build());
         String deviceKey;
         try {
             deviceKey = objectMapper.readTree(channelConfig).path("deviceKey").asText(null);
@@ -63,7 +73,7 @@ public class BarkNotifier implements Notifier {
             body.put("level", notice.level());
         }
         try {
-            JsonNode result = restClient.post().uri("/push").body(body).retrieve().body(JsonNode.class);
+            JsonNode result = client.post().uri("/push").body(body).retrieve().body(JsonNode.class);
             if (result != null && result.path("code").asInt(200) != 200) {
                 throw new BizException(ErrorCode.EXTERNAL_SERVICE, "Bark 返回错误：" + result.path("message").asText());
             }

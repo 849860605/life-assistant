@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lifeassistant.core.audit.CallRecorder;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
+import com.lifeassistant.core.integration.IntegrationSettings;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -33,7 +33,7 @@ public class TuniuClient {
     private static final int PER_DAY = 50;
     private static final long CACHE_MILLIS = 30 * 60_000L;
 
-    private final String apiKey;
+    private final IntegrationSettings settings;
     private final ObjectMapper objectMapper;
     private final CallRecorder recorder;
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(8)).build();
@@ -42,14 +42,16 @@ public class TuniuClient {
     private LocalDate day = LocalDate.now();
     private int usedToday;
 
-    public TuniuClient(@Value("${life.tuniu.api-key:}") String apiKey, ObjectMapper objectMapper, CallRecorder recorder) {
-        this.apiKey = apiKey;
+    /** Key 和开关每次调用时从后台配置取（没在后台填就用 TUNIU_API_KEY）。 */
+    public TuniuClient(IntegrationSettings settings, ObjectMapper objectMapper, CallRecorder recorder) {
+        this.settings = settings;
         this.objectMapper = objectMapper;
         this.recorder = recorder;
     }
 
+    /** 配了 Key 且后台没停用。 */
     public boolean available() {
-        return StringUtils.hasText(apiKey);
+        return StringUtils.hasText(settings.value("tuniu", "api-key"));
     }
 
     /**
@@ -92,15 +94,46 @@ public class TuniuClient {
         usedToday++;
     }
 
+    /**
+     * 后台"测试"用：列一下酒店服务的工具，返回工具个数；也算一次额度。没配置、停用或出错抛 IllegalStateException。
+     */
+    public int ping() {
+        take();
+        return recorder.platform("途牛", "tools/list", () -> {
+            JsonNode message = send("hotel", Map.of("jsonrpc", "2.0", "id", 1, "method", "tools/list"));
+            return message.path("result").path("tools").size();
+        });
+    }
+
     private JsonNode post(String service, String tool, Map<String, Object> arguments) {
         try {
-            String body = objectMapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", 1, "method", "tools/call",
+            JsonNode message = send(service, Map.of("jsonrpc", "2.0", "id", 1, "method", "tools/call",
                     "params", Map.of("name", tool, "arguments", arguments)));
+            JsonNode content = message.path("result").path("content").path(0).path("text");
+            if (message.path("result").path("isError").asBoolean(false)) {
+                throw new IllegalStateException("途牛报错：" + abbreviate(content.asText()));
+            }
+            return content.isMissingNode() ? objectMapper.createObjectNode() : objectMapper.readTree(content.asText());
+        } catch (IllegalStateException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalStateException("途牛暂时查不到：" + e.getMessage());
+        }
+    }
+
+    /** 发一个 JSON-RPC 请求，返回整条响应消息；HTTP 出错或途牛报错抛 IllegalStateException。 */
+    private JsonNode send(String service, Map<String, Object> request) {
+        String key = settings.value("tuniu", "api-key");
+        if (!StringUtils.hasText(key)) {
+            throw new IllegalStateException("途牛没有配置或已在后台停用");
+        }
+        try {
+            String body = objectMapper.writeValueAsString(request);
             HttpResponse<String> res = http.send(HttpRequest.newBuilder(URI.create(BASE + service))
                     .timeout(Duration.ofSeconds(40))
                     .header("Content-Type", "application/json")
                     .header("Accept", "application/json, text/event-stream")
-                    .header("apiKey", apiKey)
+                    .header("apiKey", key)
                     .POST(HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString());
             if (res.statusCode() != 200) {
                 throw new IllegalStateException("途牛返回 " + res.statusCode() + "：" + abbreviate(res.body()));
@@ -109,11 +142,7 @@ public class TuniuClient {
             if (message.has("error")) {
                 throw new IllegalStateException("途牛报错：" + message.path("error").path("message").asText());
             }
-            JsonNode content = message.path("result").path("content").path(0).path("text");
-            if (message.path("result").path("isError").asBoolean(false)) {
-                throw new IllegalStateException("途牛报错：" + abbreviate(content.asText()));
-            }
-            return content.isMissingNode() ? objectMapper.createObjectNode() : objectMapper.readTree(content.asText());
+            return message;
         } catch (IllegalStateException e) {
             throw e;
         } catch (InterruptedException e) {

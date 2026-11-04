@@ -12,6 +12,20 @@ export interface UserView {
   timezone: string;
 }
 
+/** App 里可选的一个对话模型 */
+export interface ModelChoice {
+  id: number;
+  name: string;
+  description: string | null;
+}
+
+/** 模型选择：可选的、自己选的（没选为空）、默认的 */
+export interface ModelChoices {
+  models: ModelChoice[];
+  selected: number | null;
+  defaultId: number | null;
+}
+
 export interface Conversation {
   id: string;
   title: string | null;

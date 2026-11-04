@@ -1,7 +1,7 @@
 package com.lifeassistant.core.platform;
 
 import com.lifeassistant.core.audit.CallRecorder;
-import org.springframework.beans.factory.annotation.Value;
+import com.lifeassistant.core.integration.IntegrationSettings;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -18,11 +18,12 @@ import java.util.Map;
 public class CtripWendaoClient {
 
     private final RestClient restClient;
-    private final String token;
+    private final IntegrationSettings settings;
     private final CallRecorder recorder;
 
-    public CtripWendaoClient(@Value("${life.hotel.ctrip.token:}") String token, CallRecorder recorder) {
-        this.token = token;
+    /** Token 和开关每次调用时从后台配置取（没在后台填就用 TRIPAI_API_KEY）。 */
+    public CtripWendaoClient(IntegrationSettings settings, CallRecorder recorder) {
+        this.settings = settings;
         this.recorder = recorder;
         this.restClient = RestClient.builder()
                 .baseUrl("https://wendao-skill-prod.ctrip.com")
@@ -30,8 +31,17 @@ public class CtripWendaoClient {
                 .build();
     }
 
-    /** 提一个问题，返回 Markdown 原文；网络或接口错误抛 RestClientException。 */
+    /** 后台没有停用携程（不填 Token 也能匿名用）。 */
+    public boolean available() {
+        return settings.enabled("ctrip");
+    }
+
+    /** 提一个问题，返回 Markdown 原文；网络或接口错误抛 RestClientException，后台停用了抛 IllegalStateException。 */
     public String query(String question) {
+        if (!available()) {
+            throw new IllegalStateException("携程问道已在后台停用");
+        }
+        String token = settings.value("ctrip", "token");
         Map<String, Object> body = new LinkedHashMap<>();
         if (token != null && !token.isBlank()) {
             body.put("token", token);

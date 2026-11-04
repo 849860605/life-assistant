@@ -88,8 +88,103 @@ export interface OpLog {
   createdAt: string;
 }
 
+/** 模型提供方：Key 只回显后 4 位（keyTail），models 是它下面的模型数 */
+export interface LlmProvider {
+  id: number;
+  code: string;
+  name: string;
+  type: "openai" | "dashscope";
+  baseUrl: string | null;
+  completionsPath: string | null;
+  keyTail: string | null;
+  hasKey: boolean;
+  authHeader: string | null;
+  noThinking: string | null;
+  enabled: boolean;
+  sort: number;
+  models: number;
+}
+
+/** 新建、修改提供方：apiKey 留空表示不改 */
+export interface LlmProviderForm {
+  code: string;
+  name: string;
+  type: string;
+  baseUrl: string;
+  completionsPath: string;
+  apiKey: string;
+  authHeader: string;
+  noThinking: string;
+  enabled: boolean;
+  sort: number;
+}
+
+/** 模型：单价是元 / 百万 Token，空表示不算费用 */
+export interface LlmModel {
+  id: number;
+  providerCode: string;
+  model: string;
+  displayName: string;
+  description: string | null;
+  enabled: boolean;
+  userSelectable: boolean;
+  supportsTools: boolean;
+  priceInput: number | null;
+  priceCachedInput: number | null;
+  priceOutput: number | null;
+  sort: number;
+}
+
+export type LlmModelForm = Omit<LlmModel, "id">;
+
+/** 测试连接的结果 */
+export interface LlmTestResult {
+  ok: boolean;
+  millis: number;
+  model: string;
+  reply: string | null;
+  error: string | null;
+}
+
 /** 某个工具或平台近几天的调用统计（后端原样返回的列名） */
 export type CallStat = Record<string, string | number | null>;
+
+/** 第三方平台的一个字段：敏感字段只给 masked（如 ••••a1b2）；source 是生效值来源（ADMIN 后台、ENV 是 .env） */
+export interface IntegrationField {
+  name: string;
+  label: string;
+  kind: "SECRET" | "TEXT" | "READONLY";
+  env: string | null;
+  placeholder: string | null;
+  value: string | null;
+  masked: string | null;
+  source: "ADMIN" | "ENV" | null;
+  envValue: boolean;
+}
+
+/** 一个第三方平台：status 是 ON（启用且配好）、UNSET（启用了但缺 Key 或地址）、OFF（停用） */
+export interface Integration {
+  code: string;
+  name: string;
+  category: string;
+  description: string;
+  impact: string;
+  testNote: string | null;
+  keyOptional: boolean;
+  enabled: boolean;
+  status: "ON" | "UNSET" | "OFF";
+  fields: IntegrationField[];
+  calls7d: number | null;
+  failures7d: number | null;
+  avgMs: number | null;
+  updatedAt: string | null;
+}
+
+export interface IntegrationTest {
+  ok: boolean;
+  ms: number;
+  message: string;
+}
 
 function qs(params: Record<string, string | number | undefined | null>): string {
   const parts = Object.entries(params)
@@ -121,6 +216,25 @@ export const api = {
   resetAdminPassword: (id: number, password: string) => request<void>("POST", `/admins/${id}/password`, { password }),
   setAdminEnabled: (id: number, enabled: boolean) => request<Admin>("POST", `/admins/${id}/status`, { enabled }),
 
+  llmProviders: () => request<LlmProvider[]>("GET", "/llm/providers"),
+  createLlmProvider: (body: LlmProviderForm) => request<void>("POST", "/llm/providers", body),
+  updateLlmProvider: (code: string, body: LlmProviderForm) => request<void>("PUT", `/llm/providers/${code}`, body),
+  deleteLlmProvider: (code: string) => request<void>("DELETE", `/llm/providers/${code}`),
+  testLlmProvider: (code: string, model?: string) => request<LlmTestResult>("POST", `/llm/providers/${code}/test`, { model }),
+  llmModels: () => request<LlmModel[]>("GET", "/llm/models"),
+  createLlmModel: (body: LlmModelForm) => request<LlmModel>("POST", "/llm/models", body),
+  updateLlmModel: (id: number, body: LlmModelForm) => request<LlmModel>("PUT", `/llm/models/${id}`, body),
+  deleteLlmModel: (id: number) => request<void>("DELETE", `/llm/models/${id}`),
+  llmRoles: () => request<Record<string, number | null>>("GET", "/llm/roles"),
+  assignLlmRole: (role: string, modelId: number) => request<void>("PUT", `/llm/roles/${role}`, { modelId }),
+
   opLogs: (p: { action?: string; page: number; size: number }) => request<Page<OpLog>>("GET", "/op-logs" + qs(p)),
   opActions: () => request<string[]>("GET", "/op-logs/actions"),
+
+  integrations: () => request<Integration[]>("GET", "/integrations"),
+  updateIntegration: (code: string, values: Record<string, string>, clear: string[]) =>
+    request<Integration>("PUT", `/integrations/${code}`, { values, clear }),
+  setIntegrationEnabled: (code: string, enabled: boolean) =>
+    request<Integration>("POST", `/integrations/${code}/status`, { enabled }),
+  testIntegration: (code: string) => request<IntegrationTest>("POST", `/integrations/${code}/test`),
 };

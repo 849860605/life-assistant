@@ -106,6 +106,44 @@ class ChatModelRegistryTest {
         assertThat(requestBody.get()).contains("\"model\":\"glm-4-flash\"");
     }
 
+    @Test
+    void customAuthHeaderReplacesBearer() throws Exception {
+        AtomicReference<String> auth = new AtomicReference<>();
+        AtomicReference<String> apiKey = new AtomicReference<>();
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/chat/completions", exchange -> {
+            auth.set(exchange.getRequestHeaders().getFirst("Authorization"));
+            apiKey.set(exchange.getRequestHeaders().getFirst("api-key"));
+            byte[] body = """
+                    {"id":"1","object":"chat.completion","created":1,"model":"dots",
+                     "choices":[{"index":0,"message":{"role":"assistant","content":"你好"},"finish_reason":"stop"}]}"""
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+        LifeProperties.Provider dots = provider("openai", "http://127.0.0.1:" + server.getAddress().getPort(), null, "ak-1");
+        dots.setAuthHeader("api-key");
+        properties.getLlm().getProviders().put("dots", dots);
+
+        assertThat(registry.ping(registry.resolve("dots:dots3"))).isEqualTo("你好");
+        // Key 放在 api-key 头里，不再带 Authorization: Bearer
+        assertThat(apiKey.get()).isEqualTo("ak-1");
+        assertThat(auth.get()).isNull();
+    }
+
+    @Test
+    void changedProviderRebuildsClient() {
+        properties.getLlm().getProviders().get("deepseek").setApiKey("sk-1");
+        ModelSpec spec = registry.resolve("deepseek:deepseek-chat");
+        var first = registry.client(spec);
+        assertThat(registry.client(spec)).isSameAs(first);
+        properties.getLlm().getProviders().get("deepseek").setApiKey("sk-2");
+        assertThat(registry.client(spec)).isNotSameAs(first);
+    }
+
     private static LifeProperties.Provider provider(String type, String baseUrl, String path, String apiKey) {
         LifeProperties.Provider provider = new LifeProperties.Provider();
         provider.setType(type);

@@ -3,6 +3,7 @@ package com.lifeassistant.skill.travel.platform;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lifeassistant.core.audit.CallRecorder;
+import com.lifeassistant.core.integration.IntegrationSettings;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -29,22 +30,27 @@ public class FliggyCli {
 
     private final java.util.concurrent.Semaphore gate = new java.util.concurrent.Semaphore(MAX_PARALLEL, true);
 
-    private final String apiKey;
+    private final IntegrationSettings settings;
     private final List<String> command;
     private final ObjectMapper objectMapper;
     private final CallRecorder recorder;
 
-    public FliggyCli(@Value("${life.hotel.fliggy.api-key:}") String apiKey,
+    /**
+     * Key 和开关每次调用时从后台配置取（没在后台填就用 FLYAI_API_KEY）；要执行的命令只能在 .env 的 FLYAI_COMMAND 里改，
+     * 不开放给后台，免得后台账号能在服务器上执行任意命令。
+     */
+    public FliggyCli(IntegrationSettings settings,
                      @Value("${life.hotel.fliggy.command:flyai}") String command, ObjectMapper objectMapper,
                      CallRecorder recorder) {
-        this.apiKey = apiKey;
+        this.settings = settings;
         this.command = Arrays.asList(command.trim().split("\\s+"));
         this.objectMapper = objectMapper;
         this.recorder = recorder;
     }
 
+    /** 配了 Key 且后台没停用。 */
     public boolean available() {
-        return StringUtils.hasText(apiKey);
+        return StringUtils.hasText(settings.value("fliggy", "api-key"));
     }
 
     /**
@@ -94,6 +100,10 @@ public class FliggyCli {
     }
 
     private JsonNode doRun(List<String> args) {
+        String apiKey = settings.value("fliggy", "api-key");
+        if (!StringUtils.hasText(apiKey)) {
+            throw new IllegalStateException("飞猪没有配置或已在后台停用");
+        }
         List<String> full = new ArrayList<>(command);
         full.addAll(args);
         try {

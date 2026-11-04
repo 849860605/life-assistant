@@ -3,7 +3,6 @@ package com.lifeassistant.skill.travel.hotel;
 import com.lifeassistant.core.audit.CallRecorder;
 import com.lifeassistant.core.audit.UsageRecorder;
 import com.lifeassistant.core.card.CardHub;
-import com.lifeassistant.core.config.LifeProperties;
 import com.lifeassistant.core.llm.ChatModelRegistry;
 import com.lifeassistant.core.llm.ModelSpec;
 import lombok.RequiredArgsConstructor;
@@ -49,7 +48,6 @@ public class HotelRanker {
 
     private final HotelReviews reviews;
     private final ChatModelRegistry chatModels;
-    private final LifeProperties properties;
     private final UsageRecorder usageRecorder;
     private final CallRecorder recorder;
 
@@ -148,7 +146,7 @@ public class HotelRanker {
                     .append("｜住客评价亮点 ").append(r.highlight() == null ? "无" : r.highlight()).append('\n');
         }
         try {
-            ModelSpec model = chatModels.resolve(properties.getModels().getRouter());
+            ModelSpec model = chatModels.resolve(chatModels.models().getRouter());
             ResponseEntity<ChatResponse, Matches> response = chatModels.client(model).prompt()
                     .system(PROMPT).user(user.toString())
                     .options(chatModels.quickOptions(model, 0.0))

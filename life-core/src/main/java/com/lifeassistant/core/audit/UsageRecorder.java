@@ -1,6 +1,7 @@
 package com.lifeassistant.core.audit;
 
 import com.lifeassistant.core.config.LifeProperties;
+import com.lifeassistant.core.llm.ChatModelRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.metadata.Usage;
@@ -19,7 +20,7 @@ public class UsageRecorder {
     private static final BigDecimal MILLION = BigDecimal.valueOf(1_000_000);
 
     private final LlmUsageMapper usageMapper;
-    private final LifeProperties properties;
+    private final ChatModelRegistry chatModels;
 
     /** 落一条用量记录；usage 为空直接跳过，写库失败只打日志，不影响对话。 */
     public void record(Long userId, String conversationId, String purpose, String model, Usage usage) {
@@ -35,7 +36,7 @@ public class UsageRecorder {
             row.setPromptTokens(usage.getPromptTokens() == null ? 0 : usage.getPromptTokens());
             row.setCompletionTokens(usage.getCompletionTokens() == null ? 0 : usage.getCompletionTokens());
             row.setCachedTokens(cachedTokens(usage));
-            row.setCost(cost(properties.getLlm().getPricing().get(model), row));
+            row.setCost(cost(chatModels.price(model), row));
             usageMapper.insert(row);
         } catch (RuntimeException e) {
             // 用量记录失败不影响对话

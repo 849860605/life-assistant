@@ -15,6 +15,8 @@ export const router = createRouter({
         { path: "dashboard", name: "dashboard", component: () => import("./views/Dashboard.vue"), meta: { title: "总览" } },
         { path: "users", name: "users", component: () => import("./views/Users.vue"), meta: { title: "用户管理" } },
         { path: "admins", name: "admins", component: () => import("./views/Admins.vue"), meta: { title: "管理员", super: true } },
+        { path: "models", name: "models", component: () => import("./views/Models.vue"), meta: { title: "模型配置" } },
+        { path: "integrations", name: "integrations", component: () => import("./views/Integrations.vue"), meta: { title: "第三方平台" } },
         { path: "logs", name: "logs", component: () => import("./views/OpLogs.vue"), meta: { title: "操作日志" } },
         { path: "password", name: "password", component: () => import("./views/Password.vue"), meta: { title: "修改密码" } },
       ],

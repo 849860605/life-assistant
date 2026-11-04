@@ -66,6 +66,8 @@ public class LifeProperties {
         /** 对话接口路径，为空用客户端默认值（openai 是 /v1/chat/completions）；智谱、豆包这类路径不同的要填 */
         private String completionsPath;
         private String apiKey;
+        /** 放 Key 的请求头，空表示 Authorization: Bearer；有的厂商要放在别的头里（如小红书点点的 api-key） */
+        private String authHeader;
         /** 关掉思考要额外带的请求参数（openai 类型才用），打分、分类这类简单任务用，例如 DeepSeek 是 thinking.type=disabled */
         private Map<String, Object> noThinking;
     }

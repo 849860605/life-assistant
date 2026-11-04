@@ -3,7 +3,7 @@ package com.lifeassistant.core.place;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.lifeassistant.common.error.BizException;
 import com.lifeassistant.common.error.ErrorCode;
-import com.lifeassistant.core.config.LifeProperties;
+import com.lifeassistant.core.integration.IntegrationSettings;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -50,7 +50,7 @@ public class AmapPlaceService {
     private static final String THUMB = "?operate=merge&w=480&h=360&position=5";
 
     private final RestClient restClient;
-    private final String key;
+    private final IntegrationSettings settings;
     private final Map<String, Cached> cache = Collections.synchronizedMap(new LinkedHashMap<>(256, 0.75f, true) {
         @Override
         protected boolean removeEldestEntry(Map.Entry<String, Cached> eldest) {
@@ -66,8 +66,9 @@ public class AmapPlaceService {
     });
     private long lastCall;
 
-    public AmapPlaceService(RestClient.Builder externalRestClientBuilder, LifeProperties properties) {
-        this.key = properties.getAmap().getKey();
+    /** Key 和开关每次调用时从后台"高德 Web 服务"取（没在后台填就用 AMAP_KEY）。 */
+    public AmapPlaceService(RestClient.Builder externalRestClientBuilder, IntegrationSettings settings) {
+        this.settings = settings;
         this.restClient = externalRestClientBuilder.clone().baseUrl("https://restapi.amap.com").build();
     }
 
@@ -88,7 +89,7 @@ public class AmapPlaceService {
     }
 
     public boolean available() {
-        return StringUtils.hasText(key);
+        return StringUtils.hasText(key());
     }
 
     /**
@@ -433,7 +434,7 @@ public class AmapPlaceService {
         throttle();
         try {
             return restClient.get().uri(b -> {
-                b.path("/v3/staticmap").queryParam("key", key);
+                b.path("/v3/staticmap").queryParam("key", key());
                 for (int i = 0; i + 1 < params.size(); i += 2) {
                     b.queryParam(params.get(i), "{p" + i + "}");
                 }
@@ -608,7 +609,7 @@ public class AmapPlaceService {
             JsonNode body;
             try {
                 body = restClient.get().uri(b -> {
-                    b.path(path).queryParam("key", key);
+                    b.path(path).queryParam("key", key());
                     for (int i = 0; i + 1 < params.length; i += 2) {
                         if (!params[i + 1].isEmpty()) {
                             b.queryParam(params[i], params[i + 1]);
@@ -634,5 +635,10 @@ public class AmapPlaceService {
             }
             throw new BizException(ErrorCode.EXTERNAL_SERVICE, "高德返回错误：" + info);
         }
+    }
+
+    /** 当前生效的高德 Web 服务 Key；没配或后台停用了返回 null。 */
+    private String key() {
+        return settings.value("amap", "key");
     }
 }

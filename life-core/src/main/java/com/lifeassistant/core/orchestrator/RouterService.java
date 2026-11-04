@@ -53,7 +53,7 @@ public class RouterService {
             return new RouteDecision(lastSkillId, "确认上一轮的方案，沿用上一轮技能");
         }
         try {
-            ModelSpec model = chatModels.resolve(properties.getModels().getRouter());
+            ModelSpec model = chatModels.resolve(chatModels.models().getRouter());
             ResponseEntity<ChatResponse, RouteDecision> response = chatModels.client(model).prompt()
                     .system(systemPrompt(lastSkillId))
                     .user(input)

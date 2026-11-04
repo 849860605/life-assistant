@@ -1,6 +1,7 @@
 package com.lifeassistant.core.mcp;
 
 import com.lifeassistant.core.config.LifeProperties;
+import com.lifeassistant.core.integration.IntegrationSettings;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -14,7 +15,7 @@ class McpServerRegistryTest {
         LifeProperties.McpServer server = new LifeProperties.McpServer();
         server.setUrl("https://mcp.example.com");
         properties.getMcp().put("rollinggo", server);
-        McpServerRegistry registry = new McpServerRegistry(properties);
+        McpServerRegistry registry = new McpServerRegistry(properties, IntegrationSettings.of(properties));
 
         assertThat(registry.configured("rollinggo")).isFalse();
         assertThat(registry.tools("rollinggo")).isEmpty();
@@ -28,7 +29,7 @@ class McpServerRegistryTest {
         server.setUrl("http://127.0.0.1:1");
         server.setApiKey("key");
         properties.getMcp().put("rollinggo", server);
-        McpServerRegistry registry = new McpServerRegistry(properties);
+        McpServerRegistry registry = new McpServerRegistry(properties, IntegrationSettings.of(properties));
 
         assertThat(registry.tools("rollinggo")).isEmpty();
         long start = System.nanoTime();

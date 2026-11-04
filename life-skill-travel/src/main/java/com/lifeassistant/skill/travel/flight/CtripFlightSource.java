@@ -38,7 +38,7 @@ public class CtripFlightSource implements FlightPriceSource {
 
     @Override
     public boolean available() {
-        return true;
+        return client.available();
     }
 
     @Override

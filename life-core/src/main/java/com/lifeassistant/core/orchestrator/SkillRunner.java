@@ -6,6 +6,7 @@ import com.lifeassistant.core.auth.ToolContexts;
 import com.lifeassistant.core.config.LifeProperties;
 import com.lifeassistant.core.llm.ChatModelRegistry;
 import com.lifeassistant.core.llm.ModelSpec;
+import com.lifeassistant.core.llm.config.LlmConfigService;
 import com.lifeassistant.core.memory.MemoryService;
 import com.lifeassistant.core.memory.MemoryTools;
 import com.lifeassistant.core.skill.LifeSkill;
@@ -40,23 +41,23 @@ public class SkillRunner {
     private final MemoryTools memoryTools;
     private final UserService userService;
     private final UsageRecorder usageRecorder;
-    private final LifeProperties properties;
+    private final LlmConfigService llmConfig;
 
     public SkillRunner(ChatModelRegistry chatModels, ChatMemory chatMemory, MemoryService memoryService,
                        MemoryTools memoryTools, UserService userService, UsageRecorder usageRecorder,
-                       LifeProperties properties) {
+                       LlmConfigService llmConfig) {
         this.chatModels = chatModels;
         this.chatMemory = chatMemory;
         this.memoryService = memoryService;
         this.memoryTools = memoryTools;
         this.userService = userService;
         this.usageRecorder = usageRecorder;
-        this.properties = properties;
+        this.llmConfig = llmConfig;
     }
 
     /** 流式执行技能：挂技能工具和记忆工具，按会话 id 读写聊天记忆；流正常结束后按最后一个带用量的响应记一次 token 用量。 */
     public Flux<ChatResponse> stream(LifeSkill skill, UserCtx ctx, String conversationId, String input) {
-        ModelSpec model = chatModels.resolve(skill.model(properties.getModels()));
+        ModelSpec model = chatModels.resolve(modelFor(skill, ctx));
         List<Object> tools = new ArrayList<>(skill.tools());
         tools.add(memoryTools);
         AtomicReference<ChatResponse> last = new AtomicReference<>();
@@ -85,6 +86,16 @@ public class SkillRunner {
                                 response.getMetadata().getUsage());
                     }
                 });
+    }
+
+    /** 技能用哪个模型：技能用的是默认对话模型时，用户在 App 里自己选了模型就用用户选的。 */
+    String modelFor(LifeSkill skill, UserCtx ctx) {
+        LifeProperties.Models models = chatModels.models();
+        String configured = skill.model(models);
+        if (!configured.equals(models.getSkill())) {
+            return configured;
+        }
+        return llmConfig.preferredSpec(userService.get(ctx.userId()).getPreferredModelId()).orElse(configured);
     }
 
     /** 拼系统提示词：用户时区的当前时间、昵称、已记住的用户信息、通用安全规则，最后接技能自己的提示词。 */

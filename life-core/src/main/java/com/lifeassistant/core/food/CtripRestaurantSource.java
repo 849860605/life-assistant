@@ -36,7 +36,7 @@ public class CtripRestaurantSource implements RestaurantSource {
 
     @Override
     public boolean available() {
-        return true;
+        return client.available();
     }
 
     @Override

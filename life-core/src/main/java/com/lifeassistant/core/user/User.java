@@ -21,6 +21,8 @@ public class User {
     private String timezone;
     private Integer status;
     private OffsetDateTime lastLoginAt;
+    /** 自己选的对话模型（t_llm_model.id），空表示用默认 */
+    private Long preferredModelId;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
 }

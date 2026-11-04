@@ -33,7 +33,10 @@
               />
               <view class="ask-tools">
                 <view class="ask-tool" @click="openChat()"><Icon name="plus" :size="14" color="var(--muted)" /><text>上传文件</text></view>
-                <view class="ask-send" :class="{ off: !question.trim() }" @click="ask"><Icon name="send" :size="18" color="#fff" /></view>
+                <view class="ask-right">
+                  <ModelPicker :wide="wide" />
+                  <view class="ask-send" :class="{ off: !question.trim() }" @click="ask"><Icon name="send" :size="18" color="#fff" /></view>
+                </view>
               </view>
             </view>
           </view>
@@ -151,7 +154,10 @@
         </scroll-view>
         <view class="m-ask-tools">
           <view class="m-tool" @click="openChat()"><Icon name="plus" :size="18" color="var(--muted)" /></view>
-          <view class="m-send" :class="{ off: !question.trim() }" @click="ask"><Icon name="send" :size="18" color="#fff" /></view>
+          <view class="ask-right">
+            <ModelPicker small />
+            <view class="m-send" :class="{ off: !question.trim() }" @click="ask"><Icon name="send" :size="18" color="#fff" /></view>
+          </view>
         </view>
       </view>
 
@@ -200,6 +206,7 @@ import type { Place, TodayAgenda, Trip } from "../../api/types";
 import BrandMark from "../../components/BrandMark.vue";
 import CityPicker from "../../components/CityPicker.vue";
 import DuoIcon from "../../components/DuoIcon.vue";
+import ModelPicker from "../../components/ModelPicker.vue";
 import Icon from "../../components/Icon.vue";
 import Shell from "../../components/Shell.vue";
 import TodayCard from "../../components/TodayCard.vue";
@@ -391,6 +398,7 @@ function changeCity(c: string) {
 .ask-box { width: 100%; max-width: 860px; background: var(--surface); border: 1.5px solid var(--accent); border-radius: 18px; padding: 14px 16px 10px; box-shadow: 0 10px 30px rgba(47, 107, 242, 0.12); display: flex; flex-direction: column; gap: 8px; }
 .ask-input { width: auto; font-size: 16px; line-height: 24px; min-height: 48px; max-height: 120px; overflow-y: auto; color: var(--ink); }
 .ask-tools { display: flex; align-items: center; justify-content: space-between; }
+.ask-right { display: flex; align-items: center; gap: 8px; }
 .ask-tool { display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--muted); padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px; cursor: pointer; }
 .ask-send, .m-send { width: 42px; height: 42px; border-radius: 50%; background: var(--accent); display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
 .ask-send.off, .m-send.off { opacity: 0.45; }

@@ -4,7 +4,6 @@ import com.lifeassistant.common.auth.UserCtx;
 import com.lifeassistant.common.error.BizException;
 import com.lifeassistant.common.error.ErrorCode;
 import com.lifeassistant.core.audit.UsageRecorder;
-import com.lifeassistant.core.config.LifeProperties;
 import com.lifeassistant.core.llm.ChatModelRegistry;
 import com.lifeassistant.core.llm.ModelSpec;
 import com.lifeassistant.core.memory.MemoryCategory;
@@ -51,7 +50,6 @@ public class TripFood {
     private final AmapPlaceService places;
     private final MemoryService memory;
     private final ChatModelRegistry chatModels;
-    private final LifeProperties properties;
     private final UsageRecorder usageRecorder;
 
     /**
@@ -349,7 +347,7 @@ public class TripFood {
                 城市：%s。这天（%s）的安排：%s。页面上当前选的是%s。
                 用户的偏好记忆：%s""".formatted(city, day.date(), items, meal.label, prefs.isEmpty() ? "无" : prefs);
         try {
-            ModelSpec model = chatModels.resolve(properties.getModels().getRouter());
+            ModelSpec model = chatModels.resolve(chatModels.models().getRouter());
             ResponseEntity<ChatResponse, FoodIntent> response = chatModels.client(model).prompt()
                     .system(system)
                     .user(text)

@@ -4,7 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.lifeassistant.common.error.BizException;
 import com.lifeassistant.common.error.ErrorCode;
 import com.lifeassistant.core.audit.CallRecorder;
-import com.lifeassistant.core.config.LifeProperties;
+import com.lifeassistant.core.integration.ByConfig;
+import com.lifeassistant.core.integration.IntegrationSettings;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -25,29 +26,34 @@ import java.util.Map;
 @Component
 public class BochaSearchProvider implements WebSearchProvider {
 
-    private final RestClient restClient;
-    private final String apiKey;
+    private final RestClient.Builder builder;
+    private final IntegrationSettings settings;
     private final CallRecorder recorder;
+    private final ByConfig<RestClient> restClient = new ByConfig<>();
 
-    public BochaSearchProvider(RestClient.Builder externalRestClientBuilder, LifeProperties properties,
+    /** Key、地址和开关每次调用时从后台配置取（没在后台填就用 BOCHA_API_KEY）。 */
+    public BochaSearchProvider(RestClient.Builder externalRestClientBuilder, IntegrationSettings settings,
                                CallRecorder recorder) {
-        LifeProperties.Search config = properties.getSearch();
-        this.apiKey = config.getBochaApiKey();
+        this.builder = externalRestClientBuilder.clone();
+        this.settings = settings;
         this.recorder = recorder;
-        this.restClient = externalRestClientBuilder.clone().baseUrl(config.getBochaBaseUrl()).build();
     }
 
+    /** 配了 Key 且后台没停用。 */
     @Override
     public boolean available() {
-        return StringUtils.hasText(apiKey);
+        return StringUtils.hasText(settings.value("bocha", "api-key"));
     }
 
     /** 调 /v1/web-search，开启长摘要；sites 用 | 拼成 include 参数。 */
     @Override
     public List<SearchResult> search(String query, List<String> sites, int count, boolean recentYearOnly) {
-        if (!available()) {
-            throw new BizException(ErrorCode.EXTERNAL_SERVICE, "联网搜索没有配置（BOCHA_API_KEY）");
+        String apiKey = settings.value("bocha", "api-key");
+        if (!StringUtils.hasText(apiKey)) {
+            throw new BizException(ErrorCode.EXTERNAL_SERVICE, "联网搜索没有配置（BOCHA_API_KEY）或已在后台停用");
         }
+        String baseUrl = settings.value("bocha", "base-url");
+        RestClient client = restClient.get(baseUrl, () -> builder.clone().baseUrl(baseUrl).build());
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("query", query);
         body.put("summary", true);
@@ -57,7 +63,7 @@ public class BochaSearchProvider implements WebSearchProvider {
             body.put("include", String.join("|", sites));
         }
         try {
-            return recorder.platform("博查", query, () -> parse(restClient.post().uri("/v1/web-search")
+            return recorder.platform("博查", query, () -> parse(client.post().uri("/v1/web-search")
                     .header("Authorization", "Bearer " + apiKey)
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(body)

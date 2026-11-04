@@ -2,7 +2,7 @@ package com.lifeassistant.api.web;
 
 import com.lifeassistant.common.api.ApiResponse;
 import com.lifeassistant.core.auth.MediaTicket;
-import com.lifeassistant.core.config.LifeProperties;
+import com.lifeassistant.core.integration.IntegrationSettings;
 import com.lifeassistant.core.place.AmapPlaceService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -44,17 +44,17 @@ public class AmapJsController {
     private static final Pattern SAFE_PATH = Pattern.compile("^/v[345]/[A-Za-z0-9/_.\\-]{1,200}$");
     private static final int MAX_STOPS = 15;
 
-    private final LifeProperties properties;
+    private final IntegrationSettings settings;
     private final MediaTicket mediaTicket;
     private final AmapPlaceService places;
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
 
-    /** GET /api/v1/maps/js-config：JS Key（没配为空，页面就用静态地图）。 */
+    /** GET /api/v1/maps/js-config：JS Key（没配或后台停用了为空，页面就用静态地图）。 */
     @GetMapping("/js-config")
     public ApiResponse<Map<String, Object>> jsConfig() {
-        LifeProperties.Amap amap = properties.getAmap();
-        boolean on = StringUtils.hasText(amap.getJsKey()) && StringUtils.hasText(amap.getJsSecurity());
-        return ApiResponse.ok(Map.of("key", on ? amap.getJsKey() : ""));
+        String key = settings.value("amap-js", "js-key");
+        boolean on = StringUtils.hasText(key) && StringUtils.hasText(settings.value("amap-js", "js-security"));
+        return ApiResponse.ok(Map.of("key", on ? key : ""));
     }
 
     /**
@@ -93,7 +93,7 @@ public class AmapJsController {
         if (mediaTicket.verify(mt).isEmpty()) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
-        String security = properties.getAmap().getJsSecurity();
+        String security = settings.value("amap-js", "js-security");
         if (!StringUtils.hasText(security)) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
         }

@@ -133,7 +133,7 @@
           <view class="composer-tools">
             <view class="tool" @click="pickFiles"><Icon name="plus" :size="14" color="var(--muted)" /><text>上传文件</text></view>
             <view class="tool" @click="notYet('深度搜索')"><Icon name="search" :size="14" color="var(--muted)" /><text>深度搜索</text></view>
-            <view class="model"><Icon name="sparkle" :size="13" color="var(--accent)" /><text>DeepSeek</text></view>
+            <ModelPicker class="model" :wide="wide" />
             <view v-if="sending" class="send stop-btn" title="停止" @click="stop"><Icon name="stop" :size="14" color="#fff" fill /></view>
             <view v-else class="send" :class="{ off: !canSend }" @click="sendInput"><Icon name="send" :size="18" color="#fff" /></view>
           </view>
@@ -159,6 +159,7 @@ import Icon from "../../components/Icon.vue";
 import BrandMark from "../../components/BrandMark.vue";
 import DuoIcon from "../../components/DuoIcon.vue";
 import PlanPanel from "../../components/PlanPanel.vue";
+import ModelPicker from "../../components/ModelPicker.vue";
 import Shell from "../../components/Shell.vue";
 import { useWide } from "../../utils/screen";
 import { savePlans } from "../../utils/plans";
@@ -783,7 +784,9 @@ function scrollToBottom() {
 .b-file { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 3px 8px; border-radius: 8px; background: rgba(255, 255, 255, 0.18); cursor: pointer; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .composer-tools { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
 .tool { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
-.model { display: flex; align-items: center; gap: 4px; font-size: 12px; padding: 4px 8px; border-radius: 8px; background: var(--surface-2); margin-left: auto; }
+.model { margin-left: auto; }
+.composer-tools .send { margin-left: auto; }
+.composer-tools .model + .send { margin-left: 0; }
 .send { width: 38px; height: 38px; border-radius: 50%; background: var(--accent); display: flex; align-items: center; justify-content: center; cursor: pointer; }
 .send.off { opacity: 0.45; cursor: default; }
 .stop-btn { background: var(--danger); }

@@ -2,7 +2,7 @@ package com.lifeassistant.core.platform;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.lifeassistant.core.audit.CallRecorder;
-import org.springframework.beans.factory.annotation.Value;
+import com.lifeassistant.core.integration.IntegrationSettings;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -20,11 +20,12 @@ import java.util.Map;
 public class MeituanHtClient {
 
     private final RestClient restClient;
-    private final String token;
+    private final IntegrationSettings settings;
     private final CallRecorder recorder;
 
-    public MeituanHtClient(@Value("${life.hotel.meituan.token:}") String token, CallRecorder recorder) {
-        this.token = token;
+    /** Token 和开关每次调用时从后台配置取（没在后台填就用 MEITUAN_HT_TOKEN）。 */
+    public MeituanHtClient(IntegrationSettings settings, CallRecorder recorder) {
+        this.settings = settings;
         this.recorder = recorder;
         this.restClient = RestClient.builder()
                 .baseUrl("https://mcp-open-cater.meituan.com")
@@ -32,8 +33,9 @@ public class MeituanHtClient {
                 .build();
     }
 
+    /** 配了 Token 且后台没停用。 */
     public boolean available() {
-        return StringUtils.hasText(token);
+        return StringUtils.hasText(settings.value("meituan", "token"));
     }
 
     /** 提一个问题，成功返回 Markdown；接口返回失败时抛 IllegalStateException，网络错误抛 RestClientException。 */
@@ -42,6 +44,10 @@ public class MeituanHtClient {
     }
 
     private String doQuery(String city, String question, String originQuery) {
+        String token = settings.value("meituan", "token");
+        if (!StringUtils.hasText(token)) {
+            throw new IllegalStateException("美团没有配置或已在后台停用");
+        }
         Map<String, String> body = Map.of(
                 "city", city == null ? "" : city,
                 "query", question,

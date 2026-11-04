@@ -2,7 +2,6 @@ package com.lifeassistant.core.orchestrator;
 
 import com.lifeassistant.core.audit.UsageRecorder;
 import com.lifeassistant.core.card.Card;
-import com.lifeassistant.core.config.LifeProperties;
 import com.lifeassistant.core.llm.ChatModelRegistry;
 import com.lifeassistant.core.llm.ModelSpec;
 import lombok.RequiredArgsConstructor;
@@ -44,7 +43,6 @@ public class SuggestionService {
             最多 4 条，按可能性从高到低排。只输出 JSON。""";
 
     private final ChatModelRegistry chatModels;
-    private final LifeProperties properties;
     private final UsageRecorder usageRecorder;
 
     /** 模型按这个结构输出。 */
@@ -61,7 +59,7 @@ public class SuggestionService {
         String user = "用户这轮说：" + cut(userInput, 400) + "\n\n助手的回答（结尾部分）：\n" + tail(answer, 1500)
                 + (cardText.isEmpty() ? "" : "\n\n回答里展示的卡片：\n" + cardText);
         try {
-            ModelSpec model = chatModels.resolve(properties.getModels().getRouter());
+            ModelSpec model = chatModels.resolve(chatModels.models().getRouter());
             ResponseEntity<ChatResponse, Suggestions> response = chatModels.client(model).prompt()
                     .system(PROMPT).user(user)
                     .options(ChatModelRegistry.options(model, 0.3))
