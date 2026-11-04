@@ -21,6 +21,17 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -31,6 +42,8 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 @Component
 public class ChatModelRegistry {
+
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     /** 用途：路由、打分、建议这类小任务 */
     public static final String ROUTER = "ROUTER";
@@ -167,6 +180,60 @@ public class ChatModelRegistry {
         ChatClient once = ChatClient.builder(createModel(spec.provider(),
                 RetryTemplate.builder().maxAttempts(1).build())).build();
         return once.prompt().user("请只回复两个字：你好").options(options).call().content();
+    }
+
+    /**
+     * 拉提供方的型号列表（OpenAI 兼容的 GET /models），后台添加模型时下拉选；百炼走它的兼容模式地址。
+     * 没填 Key、接口不支持或连不上时抛 BizException，提示改成手填。
+     */
+    public List<String> remoteModels(String name) {
+        LifeProperties.Provider provider = provider(name);
+        if (provider == null || !hasText(provider.getApiKey())) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "这个提供方还没填 API Key，填好后才能拉型号列表");
+        }
+        String url;
+        if ("dashscope".equals(provider.getType())) {
+            url = (hasText(provider.getBaseUrl()) ? trimSlash(provider.getBaseUrl()) : "https://dashscope.aliyuncs.com")
+                    + "/compatible-mode/v1/models";
+        } else {
+            String path = hasText(provider.getCompletionsPath())
+                    ? provider.getCompletionsPath().replace("chat/completions", "models") : "/v1/models";
+            url = trimSlash(provider.getBaseUrl()) + path;
+        }
+        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(15)).GET();
+        if (hasText(provider.getAuthHeader())) {
+            request.header(provider.getAuthHeader().trim(), provider.getApiKey());
+        } else {
+            request.header("Authorization", "Bearer " + provider.getApiKey());
+        }
+        try {
+            HttpResponse<String> response = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build()
+                    .send(request.build(), HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() != 200) {
+                throw new BizException(ErrorCode.BAD_REQUEST,
+                        "提供方没返回型号列表（HTTP " + response.statusCode() + "），可以直接手填型号");
+            }
+            List<String> ids = new ArrayList<>();
+            for (JsonNode m : JSON.readTree(response.body()).path("data")) {
+                if (hasText(m.path("id").asText(null))) {
+                    ids.add(m.path("id").asText());
+                }
+            }
+            Collections.sort(ids);
+            return ids;
+        } catch (BizException e) {
+            throw e;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new BizException(ErrorCode.BAD_REQUEST, "拉型号列表被中断，可以直接手填型号");
+        } catch (Exception e) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "拉型号列表失败，可以直接手填型号");
+        }
+    }
+
+    /** 去掉地址末尾的斜杠，方便拼路径。 */
+    private static String trimSlash(String url) {
+        return url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
     }
 
     /** 按提供方类型创建 ChatModel，用默认的重试策略。 */

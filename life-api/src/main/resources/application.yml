@@ -134,6 +134,14 @@ life:
     vision: ${LIFE_MODEL_VISION:qwen-vl-max}
   bark:
     server: ${BARK_SERVER:https://api.day.app}
+  # 发邮件验证码（注册、找回密码、绑定邮箱）：默认 QQ 邮箱 SMTP 465 端口 SSL，密码填授权码不是 QQ 密码；
+  # 没配时不能邮箱注册。daily-limit 是全站每天最多发多少封（QQ 邮箱每天能发的量有限）
+  mail:
+    host: ${LIFE_MAIL_HOST:}
+    port: ${LIFE_MAIL_PORT:465}
+    username: ${LIFE_MAIL_USERNAME:}
+    password: ${LIFE_MAIL_PASSWORD:}
+    daily-limit: ${LIFE_MAIL_DAILY_LIMIT:300}
   qweather:
     api-host: ${QWEATHER_API_HOST:}
     api-key: ${QWEATHER_API_KEY:}

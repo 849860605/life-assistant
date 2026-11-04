@@ -59,9 +59,10 @@
         <el-table-column label="状态" width="80">
           <template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? "启用" : "停用" }}</el-tag></template>
         </el-table-column>
-        <el-table-column v-if="canEdit" label="操作" width="190" :fixed="narrow ? false : 'right'">
+        <el-table-column v-if="canEdit" label="操作" width="240" :fixed="narrow ? false : 'right'">
           <template #default="{ row }">
             <el-button link type="primary" :loading="testing === row.code" :disabled="!row.hasKey || !row.enabled" @click="test(row)">测试</el-button>
+            <el-button link type="primary" :disabled="!row.hasKey" @click="openModelFor(row.code)">加模型</el-button>
             <el-button link type="primary" @click="openProvider(row)">编辑</el-button>
             <el-button link type="danger" @click="removeProvider(row)">删除</el-button>
           </template>
@@ -167,7 +168,27 @@
           </el-select>
         </el-form-item>
         <el-form-item label="型号">
-          <el-input id="mf-model" v-model="mf.model" :disabled="!!editingModelId" placeholder="接口里的 model，例如 deepseek-chat" />
+          <el-input v-if="editingModelId" id="mf-model" v-model="mf.model" disabled />
+          <template v-else>
+            <el-select
+              id="mf-model"
+              v-model="mf.model"
+              filterable
+              allow-create
+              default-first-option
+              :loading="remote.loading"
+              placeholder="从列表里选，或直接输入型号"
+              class="full"
+              @change="pickRemote"
+            >
+              <el-option v-for="id in remote.ids" :key="id" :label="id" :value="id" :disabled="added(id)">
+                <span>{{ id }}</span><span v-if="added(id)" class="muted small opt-tag">已添加</span>
+              </el-option>
+            </el-select>
+            <div class="field-hint">
+              {{ remote.loading ? "正在从提供方拉型号列表…" : remote.error || (remote.ids.length ? `从提供方拉到 ${remote.ids.length} 个型号；列表里没有的也可以直接输入` : "") }}
+            </div>
+          </template>
         </el-form-item>
         <el-form-item label="显示名"><el-input id="mf-name" v-model="mf.displayName" placeholder="App 里给用户看的名字，例如 DeepSeek" /></el-form-item>
         <el-form-item label="说明"><el-input id="mf-desc" v-model="mf.description" placeholder="可不填，例如 速度快、适合日常" /></el-form-item>
@@ -196,7 +217,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { Plus } from "@element-plus/icons-vue";
 import { api, type LlmModel, type LlmModelForm, type LlmProvider, type LlmProviderForm } from "../api";
@@ -385,6 +406,51 @@ const blankModel = (): LlmModelForm => ({
 });
 const mf = reactive<LlmModelForm>(blankModel());
 
+/** 添加模型时从提供方拉到的型号列表 */
+const remote = reactive({ ids: [] as string[], loading: false, error: "" });
+
+/** 选了提供方就去拉它的型号列表；拉不到就提示手填 */
+async function loadRemote(code: string) {
+  remote.ids = [];
+  remote.error = "";
+  if (!code) return;
+  remote.loading = true;
+  try {
+    const ids = await api.llmRemoteModels(code);
+    if (mf.providerCode === code) {
+      remote.ids = ids;
+      if (!ids.length) remote.error = "提供方返回的列表是空的，直接输入型号";
+    }
+  } catch (e) {
+    if (mf.providerCode === code) remote.error = e instanceof Error ? e.message : "拉型号列表失败，直接输入型号";
+  } finally {
+    if (mf.providerCode === code) remote.loading = false;
+  }
+}
+
+watch(
+  () => [modelOpen.value, mf.providerCode] as const,
+  ([open, code]) => {
+    if (open && !editingModelId.value) loadRemote(code);
+  },
+);
+
+/** 这个型号在当前提供方下已经加过了 */
+function added(id: string): boolean {
+  return models.value.some((m) => m.providerCode === mf.providerCode && m.model === id);
+}
+
+/** 选好型号后，显示名没填就先用型号名 */
+function pickRemote(id: string) {
+  if (!mf.displayName) mf.displayName = id;
+}
+
+/** 从提供方那一行直接加模型：提供方选好 */
+function openModelFor(code: string) {
+  openModel();
+  mf.providerCode = code;
+}
+
 function openModel(m?: LlmModel) {
   Object.assign(mf, blankModel(), m ? { ...m, description: m.description || "" } : { providerCode: providers.value[0]?.code || "" });
   editingModelId.value = m?.id || 0;
@@ -504,4 +570,5 @@ onMounted(load);
 .indent {
   padding-left: 96px;
 }
+.opt-tag { float: right; margin-left: 12px; }
 </style>

@@ -123,16 +123,23 @@ public class SearchController {
         return ApiResponse.ok(hotelSearch.search(city, near, checkIn, checkOut, type, stars, maxPrice, radius, refresh));
     }
 
-    /** GET /api/v1/search/hotels/quote?name=…&city=…&checkIn=…&checkOut=…：一家酒店在各平台的价格，十几秒。 */
+    /**
+     * GET /api/v1/search/hotels/quote?name=…&city=…&checkIn=…&checkOut=…：一家酒店在各平台的价格，十几秒。
+     * 页面上自动查价都走这里，默认不查途牛（每分钟 5 次、每天 50 次，留给用户主动比价）；tuniu=true 时一起查。
+     */
     @GetMapping("/hotels/quote")
     public ApiResponse<HotelQuoteBook.Comparison> hotelQuote(@RequestParam String name, @RequestParam String city,
                                                              @RequestParam java.time.LocalDate checkIn,
                                                              @RequestParam java.time.LocalDate checkOut,
+                                                             @RequestParam(defaultValue = "false") boolean tuniu,
                                                              @RequestParam(defaultValue = "false") boolean refresh) {
         // 一家酒店的多平台比价缓存 30 分钟，至少一个平台有价才缓存
-        return ApiResponse.ok(queryCache.get("hotel-quote", name + "|" + city + "|" + checkIn + "|" + checkOut,
-                java.time.Duration.ofMinutes(30), refresh, HotelQuoteBook.Comparison.class,
-                () -> hotelPriceTools.quote(java.util.List.of(name), city, checkIn, checkOut),
+        return ApiResponse.ok(queryCache.get("hotel-quote", name + "|" + city + "|" + checkIn + "|" + checkOut
+                        + (tuniu ? "|tuniu" : ""), java.time.Duration.ofMinutes(30), refresh, HotelQuoteBook.Comparison.class,
+                () -> tuniu ? hotelPriceTools.quote(java.util.List.of(name), city, checkIn, checkOut)
+                        : new HotelQuoteBook.Comparison(city, checkIn.toString(), checkOut.toString(),
+                        com.lifeassistant.core.card.CardHub.now(), java.util.List.of(new HotelQuoteBook.Entry(name,
+                        hotelPriceTools.refine(name, city, checkIn, checkOut, java.util.Set.of("途牛"))))),
                 c -> c.hotels().stream().flatMap(h -> h.quotes().stream()).anyMatch(q -> "OK".equals(q.status()))));
     }
 

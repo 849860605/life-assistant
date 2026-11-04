@@ -5,6 +5,8 @@ import com.lifeassistant.api.auth.AdminContext;
 import com.lifeassistant.common.api.ApiResponse;
 import com.lifeassistant.core.audit.AdminStatsService;
 import com.lifeassistant.core.user.AdminUser;
+import com.lifeassistant.core.setting.AppSettingService;
+import com.lifeassistant.core.user.EmailCodeService;
 import com.lifeassistant.core.user.User;
 import com.lifeassistant.core.user.UserService;
 import jakarta.validation.Valid;
@@ -13,6 +15,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -34,6 +37,8 @@ public class AdminAppUserController {
     private final UserService userService;
     private final AdminStatsService statsService;
     private final AdminContext adminContext;
+    private final AppSettingService settings;
+    private final EmailCodeService emailCodes;
 
     /** 新建用户的请求体。 */
     public record CreateUserRequest(@NotBlank String username, @NotBlank String password, String nickname) {
@@ -47,13 +52,37 @@ public class AdminAppUserController {
     public record StatusRequest(boolean enabled) {
     }
 
-    /** 一个用户的基本信息加概要统计。 */
-    public record UserDetail(long id, String username, String nickname, String timezone, boolean enabled,
-                             OffsetDateTime createdAt, OffsetDateTime lastLoginAt,
+    /** 一个用户的基本信息加概要统计；source 是 ADMIN 后台建的或 EMAIL 自己注册的。 */
+    public record UserDetail(long id, String username, String nickname, String email, String source, String timezone,
+                             boolean enabled, OffsetDateTime createdAt, OffsetDateTime lastLoginAt,
                              AdminStatsService.UserSummary summary) {
     }
 
-    /** GET /admin/api/v1/users?keyword=&page=1&size=20：用户列表，按用户名或昵称搜。 */
+    /** 注册开关：open 为 true 时任何人都能用邮箱注册。 */
+    public record RegisterSetting(boolean open, boolean mailReady) {
+    }
+
+    /** 改注册开关的请求体。 */
+    public record RegisterRequest(boolean open) {
+    }
+
+    /** GET /admin/api/v1/users/register：是否开放注册、发信邮箱配好没有。 */
+    @GetMapping("/register")
+    public ApiResponse<RegisterSetting> registerSetting() {
+        adminContext.current();
+        return ApiResponse.ok(new RegisterSetting(settings.registerOpen(), emailCodes.ready()));
+    }
+
+    /** PUT /admin/api/v1/users/register：打开或关闭注册（任何管理员都能改），记操作日志。 */
+    @PutMapping("/register")
+    public ApiResponse<RegisterSetting> setRegister(@RequestBody RegisterRequest request) {
+        AdminUser me = adminContext.current();
+        settings.setRegisterOpen(request.open());
+        adminContext.log(me.getId(), request.open() ? "OPEN_REGISTER" : "CLOSE_REGISTER", null);
+        return ApiResponse.ok(new RegisterSetting(settings.registerOpen(), emailCodes.ready()));
+    }
+
+    /** GET /admin/api/v1/users?keyword=&page=1&size=20：用户列表，按用户名、昵称或邮箱搜。 */
     @GetMapping
     public ApiResponse<AdminStatsService.Page<AdminStatsService.UserRow>> list(
             @RequestParam(required = false) String keyword,
@@ -104,7 +133,7 @@ public class AdminAppUserController {
 
     private UserDetail detail(long id) {
         User u = userService.get(id);
-        return new UserDetail(u.getId(), u.getUsername(), u.getNickname(), u.getTimezone(),
+        return new UserDetail(u.getId(), u.getUsername(), u.getNickname(), u.getEmail(), u.getSource(), u.getTimezone(),
                 u.getStatus() != null && u.getStatus() == 1, u.getCreatedAt(), u.getLastLoginAt(),
                 statsService.userSummary(id));
     }

@@ -75,6 +75,7 @@
                       <text v-if="item.rating" class="star">★ {{ item.rating }}</text>
                       <text v-if="item.address"><Icon name="pin" :size="12" color="var(--muted)" /> {{ item.address }}</text>
                       <text v-if="item.cost" class="cost">¥{{ item.cost }}/人</text>
+                      <text v-if="day && flightChecking(itinerary, item, day.date)" class="checking">其他平台比价中…</text>
                       <text v-if="item.type === 'HOTEL' && itemPrice(item)" class="cost" :class="{ quiet: itemPrice(item)?.price == null }">{{ priceText(itemPrice(item)) }}</text>
                     </view>
                     <view v-if="EDITABLE.includes(item.type)" class="amap-links">
@@ -90,6 +91,7 @@
                     <view class="a swap" @click="openReplace(item, 'VISITED')"><Icon name="refresh" :size="13" color="var(--accent)" />以前去过，换一个</view>
                     <view class="a" @click="openReplace(item, 'DISLIKE')"><Icon name="close" :size="13" color="var(--muted)" />不感兴趣</view>
                   </template>
+                  <view v-if="flightNoOf(item) && !isBooked(item.id)" class="a swap" @click="changeFlight"><Icon name="refresh" :size="13" color="var(--accent)" />比价换航班</view>
                   <view v-if="BOOKABLE.includes(item.type)" class="a book" :class="{ on: isBooked(item.id) }" @click="toggleBooked(item.id, item.name)"><Icon name="checkCircle" :size="13" color="var(--ok)" />{{ isBooked(item.id) ? "已预约" : "标记已预约" }}</view>
                   <view v-if="doneable(item.type)" class="a book" :class="{ on: isDone(item.id) }" @click="toggleDone(item)"><Icon name="check" :size="13" color="var(--ok)" />{{ doneText(item.type, isDone(item.id)) }}</view>
                 </view>
@@ -136,7 +138,7 @@
 
         <view class="panel">
           <view class="panel-head"><text class="panel-title"><Icon name="bed" :size="16" color="var(--accent)" /> 当日酒店</text></view>
-          <StayCard v-if="dayStay" :key="dayStay.id + dayStay.name" :stay="dayStay" :trip-id="tripId" :editable="isCurrent" :booked="isBooked(dayStay.id)" @saved="onSaved" @updated="detail = $event" />
+          <StayCard v-if="dayStay" :key="dayStay.id + dayStay.name" :stay="dayStay" :trip-id="tripId" :editable="isCurrent" :booked="isBooked(dayStay.id)" :checking="stayChecking(itinerary, dayStay)" @saved="onSaved" @updated="detail = $event" />
           <template v-else-if="hotel">
             <view class="muted small"><Icon name="checkCircle" :size="12" color="var(--ok)" /> {{ cnDate(day?.date) }} 住这里<text v-if="hotel.address"> · {{ hotel.address }}</text></view>
             <view class="food">
@@ -267,7 +269,7 @@
               <view class="stop-body">
                 <view class="stop-name" :class="{ link: item.url }" @click="openUrl(item.url)">{{ item.name }}<text v-if="isBooked(item.id)" class="booked-tag">已预约</text></view>
                 <text v-if="doneable(item.type)" class="done-btn" :class="{ on: isDone(item.id) }" @click.stop="toggleDone(item)">{{ isDone(item.id) ? "✓ " : "" }}{{ doneText(item.type, isDone(item.id)) }}</text>
-                <view class="stop-time">{{ item.start }}<text v-if="item.end"> - {{ item.end }}</text><text v-if="item.rating" class="star"> · ★{{ item.rating }}</text><text v-if="item.cost" class="cost"> · ¥{{ item.cost }}/人</text></view>
+                <view class="stop-time">{{ item.start }}<text v-if="item.end"> - {{ item.end }}</text><text v-if="item.rating" class="star"> · ★{{ item.rating }}</text><text v-if="item.cost" class="cost"> · ¥{{ item.cost }}/人</text><text v-if="day && flightChecking(itinerary, item, day.date)" class="checking"> · 其他平台比价中…</text></view>
                 <view v-if="item.note" class="stop-note">{{ item.note }}</view>
                 <view v-if="EDITABLE.includes(item.type)" class="amap-links">
                   <text class="amap" @click.stop="openUrl(amapUrl(item, city))"><Icon name="pin" :size="12" color="var(--accent)" /> 高德地图</text>
@@ -279,6 +281,10 @@
               <view class="act book" :class="{ on: isBooked(item.id) }" @click="toggleBooked(item.id, item.name)">
                 <Icon name="checkCircle" :size="13" color="var(--ok)" />
                 <text>{{ isBooked(item.id) ? "已预约" : "标记已预约" }}</text>
+              </view>
+              <view v-if="flightNoOf(item) && !isBooked(item.id)" class="act" @click="changeFlight">
+                <Icon name="refresh" :size="13" color="var(--ink)" />
+                <text>比价换航班</text>
               </view>
             </view>
             <view v-if="isCurrent && EDITABLE.includes(item.type)" class="stop-actions">
@@ -302,7 +308,7 @@
         <view class="add" @click="addStop"><Icon name="plus" :size="16" color="var(--accent)" /><text>添加景点/活动</text></view>
         <view v-if="dayStay" class="m-stay">
           <view class="m-stay-title"><Icon name="bed" :size="15" color="var(--accent)" /> 今晚住</view>
-          <StayCard :key="dayStay.id + dayStay.name" :stay="dayStay" :trip-id="tripId" :editable="isCurrent" :booked="isBooked(dayStay.id)" @saved="onSaved" @updated="detail = $event" />
+          <StayCard :key="dayStay.id + dayStay.name" :stay="dayStay" :trip-id="tripId" :editable="isCurrent" :booked="isBooked(dayStay.id)" :checking="stayChecking(itinerary, dayStay)" @saved="onSaved" @updated="detail = $event" />
         </view>
       </view>
 
@@ -358,7 +364,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from "vue";
+import { computed, onUnmounted, reactive, ref, watch } from "vue";
 import { onLoad, onShow } from "@dcloudio/uni-app";
 import { api } from "../../api";
 import { API_BASE, showError } from "../../api/http";
@@ -373,6 +379,7 @@ import Shell from "../../components/Shell.vue";
 import { useWide } from "../../utils/screen";
 import { doneable, doneText, hm, mdw, openUrl, shortDate } from "../../utils/format";
 import { hotelPrice, loadHotelPrices, priceText, stayDates, type HotelPrice } from "../../utils/hotelPrice";
+import { anyChecking, flightChecking, flightNoOf, pollWhileChecking, stayChecking } from "../../utils/priceCheck";
 import { amapNavUrl, amapUrl, cityOf, dayMapUrl, dayTravel, distanceText, duration as duration2, legFrom, located, needsGeo } from "../../utils/place";
 
 /**
@@ -445,6 +452,31 @@ const anchor = computed(() => {
   return list.find((x) => x.type === "SPOT") || list[0];
 });
 const stays = computed<Stay[]>(() => detail.value?.version.itinerary?.stays || []);
+/** 当前看的版本的结构化行程 */
+const itinerary = computed(() => detail.value?.version.itinerary);
+
+/** 后台还在给选中的酒店、航班补其他平台的价格时，每 5 秒刷新一次当前版本，补完自动停 */
+let stopPolling: (() => void) | null = null;
+watch(
+  () => (isCurrent.value && anyChecking(itinerary.value) ? detail.value?.version.version : null),
+  (version) => {
+    stopPolling?.();
+    stopPolling = null;
+    if (version == null) return;
+    stopPolling = pollWhileChecking(async () => {
+      const d = await api.trip(tripId.value);
+      if (d.version.version !== detail.value?.version.version) return true;
+      detail.value = d;
+      return !anyChecking(d.version.itinerary);
+    });
+  },
+);
+onUnmounted(() => stopPolling?.());
+
+/** 换航班：去机票比价页（带上行程，比完可以直接写进对应那天） */
+function changeFlight() {
+  go(`/pages/search/flight?tab=flight&trip=${tripId.value}`);
+}
 /** 当天晚上住的那段住宿；最后一天（离店日）显示离店的那家 */
 const dayStay = computed(() => {
   const date = day.value?.date;
@@ -1156,6 +1188,7 @@ async function loadVersions() {
 .stop-time { font-size: 12px; color: var(--muted); margin-top: 1px; font-variant-numeric: tabular-nums; }
 .cost { color: var(--price); }
 .cost.quiet { color: var(--muted); }
+.checking { color: var(--accent); }
 .stop-note { font-size: 13px; margin-top: 2px; color: var(--ink); opacity: 0.85; }
 .stop-actions { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
 .act {

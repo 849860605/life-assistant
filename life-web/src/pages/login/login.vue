@@ -44,33 +44,27 @@
         </view>
       </view>
 
-      <!-- 右侧登录卡片 -->
+      <!-- 右侧卡片：登录、注册、找回密码三种状态 -->
       <view class="panel">
-        <view class="panel-title">登录星络</view>
-        <view class="panel-sub">登录后可保存行程、继续编辑与查看预订信息</view>
-
-        <view class="tabs">
-          <view class="tab" :class="{ on: mode === 'code' }" @click="mode = 'code'">验证码登录</view>
-          <view class="tab" :class="{ on: mode === 'password' }" @click="mode = 'password'">密码登录</view>
-        </view>
-
-        <view v-if="mode === 'code'" class="form">
-          <view class="notice">短信验证码登录暂未开通，请先用「密码登录」。</view>
-          <view class="field disabled">
-            <Icon name="phone" :size="18" color="var(--muted)" />
-            <input id="phone" class="field-input" disabled placeholder="请输入手机号" />
+        <template v-if="view === 'reset'">
+          <view class="panel-title">找回密码</view>
+          <view class="panel-sub">用绑定的邮箱收验证码，设一个新密码</view>
+        </template>
+        <template v-else>
+          <view class="panel-title">{{ view === "register" ? "注册星络" : "登录星络" }}</view>
+          <view class="panel-sub">{{ view === "register" ? "用邮箱注册，验证码 10 分钟内有效" : "登录后可保存行程、继续编辑与查看预订信息" }}</view>
+          <view class="tabs">
+            <view class="tab" :class="{ on: view === 'login' }" @click="switchView('login')">登录</view>
+            <view class="tab" :class="{ on: view === 'register' }" @click="switchView('register')">注册</view>
           </view>
-          <view class="field disabled">
-            <Icon name="shield" :size="18" color="var(--muted)" />
-            <input id="code" class="field-input" disabled placeholder="请输入验证码" />
-            <view class="code-btn">获取验证码</view>
-          </view>
-        </view>
+        </template>
 
-        <view v-else class="form">
+        <!-- 登录 -->
+        <view v-if="view === 'login'" class="form">
+          <view v-if="notice" class="ok-notice">{{ notice }}</view>
           <view class="field">
             <Icon name="user" :size="18" color="var(--muted)" />
-            <input id="username" v-model="username" class="field-input" placeholder="请输入账号" />
+            <input id="username" v-model="username" class="field-input" placeholder="用户名或邮箱" />
           </view>
           <view class="field">
             <Icon name="lock" :size="18" color="var(--muted)" />
@@ -78,35 +72,80 @@
           </view>
         </view>
 
-        <view class="agree" @click="agreed = !agreed">
+        <!-- 注册 -->
+        <view v-else-if="view === 'register'" class="form">
+          <view v-if="options && !options.open" class="notice">暂未开放注册，请联系管理员开通账号。</view>
+          <view v-else-if="options && !options.mailReady" class="notice">暂时不能发邮件验证码，请稍后再试或联系管理员。</view>
+          <view class="field">
+            <Icon name="mail" :size="18" color="var(--muted)" />
+            <input id="reg-email" v-model="email" class="field-input" placeholder="邮箱" />
+          </view>
+          <view class="field">
+            <Icon name="shield" :size="18" color="var(--muted)" />
+            <input id="reg-code" v-model="code" class="field-input" type="number" maxlength="6" placeholder="6 位验证码" />
+            <view class="code-btn" :class="{ on: canSendCode }" @click="sendCode('REGISTER')">{{ codeBtnText }}</view>
+          </view>
+          <view v-if="codeHint" class="hint left">{{ codeHint }}</view>
+          <view class="field">
+            <Icon name="user" :size="18" color="var(--muted)" />
+            <input id="reg-nickname" v-model="nickname" class="field-input" maxlength="32" placeholder="昵称（选填，星络这样称呼你）" />
+          </view>
+          <view class="field">
+            <Icon name="lock" :size="18" color="var(--muted)" />
+            <input id="reg-password" v-model="password" class="field-input" password placeholder="设置密码：8 位以上，字母加数字" @confirm="submit" />
+          </view>
+          <view v-if="passwordProblem(password)" class="hint left">{{ passwordProblem(password) }}</view>
+        </view>
+
+        <!-- 找回密码 -->
+        <view v-else class="form">
+          <view class="field">
+            <Icon name="mail" :size="18" color="var(--muted)" />
+            <input id="reset-email" v-model="email" class="field-input" placeholder="绑定的邮箱" />
+          </view>
+          <view class="field">
+            <Icon name="shield" :size="18" color="var(--muted)" />
+            <input id="reset-code" v-model="code" class="field-input" type="number" maxlength="6" placeholder="6 位验证码" />
+            <view class="code-btn" :class="{ on: canSendCode }" @click="sendCode('RESET')">{{ codeBtnText }}</view>
+          </view>
+          <view v-if="codeHint" class="hint left">{{ codeHint }}</view>
+          <view class="field">
+            <Icon name="lock" :size="18" color="var(--muted)" />
+            <input id="reset-password" v-model="password" class="field-input" password placeholder="新密码：8 位以上，字母加数字" />
+          </view>
+          <view class="field">
+            <Icon name="lock" :size="18" color="var(--muted)" />
+            <input id="reset-again" v-model="again" class="field-input" password placeholder="再输一遍新密码" @confirm="submit" />
+          </view>
+          <view v-if="resetProblem" class="hint left">{{ resetProblem }}</view>
+        </view>
+
+        <view v-if="view !== 'reset'" class="agree" @click="agreed = !agreed">
           <view class="box" :class="{ on: agreed }"><Icon v-if="agreed" name="check" :size="12" color="#fff" /></view>
           <text>我已阅读并同意</text>
           <text class="link" @click.stop="notReady('《用户协议》还没写，正式上线前补上')">《用户协议》</text>
           <text class="link" @click.stop="notReady('《隐私政策》还没写，正式上线前补上')">《隐私政策》</text>
         </view>
 
-        <button class="submit" :disabled="!canSubmit" @click="submit">
-          {{ loading ? "登录中…" : mode === "code" ? "登录 / 注册" : "登录" }}
-        </button>
+        <button class="submit" :disabled="!canSubmit" @click="submit">{{ submitText }}</button>
         <view v-if="error" class="error">{{ error }}</view>
 
-        <view class="wechat" @click="notReady('微信快捷登录暂未开通')">
-          <Icon name="wechat" :size="20" color="#07c160" />
-          <text>微信快捷登录</text>
-          <text class="soon">暂未开通</text>
-        </view>
-
         <view class="links">
-          <text @click="notReady('找回密码暂未开通，自用版密码在项目 .env 里（LIFE_PASSWORD）')">忘记密码</text>
-          <text class="sep">|</text>
-          <text>遇到问题？<text class="link" @click="notReady('客服暂未开通')">联系客服</text></text>
+          <template v-if="view === 'reset'">
+            <text @click="switchView('login')">‹ 返回登录</text>
+          </template>
+          <template v-else>
+            <text @click="switchView('reset')">忘记密码</text>
+            <text class="sep">|</text>
+            <text v-if="view === 'login'">还没有账号？<text class="link" @click="switchView('register')">注册</text></text>
+            <text v-else>已有账号？<text class="link" @click="switchView('login')">去登录</text></text>
+          </template>
         </view>
-        <view v-if="mode === 'code'" class="hint">未注册的手机号验证后将自动创建账号（开通后生效）</view>
 
         <view class="trust">
           <view><Icon name="lock" :size="15" color="var(--muted)" />密码加密存储</view>
           <text class="sep">|</text>
-          <view><Icon name="shield" :size="15" color="var(--muted)" />仅用于账号登录与行程同步</view>
+          <view><Icon name="shield" :size="15" color="var(--muted)" />邮箱只用于登录和找回密码</view>
         </view>
       </view>
     </view>
@@ -114,12 +153,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onUnmounted, ref } from "vue";
+import { onLoad } from "@dcloudio/uni-app";
 import { api } from "../../api";
 import { setToken } from "../../api/http";
 import { clearMediaTicket } from "../../utils/media";
 import Icon from "../../components/Icon.vue";
 import BrandMark from "../../components/BrandMark.vue";
+import { looksLikeEmail, passwordProblem } from "../../utils/password";
 
 /** 左侧三条功能介绍 */
 const FEATURES = [
@@ -139,40 +180,145 @@ const SAMPLE_TOOLS = [
   { icon: "food", tone: "orange", title: "美食推荐", desc: "按当天路线找顺路的店" },
 ];
 
-const mode = ref<"code" | "password">("password");
+/** 卡片现在是登录、注册还是找回密码 */
+const view = ref<"login" | "register" | "reset">("login");
 const username = ref("");
 const password = ref("");
+const email = ref("");
+const code = ref("");
+const nickname = ref("");
+const again = ref("");
 const agreed = ref(false);
 const loading = ref(false);
 const error = ref("");
+/** 登录卡片上的绿色提示（比如"密码已重置"） */
+const notice = ref("");
+/** 注册是否开放、能不能发邮件；没查到时按开放处理，提交时后端会再拦 */
+const options = ref<{ open: boolean; mailReady: boolean } | null>(null);
+/** 验证码按钮：倒计时秒数、发送中、发到哪了 */
+const countdown = ref(0);
+const sending = ref(false);
+const codeHint = ref("");
+let timer: ReturnType<typeof setInterval> | null = null;
 
-const canSubmit = computed(() => mode.value === "password" && !loading.value && !!username.value && !!password.value);
+onLoad((q) => {
+  if (q?.view === "register" || q?.view === "reset") view.value = q.view;
+});
+api.registerOptions().then((o) => (options.value = o)).catch(() => {});
+onUnmounted(() => {
+  if (timer) clearInterval(timer);
+});
+
+/** 换卡片：清掉错误、验证码和密码，邮箱在登录、注册、找回密码之间沿用 */
+function switchView(next: "login" | "register" | "reset") {
+  if (view.value === next) return;
+  if (next === "login" && looksLikeEmail(email.value) && !username.value) username.value = email.value.trim();
+  if (next !== "login" && looksLikeEmail(username.value) && !email.value) email.value = username.value.trim();
+  view.value = next;
+  error.value = "";
+  notice.value = "";
+  code.value = "";
+  codeHint.value = "";
+  password.value = "";
+  again.value = "";
+}
+
+const registerBlocked = computed(() => !!options.value && (!options.value.open || !options.value.mailReady));
+const canSendCode = computed(() => !sending.value && countdown.value === 0 && looksLikeEmail(email.value)
+  && !(view.value === "register" && registerBlocked.value));
+const codeBtnText = computed(() => (sending.value ? "发送中…" : countdown.value ? `${countdown.value} 秒后重发` : "获取验证码"));
+
+/** 找回密码时新密码哪里不对 */
+const resetProblem = computed(() => {
+  const p = passwordProblem(password.value);
+  if (p) return p;
+  if (password.value && again.value && again.value !== password.value) return "两次输入的新密码不一样";
+  return "";
+});
+
+const canSubmit = computed(() => {
+  if (loading.value) return false;
+  if (view.value === "login") return !!username.value.trim() && !!password.value;
+  const base = looksLikeEmail(email.value) && /^\d{6}$/.test(code.value.trim()) && !!password.value && !passwordProblem(password.value);
+  if (view.value === "register") return base && !registerBlocked.value;
+  return base && again.value === password.value;
+});
+
+const submitText = computed(() => {
+  if (loading.value) return view.value === "login" ? "登录中…" : view.value === "register" ? "注册中…" : "提交中…";
+  return view.value === "login" ? "登录" : view.value === "register" ? "注册并登录" : "重置密码";
+});
 
 function notReady(msg: string) {
   uni.showToast({ title: msg, icon: "none", duration: 2500 });
 }
 
-/** 登录成功后保存 token，进入首页。 */
+/** 要验证码：成功后开始倒计时，告诉用户发到哪了 */
+async function sendCode(purpose: "REGISTER" | "RESET") {
+  if (!canSendCode.value) {
+    if (!looksLikeEmail(email.value)) error.value = "先填一个正确的邮箱";
+    return;
+  }
+  sending.value = true;
+  error.value = "";
+  try {
+    const r = await api.sendEmailCode(email.value.trim(), purpose);
+    codeHint.value = `验证码已发到 ${email.value.trim()}，10 分钟内有效；没收到的话看看垃圾邮件`;
+    startCountdown(r.cooldown || 60);
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "验证码没发出去";
+  } finally {
+    sending.value = false;
+  }
+}
+
+function startCountdown(seconds: number) {
+  countdown.value = seconds;
+  if (timer) clearInterval(timer);
+  timer = setInterval(() => {
+    countdown.value -= 1;
+    if (countdown.value <= 0 && timer) {
+      clearInterval(timer);
+      timer = null;
+    }
+  }, 1000);
+}
+
+/** 提交当前卡片：登录、注册（成功直接进首页）或重置密码（成功回登录） */
 async function submit() {
   if (!canSubmit.value) return;
-  if (!agreed.value) {
+  if (view.value !== "reset" && !agreed.value) {
     error.value = "请先勾选同意用户协议和隐私政策";
     return;
   }
   loading.value = true;
   error.value = "";
   try {
-    const result = await api.login(username.value.trim(), password.value);
-    setToken(result.token);
-    // 换了账号，旧的下载票据不能再用
-    clearMediaTicket();
-    forgetOtherUser(result.user.id);
-    uni.switchTab({ url: "/pages/home/home" });
+    if (view.value === "login") {
+      finishLogin(await api.login(username.value.trim(), password.value));
+    } else if (view.value === "register") {
+      finishLogin(await api.register(email.value.trim(), code.value.trim(), password.value, nickname.value.trim()));
+    } else {
+      await api.resetPassword(email.value.trim(), code.value.trim(), password.value);
+      const address = email.value.trim();
+      switchView("login");
+      username.value = address;
+      notice.value = "密码已重置，用新密码登录";
+    }
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "登录失败";
+    error.value = e instanceof Error ? e.message : "操作失败";
   } finally {
     loading.value = false;
   }
+}
+
+/** 登录或注册成功：保存 token，进入首页 */
+function finishLogin(result: { token: string; user: { id: number } }) {
+  setToken(result.token);
+  // 换了账号，旧的下载票据不能再用
+  clearMediaTicket();
+  forgetOtherUser(result.user.id);
+  uni.switchTab({ url: "/pages/home/home" });
 }
 
 const LAST_USER_KEY = "life_last_user";
@@ -269,6 +415,8 @@ function forgetOtherUser(userId: number) {
 .field.disabled { background: #f7f8fb; }
 .field-input { flex: 1; min-width: 0; height: 100%; font-size: 15px; color: #1b2333; background: transparent; border: none; }
 .code-btn { padding: 6px 12px; border: 1px solid #c9d6f3; border-radius: 8px; color: #9aa6bf; font-size: 14px; font-weight: 600; white-space: nowrap; }
+.code-btn.on { color: var(--accent); border-color: var(--accent); cursor: pointer; }
+.ok-notice { font-size: 13px; color: #17703a; background: #e7f6ec; border-radius: 8px; padding: 8px 12px; }
 .agree { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; font-size: 13px; color: #4b5874; cursor: pointer; }
 .box { width: 16px; height: 16px; border: 1px solid #b9c3d6; border-radius: 4px; margin-right: 6px; display: flex; align-items: center; justify-content: center; }
 .box.on { background: var(--accent); border-color: var(--accent); }
@@ -276,12 +424,11 @@ function forgetOtherUser(userId: number) {
 .submit { height: 52px; line-height: 52px; border-radius: 12px; background: var(--accent); color: #fff; font-size: 18px; font-weight: 800; border: none; margin: 4px 0 0; }
 .submit[disabled] { background: #9db8f2; color: #fff; }
 .error { color: var(--danger); font-size: 14px; text-align: center; }
-.wechat { height: 50px; border: 1px solid #dfe4ee; border-radius: 12px; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 16px; font-weight: 600; color: #8a94a8; background: #fafbfd; cursor: pointer; }
-.soon { font-size: 12px; font-weight: 600; color: #9a5b12; background: #fdf3e3; padding: 1px 8px; border-radius: 999px; }
 .links { display: flex; justify-content: center; align-items: center; gap: 24px; font-size: 14px; color: #4b5874; }
-.links > text:first-child { cursor: pointer; }
+.links > text { cursor: pointer; }
 .sep { color: #d3d9e4; }
 .hint { text-align: center; font-size: 13px; color: #5b6782; }
+.hint.left { text-align: left; margin-top: -6px; }
 .trust { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 16px; padding: 12px; margin-top: 4px; background: #f6f8fc; border-radius: 12px; font-size: 13px; color: #5b6782; }
 .trust > view { display: flex; align-items: center; gap: 6px; }
 

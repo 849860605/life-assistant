@@ -1066,7 +1066,7 @@ public class TripEditor {
 
     private static final java.util.regex.Pattern FLIGHT_NO = java.util.regex.Pattern.compile("[A-Z0-9]{2}\\d{1,4}(/[A-Z0-9]{2}\\d{1,4})*");
     /** 安排名称里带航班号的交通项就当成这天的航班 */
-    private static final java.util.regex.Pattern FLIGHT_IN_NAME = java.util.regex.Pattern.compile("(?<![A-Z0-9])[A-Z0-9]{2}\\d{3,4}(?!\\d)");
+    static final java.util.regex.Pattern FLIGHT_IN_NAME = java.util.regex.Pattern.compile("(?<![A-Z0-9])[A-Z0-9]{2}\\d{3,4}(?!\\d)");
     private static final java.util.regex.Pattern HHMM = java.util.regex.Pattern.compile("\\d{1,2}:\\d{2}");
 
     public FlightPreview previewFlight(UserCtx ctx, long tripId, int dayIndex, FlightPick pick) {
@@ -1618,6 +1618,19 @@ public class TripEditor {
         return itinerary.days().stream().filter(d -> d.legs() != null).flatMap(d -> d.legs().stream())
                 .anyMatch(l -> !Itinerary.WALK.equals(l.mode()) && (l.transit() == null
                         || Itinerary.DRIVE.equals(l.mode()) && l.taxi() == null));
+    }
+
+    /** 后台改当前版本里的价格这类信息：在锁里读最新版本，改完原地写回，不算新版本；没变就不写。 */
+    public void updateInPlace(UserCtx ctx, long tripId, java.util.function.UnaryOperator<Itinerary> change) {
+        locked(tripId, () -> {
+            TripService.TripDetail latest = tripService.get(ctx, tripId, null);
+            Itinerary before = itinerary(latest);
+            Itinerary after = change.apply(before);
+            if (after != null && !after.equals(before)) {
+                tripService.updateItinerary(tripId, latest.version().getVersion(), json(after), after.toMarkdown());
+            }
+            return null;
+        });
     }
 
     /** 在这个行程的锁里执行；锁是可重入的，里面再调别的加锁方法没问题。用 ReentrantLock 而不是 synchronized，免得卡住虚拟线程。 */

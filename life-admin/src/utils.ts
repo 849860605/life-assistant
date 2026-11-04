@@ -39,6 +39,8 @@ export const ACTION_LABELS: Record<string, string> = {
   LOGIN: "登录后台",
   CHANGE_OWN_PASSWORD: "修改自己的密码",
   CREATE_USER: "新建用户",
+  OPEN_REGISTER: "开放注册",
+  CLOSE_REGISTER: "关闭注册",
   RESET_USER_PASSWORD: "重置用户密码",
   ENABLE_USER: "启用用户",
   DISABLE_USER: "停用用户",

@@ -29,11 +29,14 @@ public class FlightTools {
     private final List<FlightPriceSource> sources;
     private final CardHub cards;
     private final com.lifeassistant.core.cache.QueryCache queryCache;
+    private final FlightBook flightBook;
 
-    public FlightTools(List<FlightPriceSource> sources, CardHub cards, com.lifeassistant.core.cache.QueryCache queryCache) {
+    public FlightTools(List<FlightPriceSource> sources, CardHub cards, com.lifeassistant.core.cache.QueryCache queryCache,
+                       FlightBook flightBook) {
         this.sources = sources;
         this.cards = cards;
         this.queryCache = queryCache;
+        this.flightBook = flightBook;
     }
 
     /** 某一航班在各平台的价格；tax 是另付的税费（只有途牛单独给），没有为空。 */
@@ -72,11 +75,119 @@ public class FlightTools {
         @SuppressWarnings("unchecked")
         List<Flight> flights = (List<Flight>) out.get("flights");
         if (flights != null && !flights.isEmpty()) {
+            record(origin, destination, String.valueOf(out.get("date")), flights);
             Map<String, Object> card = new LinkedHashMap<>(out);
             card.put("queriedAt", CardHub.now());
             if (cards.emit("flights", card, summary(origin, destination, LocalDate.parse(date.trim()), flights))) {
                 out.put("card", CardHub.SHOWN_HINT);
             }
+        }
+        return out;
+    }
+
+    /** 快速查价最多给模型这么多班 */
+    private static final int QUICK_FLIGHTS = 6;
+
+    /**
+     * 规划行程时用的快速查价：只查飞猪（一两秒），不发卡片；挑中的那班写进行程后，后台再去携程、美团补比价。
+     */
+    @Tool(description = """
+            规划完整行程时查大交通用这个：只查飞猪，一两秒出结果，不出比价卡片。按偏好返回几班（航班号、起降时间、机场、价格），
+            从里面挑一班写进行程（TRANSPORT 项的 name 里带航班号，如"南航 CZ3401 双流T2 → 萧山T3"），价格和链接后端会自动带上，
+            其他平台的价格行程生成后后台补。往返就去程、回程各调一次，可以和酒店、天气一起并行调用。
+            用户单独问机票价格、或者说要全部比好价时用 compareFlights。""")
+    public Map<String, Object> quickFlights(
+            @ToolParam(description = "出发城市，例如：成都") String origin,
+            @ToolParam(description = "到达城市，例如：杭州") String destination,
+            @ToolParam(description = "出发日期 yyyy-MM-dd") String date,
+            @ToolParam(description = "偏好：直飞 / 早班 / 下午 / 晚班 / 便宜，没有就不填", required = false) String preference) {
+        LocalDate day;
+        try {
+            day = LocalDate.parse(date.trim());
+        } catch (RuntimeException e) {
+            return Map.of("error", "日期格式不对，要 yyyy-MM-dd");
+        }
+        if (day.isBefore(LocalDate.now())) {
+            return Map.of("error", day + " 已经过去了");
+        }
+        FlightPriceSource fliggy = sources.stream().filter(s -> "飞猪".equals(s.platform()) && s.available()).findFirst()
+                .orElse(null);
+        if (fliggy == null) {
+            return Map.of("error", "飞猪没有配置，改用 compareFlights 查");
+        }
+        FlightPriceSource.Result result;
+        try {
+            result = fliggy.search(origin, destination, day);
+        } catch (RuntimeException e) {
+            result = FlightPriceSource.Result.failed(fliggy.platform(), e.getMessage());
+        }
+        List<Flight> flights = pick(merge(List.of(result), PAGE_FLIGHTS), preference);
+        if (flights.isEmpty()) {
+            return Map.of("error", "飞猪没查到这天的航班" + (result.note() == null ? "" : "（" + result.note() + "）")
+                    + "，改用 compareFlights 查各平台");
+        }
+        record(origin, destination, day.toString(), flights);
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("date", day.toString());
+        out.put("flights", flights.stream().map(f -> {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("flightNo", f.flightNo());
+            m.put("airline", f.airline());
+            m.put("time", f.depTime() + "-" + f.arrTime() + (f.nextDay() ? "（次日）" : ""));
+            m.put("airports", f.depAirport() + " → " + f.arrAirport());
+            m.put("price", f.lowest());
+            if (f.transfer()) {
+                m.put("transfer", f.via() == null ? "中转" : "经" + f.via() + "中转");
+            }
+            return m;
+        }).toList());
+        out.put("note", "价格只来自飞猪；写进行程后后台会补携程、美团的价格");
+        return out;
+    }
+
+    /** 按偏好挑几班：直飞优先时去掉中转；早班、下午、晚班按起飞时间筛；其余按价格。 */
+    static List<Flight> pick(List<Flight> flights, String preference) {
+        String p = preference == null ? "" : preference;
+        List<Flight> list = new ArrayList<>(flights);
+        if (p.contains("直飞") && list.stream().anyMatch(f -> !f.transfer())) {
+            list.removeIf(Flight::transfer);
+        }
+        java.util.function.Predicate<Flight> slot = p.contains("早") ? f -> pad(f.depTime()).compareTo("11:00") < 0
+                : p.contains("下午") ? f -> pad(f.depTime()).compareTo("12:00") >= 0 && pad(f.depTime()).compareTo("18:00") < 0
+                : p.contains("晚") ? f -> pad(f.depTime()).compareTo("18:00") >= 0 : null;
+        if (slot != null && list.stream().anyMatch(slot)) {
+            list.removeIf(slot.negate());
+        }
+        list.sort(Comparator.comparing(Flight::lowest, Comparator.nullsLast(Comparator.naturalOrder())));
+        return list.size() > QUICK_FLIGHTS ? new ArrayList<>(list.subList(0, QUICK_FLIGHTS)) : list;
+    }
+
+    /** 记进当前会话的航班簿，保存行程时按航班号找回价格和链接。 */
+    private void record(String origin, String destination, String date, List<Flight> flights) {
+        com.lifeassistant.core.audit.CallRecorder.Scope scope = com.lifeassistant.core.audit.CallRecorder.current();
+        flightBook.record(scope == null ? null : scope.conversationId(), origin, destination, date, flights, CardHub.now());
+    }
+
+    /**
+     * 后台补比价：给行程里选中的一班去其他平台（skip 里的平台不查，比如已经查过的飞猪、额度紧的途牛）查同一航线，
+     * 按航班号对上后返回各平台价格；一个平台都没对上返回空 map。
+     */
+    public Map<String, PlatformPrice> refine(String origin, String destination, LocalDate date, String flightNo,
+                                             Set<String> skip) {
+        List<FlightPriceSource> active = sources.stream()
+                .filter(s -> s.available() && !skip.contains(s.platform())).toList();
+        Map<String, PlatformPrice> out = new LinkedHashMap<>();
+        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            List<Future<FlightPriceSource.Result>> futures = active.stream()
+                    .map(s -> executor.submit(() -> s.search(origin, destination, date))).toList();
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(DEADLINE_SECONDS);
+            for (int i = 0; i < futures.size(); i++) {
+                FlightPriceSource.Result r = await(futures.get(i), active.get(i).platform(), deadline);
+                r.offers().stream().filter(o -> flightNo.equalsIgnoreCase(o.flightNo()) && o.price() != null)
+                        .min(Comparator.comparing(FlightPriceSource.Offer::price))
+                        .ifPresent(o -> out.put(r.platform(), new PlatformPrice(o.price(), o.url(), o.tax())));
+            }
+            executor.shutdownNow();
         }
         return out;
     }

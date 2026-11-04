@@ -26,9 +26,10 @@ public class AdminStatsService {
     public record Page<T>(long total, List<T> items) {
     }
 
-    /** 用户列表的一行：最近活跃取最近一次对话的更新时间。 */
-    public record UserRow(long id, String username, String nickname, int status, OffsetDateTime createdAt,
-                          OffsetDateTime lastLoginAt, OffsetDateTime lastActiveAt, long conversations, long trips) {
+    /** 用户列表的一行：最近活跃取最近一次对话的更新时间；source 是 ADMIN 后台建的或 EMAIL 自己注册的。 */
+    public record UserRow(long id, String username, String nickname, String email, String source, int status,
+                          OffsetDateTime createdAt, OffsetDateTime lastLoginAt, OffsetDateTime lastActiveAt,
+                          long conversations, long trips) {
     }
 
     /**
@@ -107,23 +108,23 @@ public class AdminStatsService {
         }
     }
 
-    /** 用户分页列表，keyword 按用户名或昵称模糊找；page 从 1 开始。 */
+    /** 用户分页列表，keyword 按用户名、昵称或邮箱模糊找；page 从 1 开始。 */
     public Page<UserRow> users(String keyword, int page, int size) {
         String like = keyword == null || keyword.isBlank() ? null : "%" + keyword.trim() + "%";
-        String where = like == null ? "" : " WHERE u.username ILIKE ? OR u.nickname ILIKE ?";
-        Object[] filter = like == null ? new Object[0] : new Object[]{like, like};
+        String where = like == null ? "" : " WHERE u.username ILIKE ? OR u.nickname ILIKE ? OR u.email ILIKE ?";
+        Object[] filter = like == null ? new Object[0] : new Object[]{like, like, like};
         long total = jdbc.queryForObject("SELECT count(*) FROM t_user u" + where, Long.class, filter);
         List<Object> args = new ArrayList<>(List.of(filter));
         args.add(size);
         args.add((long) (page - 1) * size);
         List<UserRow> rows = jdbc.query("""
-                SELECT u.id, u.username, u.nickname, u.status, u.created_at, u.last_login_at,
+                SELECT u.id, u.username, u.nickname, u.email, u.source, u.status, u.created_at, u.last_login_at,
                   (SELECT max(c.updated_at) FROM t_conversation c WHERE c.user_id = u.id) AS last_active_at,
                   (SELECT count(*) FROM t_conversation c WHERE c.user_id = u.id) AS conversations,
                   (SELECT count(*) FROM t_trip t WHERE t.user_id = u.id) AS trips
                 FROM t_user u""" + where + " ORDER BY u.id LIMIT ? OFFSET ?",
                 (rs, i) -> new UserRow(rs.getLong("id"), rs.getString("username"), rs.getString("nickname"),
-                        rs.getInt("status"), rs.getObject("created_at", OffsetDateTime.class),
+                        rs.getString("email"), rs.getString("source"), rs.getInt("status"), rs.getObject("created_at", OffsetDateTime.class),
                         rs.getObject("last_login_at", OffsetDateTime.class),
                         rs.getObject("last_active_at", OffsetDateTime.class), rs.getLong("conversations"),
                         rs.getLong("trips")), args.toArray());

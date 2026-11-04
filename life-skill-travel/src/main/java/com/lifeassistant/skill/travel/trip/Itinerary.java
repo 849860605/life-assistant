@@ -20,11 +20,19 @@ import java.util.Set;
  * done 是用户标记"去过了 / 吃过了"的安排 id：出行中或回来后在页面上勾，不算新版本。
  * transport 是整个行程默认怎么走：TRANSIT 地铁公交（空也按它）或 DRIVE 打车/自驾；
  * legModes 是用户单独改过的路段，键是"起点 id>终点 id"，值是 TRANSIT 或 DRIVE。近的路段始终步行，不受它们影响。
+ * checking 是后台正在补比价的住宿和航班（键是住宿 id 或安排 id，值是开始时间）：生成行程时只查了一个平台，
+ * 后台查完其他平台就去掉，页面上这期间显示"比价中"。
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record Itinerary(List<Day> days, String tips, Boolean geo, List<Stay> stays, List<String> booked,
                         java.util.Map<String, String> bookingStatus, List<String> done, String transport,
-                        java.util.Map<String, String> legModes) {
+                        java.util.Map<String, String> legModes, java.util.Map<String, String> checking) {
+
+    public Itinerary(List<Day> days, String tips, Boolean geo, List<Stay> stays, List<String> booked,
+                     java.util.Map<String, String> bookingStatus, List<String> done, String transport,
+                     java.util.Map<String, String> legModes) {
+        this(days, tips, geo, stays, booked, bookingStatus, done, transport, legModes, null);
+    }
 
     /** 预订状态：计划预订、已跳转平台、已确认订单 */
     public static final String PLANNED = "PLANNED";
@@ -56,36 +64,42 @@ public record Itinerary(List<Day> days, String tips, Boolean geo, List<Stay> sta
 
     /** 换掉逐日安排，其余不变。 */
     public Itinerary withDays(List<Day> newDays) {
-        return new Itinerary(newDays, tips, geo, stays, booked, bookingStatus, done, transport, legModes);
+        return new Itinerary(newDays, tips, geo, stays, booked, bookingStatus, done, transport, legModes, checking);
     }
 
     /** 换掉住宿，其余不变。 */
     public Itinerary withStays(List<Stay> newStays) {
-        return new Itinerary(days, tips, geo, newStays, booked, bookingStatus, done, transport, legModes);
+        return new Itinerary(days, tips, geo, newStays, booked, bookingStatus, done, transport, legModes, checking);
     }
 
     /** 换掉已预约的 id 列表，其余不变；空列表存成 null。 */
     public Itinerary withBooked(List<String> newBooked) {
         return new Itinerary(days, tips, geo, stays, newBooked == null || newBooked.isEmpty() ? null : List.copyOf(newBooked),
-                bookingStatus, done, transport, legModes);
+                bookingStatus, done, transport, legModes, checking);
     }
 
     /** 换掉"已跳转平台"的记录，其余不变；空的存成 null。 */
     public Itinerary withBookingStatus(java.util.Map<String, String> status) {
         return new Itinerary(days, tips, geo, stays, booked,
-                status == null || status.isEmpty() ? null : java.util.Map.copyOf(status), done, transport, legModes);
+                status == null || status.isEmpty() ? null : java.util.Map.copyOf(status), done, transport, legModes, checking);
     }
 
     /** 换掉"去过了 / 吃过了"的 id 列表，其余不变；空列表存成 null。 */
     public Itinerary withDone(List<String> newDone) {
         return new Itinerary(days, tips, geo, stays, booked, bookingStatus,
-                newDone == null || newDone.isEmpty() ? null : List.copyOf(newDone), transport, legModes);
+                newDone == null || newDone.isEmpty() ? null : List.copyOf(newDone), transport, legModes, checking);
     }
 
     /** 换掉默认出行方式和单独改过的路段，并按新的选择重排每段路；空的存成 null。 */
     public Itinerary withTransport(String newTransport, java.util.Map<String, String> newLegModes) {
         return new Itinerary(days, tips, geo, stays, booked, bookingStatus, done, newTransport,
-                newLegModes == null || newLegModes.isEmpty() ? null : java.util.Map.copyOf(newLegModes)).resolveLegs();
+                newLegModes == null || newLegModes.isEmpty() ? null : java.util.Map.copyOf(newLegModes), checking).resolveLegs();
+    }
+
+    /** 换掉后台补比价的记录，其余不变；空的存成 null。 */
+    public Itinerary withChecking(java.util.Map<String, String> newChecking) {
+        return new Itinerary(days, tips, geo, stays, booked, bookingStatus, done, transport, legModes,
+                newChecking == null || newChecking.isEmpty() ? null : java.util.Map.copyOf(newChecking));
     }
 
     /** 这段路该用哪种方式：单独改过的优先，否则用行程默认（默认地铁公交）。 */
@@ -104,7 +118,7 @@ public record Itinerary(List<Day> days, String tips, Boolean geo, List<Stay> sta
         }
         List<Day> resolved = days.stream().map(d -> d.legs() == null ? d : new Day(d.date(), d.theme(), d.items(),
                 d.legs().stream().map(l -> l.choose(modeFor(l.from(), l.to()))).toList())).toList();
-        return new Itinerary(resolved, tips, geo, stays, booked, bookingStatus, done, transport, legModes);
+        return new Itinerary(resolved, tips, geo, stays, booked, bookingStatus, done, transport, legModes, checking);
     }
 
     /** 这一项是不是已经去过 / 吃过。 */
@@ -114,7 +128,7 @@ public record Itinerary(List<Day> days, String tips, Boolean geo, List<Stay> sta
 
     /** 标记已补过地理信息。 */
     public Itinerary located(List<Day> newDays, List<Stay> newStays) {
-        return new Itinerary(newDays, tips, true, newStays, booked, bookingStatus, done, transport, legModes);
+        return new Itinerary(newDays, tips, true, newStays, booked, bookingStatus, done, transport, legModes, checking);
     }
 
     /** 某项的预订状态：在 booked 里是已确认，点过预订链接是已跳转平台，否则是计划预订。 */

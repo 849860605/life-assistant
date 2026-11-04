@@ -98,6 +98,13 @@ public class AdminLlmController {
         }
     }
 
+    /** GET /admin/api/v1/llm/providers/{code}/remote-models：从提供方拉型号列表，添加模型时下拉选。 */
+    @GetMapping("/providers/{code}/remote-models")
+    public ApiResponse<List<String>> remoteModels(@PathVariable String code) {
+        adminContext.requireSuper();
+        return ApiResponse.ok(chatModels.remoteModels(code));
+    }
+
     /** GET /admin/api/v1/llm/models：全部模型。 */
     @GetMapping("/models")
     public ApiResponse<List<LlmModel>> models() {

@@ -12,6 +12,37 @@
     <view class="card links">
       <view class="link-row" @click="goSchedule"><text>我的日程和提醒</text><text class="muted">›</text></view>
       <view class="link-row" @click="go('/pages/chat/chat')"><text>对话记录</text><text class="muted">›</text></view>
+      <view class="link-row" @click="mail.open = !mail.open">
+        <text>{{ user?.email ? "邮箱" : "绑定邮箱" }}</text>
+        <text class="muted">{{ mail.open ? "收起" : user?.email ? `${user.email} · 换绑 ›` : "绑了能用邮箱登录、找回密码 ›" }}</text>
+      </view>
+      <view class="link-row" @click="pw.open = !pw.open"><text>修改密码</text><text class="muted">{{ pw.open ? "收起" : "›" }}</text></view>
+    </view>
+
+    <!-- 绑定邮箱：收验证码确认是自己的邮箱，绑好后能用邮箱登录和找回密码 -->
+    <view v-if="mail.open" class="card stack">
+      <input id="bind-email" v-model="mail.email" class="input" placeholder="邮箱" />
+      <view class="row">
+        <input id="bind-code" v-model="mail.code" class="input grow" type="number" maxlength="6" placeholder="6 位验证码" />
+        <button class="btn ghost small" :disabled="!canSendMail" @click="sendBindCode">{{ mail.sending ? "发送中…" : mail.countdown ? `${mail.countdown} 秒后重发` : "获取验证码" }}</button>
+      </view>
+      <view v-if="mail.hint" class="muted small">{{ mail.hint }}</view>
+      <view class="row">
+        <button class="btn small" :disabled="!canBind" @click="bindEmail">{{ mail.saving ? "绑定中…" : "绑定" }}</button>
+        <button class="btn ghost small" @click="closeMail">取消</button>
+      </view>
+    </view>
+
+    <!-- 修改密码：要原密码，改完其他设备上的登录会退出 -->
+    <view v-if="pw.open" class="card stack">
+      <input id="pw-old" v-model="pw.old" class="input" password placeholder="原密码" />
+      <input id="pw-new" v-model="pw.next" class="input" password placeholder="新密码：8 到 64 位，同时有字母和数字" />
+      <input id="pw-again" v-model="pw.again" class="input" password placeholder="再输一遍新密码" />
+      <view v-if="pwProblem" class="muted small">{{ pwProblem }}</view>
+      <view class="row">
+        <button class="btn small" :disabled="!!pwProblem || !pw.old || !pw.next || pw.saving" @click="changePassword">{{ pw.saving ? "保存中…" : "改密码" }}</button>
+        <button class="btn ghost small" @click="closePassword">取消</button>
+      </view>
     </view>
 
     <!-- 家庭地址：首页今日安排按它算几点出发 -->
@@ -115,11 +146,12 @@
 
 <script setup lang="ts">
 import Shell from "../../components/Shell.vue";
-import { reactive, ref } from "vue";
+import { computed, reactive, ref } from "vue";
 import { onShow } from "@dcloudio/uni-app";
 import { useWide } from "../../utils/screen";
 import { api } from "../../api";
 import { showError, toLogin } from "../../api/http";
+import { looksLikeEmail, passwordProblem } from "../../utils/password";
 import type { Brief, BriefSettings, MemoryCategory, MemoryItem, TokenView, UserView } from "../../api/types";
 
 const CATEGORY: Record<MemoryCategory, string> = {
@@ -133,6 +165,85 @@ const categories = Object.keys(CATEGORY) as MemoryCategory[];
 const categoryLabels = categories.map((c) => CATEGORY[c]);
 
 const user = ref<UserView | null>(null);
+
+/** 修改密码表单 */
+const pw = reactive({ open: false, old: "", next: "", again: "", saving: false });
+
+/** 新密码哪里不合规（和后端规则一致），没填时为空 */
+const pwProblem = computed(() => {
+  if (!pw.next) return "";
+  const p = passwordProblem(pw.next);
+  if (p) return "新" + p;
+  if (pw.again && pw.again !== pw.next) return "两次输入的新密码不一样";
+  if (!pw.again) return "再输一遍新密码";
+  return "";
+});
+
+/** 绑定邮箱表单：倒计时秒数、发送中、发到哪了 */
+const mail = reactive({ open: false, email: "", code: "", sending: false, saving: false, countdown: 0, hint: "" });
+let mailTimer: ReturnType<typeof setInterval> | null = null;
+const canSendMail = computed(() => !mail.sending && mail.countdown === 0 && looksLikeEmail(mail.email));
+const canBind = computed(() => !mail.saving && looksLikeEmail(mail.email) && /^\d{6}$/.test(mail.code.trim()));
+
+function closeMail() {
+  Object.assign(mail, { open: false, email: "", code: "", hint: "" });
+}
+
+/** 给要绑定的邮箱发验证码，成功后倒计时 */
+async function sendBindCode() {
+  if (!canSendMail.value) return;
+  mail.sending = true;
+  try {
+    const r = await api.sendEmailCode(mail.email.trim(), "BIND");
+    mail.hint = `验证码已发到 ${mail.email.trim()}，10 分钟内有效；没收到的话看看垃圾邮件`;
+    mail.countdown = r.cooldown || 60;
+    if (mailTimer) clearInterval(mailTimer);
+    mailTimer = setInterval(() => {
+      mail.countdown -= 1;
+      if (mail.countdown <= 0 && mailTimer) {
+        clearInterval(mailTimer);
+        mailTimer = null;
+      }
+    }, 1000);
+  } catch (e) {
+    showError(e);
+  } finally {
+    mail.sending = false;
+  }
+}
+
+/** 用验证码绑定邮箱，绑好后账号卡片上显示新邮箱 */
+async function bindEmail() {
+  if (!canBind.value) return;
+  mail.saving = true;
+  try {
+    user.value = await api.bindEmail(mail.email.trim(), mail.code.trim());
+    closeMail();
+    uni.showToast({ title: "邮箱绑好了，以后可以用邮箱登录", icon: "none", duration: 2500 });
+  } catch (e) {
+    showError(e);
+  } finally {
+    mail.saving = false;
+  }
+}
+
+function closePassword() {
+  Object.assign(pw, { open: false, old: "", next: "", again: "" });
+}
+
+async function changePassword() {
+  if (pwProblem.value || !pw.old || !pw.next) return;
+  pw.saving = true;
+  try {
+    await api.changePassword(pw.old, pw.next);
+    closePassword();
+    uni.showToast({ title: "密码已改好，其他设备上的登录已退出", icon: "none", duration: 2500 });
+  } catch (e) {
+    showError(e);
+  } finally {
+    pw.saving = false;
+  }
+}
 const memories = ref<MemoryItem[]>([]);
 const tokens = ref<TokenView[]>([]);
 const barkKey = ref("");

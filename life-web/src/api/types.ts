@@ -10,7 +10,12 @@ export interface UserView {
   username: string;
   nickname: string;
   timezone: string;
+  /** 绑定的邮箱，没绑为空 */
+  email?: string | null;
 }
+
+/** 验证码用途：注册、找回密码、绑定邮箱 */
+export type EmailCodePurpose = "REGISTER" | "RESET" | "BIND";
 
 /** App 里可选的一个对话模型 */
 export interface ModelChoice {
@@ -192,6 +197,8 @@ export interface Itinerary {
   transport?: "TRANSIT" | "DRIVE" | null;
   /** 单独改过的路段，键是"起点 id>终点 id" */
   legModes?: Record<string, "TRANSIT" | "DRIVE">;
+  /** 后台正在补比价的酒店（"名称|入住日期"）和航班（"航班号|日期"），值是开始时间 */
+  checking?: Record<string, string> | null;
 }
 
 /** 高德地点 */

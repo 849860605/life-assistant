@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lifeassistant.common.auth.UserCtx;
 import com.lifeassistant.core.conversation.ConversationService;
+import com.lifeassistant.core.mail.EmailSender;
 import com.lifeassistant.core.orchestrator.ChatEvent;
 import com.lifeassistant.core.orchestrator.ChatOrchestrator;
 import com.lifeassistant.core.orchestrator.RouterService;
@@ -16,6 +17,7 @@ import com.lifeassistant.skill.travel.trip.TripVersion;
 import com.lifeassistant.skill.travel.trip.TripVersionMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
@@ -89,6 +91,9 @@ class LifeApiIntegrationTest {
     RouterService routerService;
     @MockitoBean
     SkillRunner skillRunner;
+    /** 不真发邮件：从调用记录里取验证码 */
+    @MockitoBean
+    EmailSender emailSender;
 
     @Autowired
     TestRestTemplate rest;
@@ -365,6 +370,118 @@ class LifeApiIntegrationTest {
     }
 
     // ---------- helpers ----------
+
+    @Test
+    void emailRegisterLoginResetAndBind() throws Exception {
+        when(emailSender.ready()).thenReturn(true);
+        assertThat(body(anon(HttpMethod.GET, "/api/v1/auth/register-options", null)).path("data").path("open").asBoolean()).isTrue();
+
+        // 注册：要验证码，60 秒内不能再要
+        String email = "Dave@Example.com";
+        assertThat(anon(HttpMethod.POST, "/api/v1/auth/email-code", Map.of("email", email, "purpose", "REGISTER"))
+                .getStatusCode()).isEqualTo(HttpStatus.OK);
+        ResponseEntity<String> again = anon(HttpMethod.POST, "/api/v1/auth/email-code", Map.of("email", email, "purpose", "REGISTER"));
+        assertThat(again.getStatusCode()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+        assertThat(again.getBody()).contains("秒后再试");
+        String code = lastCode("dave@example.com");
+
+        // 密码太弱、验证码错都注册不了；密码弱时验证码不会被用掉
+        assertThat(anon(HttpMethod.POST, "/api/v1/auth/register",
+                Map.of("email", email, "code", code, "password", "short")).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        String wrong = code.equals("000000") ? "000001" : "000000";
+        ResponseEntity<String> bad = anon(HttpMethod.POST, "/api/v1/auth/register",
+                Map.of("email", email, "code", wrong, "password", "dave-pass-123"));
+        assertThat(bad.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(bad.getBody()).contains("验证码不对");
+        JsonNode registered = body(anon(HttpMethod.POST, "/api/v1/auth/register",
+                Map.of("email", email, "code", code, "password", "dave-pass-123", "nickname", "戴夫"))).path("data");
+        String daveToken = registered.path("token").asText();
+        assertThat(registered.path("user").path("email").asText()).isEqualTo("dave@example.com");
+        assertThat(registered.path("user").path("nickname").asText()).isEqualTo("戴夫");
+        // 验证码用过就作废
+        assertThat(anon(HttpMethod.POST, "/api/v1/auth/register",
+                Map.of("email", "dave2@example.com", "code", code, "password", "dave-pass-123")).getStatusCode())
+                .isEqualTo(HttpStatus.BAD_REQUEST);
+
+        // 用邮箱登录（不区分大小写）；邮箱已注册时不能再要注册验证码
+        assertThat(loginAs("DAVE@example.com", "dave-pass-123")).isNotBlank();
+        assertThat(anon(HttpMethod.POST, "/api/v1/auth/email-code", Map.of("email", email, "purpose", "REGISTER"))
+                .getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+
+        // 找回密码：没注册的邮箱照样回成功但不发信
+        int sent = sends("nobody@example.com");
+        assertThat(anon(HttpMethod.POST, "/api/v1/auth/email-code", Map.of("email", "nobody@example.com", "purpose", "RESET"))
+                .getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(sends("nobody@example.com")).isEqualTo(sent);
+        assertThat(anon(HttpMethod.POST, "/api/v1/auth/email-code", Map.of("email", email, "purpose", "RESET"))
+                .getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(body(anon(HttpMethod.POST, "/api/v1/auth/password/reset", Map.of("email", email,
+                "code", lastCode("dave@example.com"), "newPassword", "dave-new-456"))).path("code").asInt()).isZero();
+        // 重置后旧登录失效，新密码能登录
+        assertThat(call(daveToken, HttpMethod.GET, "/api/v1/auth/me", null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(loginAs("dave@example.com", "dave-new-456")).isNotBlank();
+
+        // 验证码最多试 5 次
+        assertThat(anon(HttpMethod.POST, "/api/v1/auth/email-code", Map.of("email", "erin@example.com", "purpose", "REGISTER"))
+                .getStatusCode()).isEqualTo(HttpStatus.OK);
+        String erinCode = lastCode("erin@example.com");
+        String erinWrong = erinCode.equals("111111") ? "222222" : "111111";
+        for (int i = 0; i < 5; i++) {
+            anon(HttpMethod.POST, "/api/v1/auth/register", Map.of("email", "erin@example.com", "code", erinWrong, "password", "erin-pass-123"));
+        }
+        ResponseEntity<String> tooMany = anon(HttpMethod.POST, "/api/v1/auth/register",
+                Map.of("email", "erin@example.com", "code", erinCode, "password", "erin-pass-123"));
+        assertThat(tooMany.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+
+        // 老用户绑定邮箱：别人的邮箱绑不了；绑好后能用邮箱登录
+        assertThat(call(token, HttpMethod.POST, "/api/v1/auth/email-code", Map.of("email", email, "purpose", "BIND"))
+                .getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(call(token, HttpMethod.POST, "/api/v1/auth/email-code", Map.of("email", "alice@example.com", "purpose", "BIND"))
+                .getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(body(call(token, HttpMethod.POST, "/api/v1/auth/email/bind", Map.of("email", "alice@example.com",
+                "code", lastCode("alice@example.com")))).path("data").path("email").asText()).isEqualTo("alice@example.com");
+        assertThat(loginAs("alice@example.com", "alice-pass-123")).isNotBlank();
+        // 没登录不能要绑定验证码
+        assertThat(anon(HttpMethod.POST, "/api/v1/auth/email-code", Map.of("email", "x@example.com", "purpose", "BIND"))
+                .getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+
+        // 后台关掉注册：要注册验证码报 403；用户列表能按邮箱搜到，来源是自己注册
+        String admin = adminLogin("admin", "admin-pass-123");
+        assertThat(call(admin, HttpMethod.PUT, "/admin/api/v1/users/register", Map.of("open", false)).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(body(anon(HttpMethod.GET, "/api/v1/auth/register-options", null)).path("data").path("open").asBoolean()).isFalse();
+        assertThat(anon(HttpMethod.POST, "/api/v1/auth/email-code", Map.of("email", "frank@example.com", "purpose", "REGISTER"))
+                .getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        call(admin, HttpMethod.PUT, "/admin/api/v1/users/register", Map.of("open", true));
+        JsonNode found = body(call(admin, HttpMethod.GET, "/admin/api/v1/users?keyword=dave@example", null)).path("data").path("items");
+        assertThat(found).hasSize(1);
+        assertThat(found.get(0).path("source").asText()).isEqualTo("EMAIL");
+    }
+
+    /** 不带登录态调接口（注册、要验证码这些公开接口）。 */
+    private ResponseEntity<String> anon(HttpMethod method, String path, Object body) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        return rest.exchange(path, method, new HttpEntity<>(body, headers), String.class);
+    }
+
+    /** 发给这个邮箱的最后一封验证码邮件里的验证码（标题最后 6 位）。 */
+    private String lastCode(String email) {
+        String subject = null;
+        for (var invocation : Mockito.mockingDetails(emailSender).getInvocations()) {
+            if (invocation.getMethod().getName().equals("send") && email.equals(invocation.getArgument(0))) {
+                subject = invocation.getArgument(1);
+            }
+        }
+        assertThat(subject).as("没给 " + email + " 发过验证码").isNotNull();
+        return subject.substring(subject.length() - 6);
+    }
+
+    /** 给这个邮箱发过几封信。 */
+    private int sends(String email) {
+        return (int) Mockito.mockingDetails(emailSender).getInvocations().stream()
+                .filter(i -> i.getMethod().getName().equals("send") && email.equals(i.getArgument(0))).count();
+    }
 
     private static ChatResponse chunk(String text) {
         return new ChatResponse(List.of(new Generation(new AssistantMessage(text))));

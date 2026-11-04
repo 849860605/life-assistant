@@ -38,6 +38,7 @@ public class TripEditTools {
     private final HotelQuoteBook quoteBook;
     private final CardHub cards;
     private final ObjectMapper objectMapper;
+    private final TripPriceCheck priceCheck;
 
     /** 换掉的一项：按 id 定位，新地点和可选的新时间、说明。 */
     public record ItemChange(
@@ -335,12 +336,20 @@ public class TripEditTools {
                         .map(i -> new Itinerary.Item(null, i.start(), i.end(), i.type(), i.name(), i.address(), i.note(),
                                 i.cost(), i.url(), null)).toList()))
                 .toList();
+        CallRecorder.Scope scope = CallRecorder.current();
+        String conversationId = scope == null ? null : scope.conversationId();
         List<Itinerary.Stay> newStays = null;
         if (stays != null && !stays.isEmpty()) {
-            CallRecorder.Scope scope = CallRecorder.current();
-            newStays = tripTools.toStays(stays, scope == null ? null : scope.conversationId(), it);
+            newStays = tripTools.toStays(stays, conversationId, it);
         }
-        return result(ctx, tripId, tripEditor.patch(ctx, tripId, fresh, start, end, newStays, changeNote));
+        // 新写的航班按查过的填价格；只查过一个平台的酒店、航班保存后后台补比价
+        TripPriceCheck.Prepared prepared = priceCheck.prepare(new Itinerary(fresh, null).withStays(newStays), conversationId);
+        Map<String, Object> out = result(ctx, tripId, tripEditor.patch(ctx, tripId, prepared.itinerary().days(), start, end,
+                newStays, changeNote));
+        if (!out.containsKey("error")) {
+            priceCheck.start(ctx, tripId, prepared.targets());
+        }
+        return out;
     }
 
     /** 换某段住宿的酒店：价格、预订链接从这个会话最近的比价结果里取。 */

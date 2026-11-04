@@ -21,6 +21,10 @@ export interface UserRow {
   id: number;
   username: string;
   nickname: string | null;
+  /** 绑定的邮箱，没绑为空 */
+  email: string | null;
+  /** 账号来源：ADMIN 后台建的，EMAIL 自己用邮箱注册的 */
+  source: string;
   status: number;
   createdAt: string;
   lastLoginAt: string | null;
@@ -46,6 +50,8 @@ export interface UserDetail {
   id: number;
   username: string;
   nickname: string | null;
+  email: string | null;
+  source: string;
   timezone: string;
   enabled: boolean;
   createdAt: string;
@@ -206,6 +212,9 @@ export const api = {
 
   users: (p: { keyword?: string; page: number; size: number }) => request<Page<UserRow>>("GET", "/users" + qs(p)),
   user: (id: number) => request<UserDetail>("GET", `/users/${id}`),
+  /** 是否开放注册、发信邮箱配好没有 */
+  registerSetting: () => request<{ open: boolean; mailReady: boolean }>("GET", "/users/register"),
+  setRegisterOpen: (open: boolean) => request<{ open: boolean; mailReady: boolean }>("PUT", "/users/register", { open }),
   createUser: (body: { username: string; password: string; nickname?: string }) => request<UserDetail>("POST", "/users", body),
   resetUserPassword: (id: number, password: string) => request<void>("POST", `/users/${id}/password`, { password }),
   setUserEnabled: (id: number, enabled: boolean) => request<UserDetail>("POST", `/users/${id}/status`, { enabled }),
@@ -221,6 +230,8 @@ export const api = {
   updateLlmProvider: (code: string, body: LlmProviderForm) => request<void>("PUT", `/llm/providers/${code}`, body),
   deleteLlmProvider: (code: string) => request<void>("DELETE", `/llm/providers/${code}`),
   testLlmProvider: (code: string, model?: string) => request<LlmTestResult>("POST", `/llm/providers/${code}/test`, { model }),
+  /** 从提供方拉型号列表（OpenAI 兼容的 /models），拉不到时报错，页面上改成手填 */
+  llmRemoteModels: (code: string) => request<string[]>("GET", `/llm/providers/${code}/remote-models`),
   llmModels: () => request<LlmModel[]>("GET", "/llm/models"),
   createLlmModel: (body: LlmModelForm) => request<LlmModel>("POST", "/llm/models", body),
   updateLlmModel: (id: number, body: LlmModelForm) => request<LlmModel>("PUT", `/llm/models/${id}`, body),

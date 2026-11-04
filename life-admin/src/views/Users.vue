@@ -6,9 +6,21 @@
         <div class="page-sub">星络 App 的用户。这里只看账号和用量统计，看不到对话内容和行程内容</div>
       </div>
       <div class="tools">
-        <el-input id="user-search" v-model="keyword" placeholder="搜用户名或昵称" clearable :prefix-icon="Search" class="search" @keyup.enter="search" @clear="search" />
+        <el-input id="user-search" v-model="keyword" placeholder="搜用户名、昵称或邮箱" clearable :prefix-icon="Search" class="search" @keyup.enter="search" @clear="search" />
         <el-button type="primary" :icon="Plus" @click="openCreate">新建用户</el-button>
       </div>
+    </div>
+
+    <!-- 注册开关：打开后任何人都能用邮箱注册 -->
+    <div class="card register">
+      <div>
+        <div class="reg-title">开放注册</div>
+        <div class="muted small">
+          {{ register.open ? "任何人都能在登录页用邮箱收验证码注册" : "已关闭，只能由管理员在这里新建用户" }}
+          <span v-if="!register.mailReady" class="warn">；发信邮箱还没配好（服务器 .env 的 LIFE_MAIL_*），现在收不到验证码</span>
+        </div>
+      </div>
+      <el-switch id="register-open" v-model="register.open" :loading="register.saving" :before-change="toggleRegister" />
     </div>
 
     <div class="card">
@@ -19,10 +31,13 @@
               <div class="avatar">{{ (row.nickname || row.username).slice(0, 1) }}</div>
               <div>
                 <div class="uname">{{ row.nickname || row.username }}</div>
-                <div class="muted small">@{{ row.username }}</div>
+                <div class="muted small">{{ row.email || "@" + row.username }}</div>
               </div>
             </div>
           </template>
+        </el-table-column>
+        <el-table-column label="来源" width="90">
+          <template #default="{ row }"><el-tag :type="row.source === 'EMAIL' ? 'primary' : 'info'" size="small" effect="plain">{{ sourceText(row.source) }}</el-tag></template>
         </el-table-column>
         <el-table-column label="状态" width="80">
           <template #default="{ row }"><el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">{{ row.status === 1 ? "正常" : "已停用" }}</el-tag></template>
@@ -84,6 +99,8 @@
       <div v-if="detail" class="detail">
         <el-descriptions :column="1" border size="small">
           <el-descriptions-item label="用户名">{{ detail.username }}</el-descriptions-item>
+          <el-descriptions-item label="邮箱">{{ detail.email || "没绑定" }}</el-descriptions-item>
+          <el-descriptions-item label="来源">{{ sourceText(detail.source) }}</el-descriptions-item>
           <el-descriptions-item label="状态"><el-tag :type="detail.enabled ? 'success' : 'info'" size="small">{{ detail.enabled ? "正常" : "已停用" }}</el-tag></el-descriptions-item>
           <el-descriptions-item label="时区">{{ detail.timezone }}</el-descriptions-item>
           <el-descriptions-item label="创建时间">{{ fmtTime(detail.createdAt) }}</el-descriptions-item>
@@ -117,7 +134,7 @@ import { Plus, Search } from "@element-plus/icons-vue";
 import { api, type UserDetail, type UserRow } from "../api";
 import { fmtTime, fromNow, money, narrow, num, passwordRules, randomPassword, usernameRules } from "../utils";
 
-/** App 用户管理：搜索分页、新建、详情（只有统计）、重置密码、启用停用 */
+/** App 用户管理：注册开关、搜索分页、新建、详情（只有统计）、重置密码、启用停用 */
 const keyword = ref("");
 const page = ref(1);
 const size = 20;
@@ -140,6 +157,41 @@ async function load() {
 function search() {
   page.value = 1;
   load();
+}
+
+/** 账号来源的中文 */
+function sourceText(source: string) {
+  return source === "EMAIL" ? "自己注册" : "后台新建";
+}
+
+// 注册开关
+const register = reactive({ open: true, mailReady: true, saving: false });
+
+async function loadRegister() {
+  Object.assign(register, await api.registerSetting());
+}
+
+/** 切换开关前先确认，关掉后登录页的注册入口提示"暂未开放注册" */
+async function toggleRegister(): Promise<boolean> {
+  const next = !register.open;
+  try {
+    await ElMessageBox.confirm(
+      next ? "打开后，任何人都能用邮箱注册星络账号，每个人聊天都会产生模型费用。确定打开？" : "关闭后新用户不能自己注册，已有账号不受影响。确定关闭？",
+      next ? "开放注册" : "关闭注册",
+      { confirmButtonText: next ? "打开" : "关闭", cancelButtonText: "取消", type: next ? "warning" : "info" },
+    );
+  } catch {
+    return false;
+  }
+  register.saving = true;
+  try {
+    Object.assign(register, await api.setRegisterOpen(next));
+    ElMessage.success(next ? "已开放注册" : "已关闭注册");
+    // 开关的值由上面这次返回写好了，不用 el-switch 再翻一次
+    return false;
+  } finally {
+    register.saving = false;
+  }
 }
 
 // 新建
@@ -220,10 +272,16 @@ async function openDetail(row: UserRow) {
   detail.value = await api.user(row.id);
 }
 
-onMounted(load);
+onMounted(() => {
+  load();
+  loadRegister().catch(() => {});
+});
 </script>
 
 <style scoped>
+.register { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.reg-title { font-weight: 700; margin-bottom: 2px; }
+.warn { color: var(--el-color-warning); }
 .tools {
   display: flex;
   gap: 10px;

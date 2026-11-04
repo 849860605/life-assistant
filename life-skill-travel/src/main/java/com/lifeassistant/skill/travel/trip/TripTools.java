@@ -45,6 +45,7 @@ public class TripTools {
     private final HotelQuoteBook quoteBook;
     private final CardHub cards;
     private final ObjectMapper objectMapper;
+    private final TripPriceCheck priceCheck;
 
     /** 模型填的一项安排。 */
     public record PlanItem(
@@ -68,7 +69,7 @@ public class TripTools {
 
     /** 模型填的一段住宿。 */
     public record PlanStay(
-            @ToolParam(description = "酒店完整名称，用 findAndCompareHotels / compareHotelPrices 返回的 hotel 原样填") String hotel,
+            @ToolParam(description = "酒店完整名称，用 quickHotels 返回的 name 或 findAndCompareHotels / compareHotelPrices 返回的 hotel 原样填") String hotel,
             @ToolParam(description = "入住日期 yyyy-MM-dd") String checkIn,
             @ToolParam(description = "离店日期 yyyy-MM-dd") String checkOut) {
     }
@@ -181,8 +182,8 @@ public class TripTools {
             保存行程并以行程卡展示给用户（新行程是草稿）。规划好后直接调用，不要先在回答里把逐日行程写一遍；
             整份重新生成已保存的行程时传 tripId，会生成新版本；只改其中几项、某一天、加减天时不要用它，
             用 replaceTripItems、removeTripItems、addTripItems、reorderTripDay、swapTripDays、rewriteTripDays、changeTripHotel。
-            days 写完整的逐日安排；过夜行程在 stays 里写住哪家酒店（用比价结果里的酒店名，
-            价格和链接后端会自动带上）；注意事项、装备清单、天气提醒写进 tips（Markdown）。
+            days 写完整的逐日安排；过夜行程在 stays 里写住哪家酒店（用 quickHotels 或比价结果里的酒店名，
+            价格和链接后端会自动带上）；坐飞机写成 TRANSPORT 项、name 带航班号（价格和链接按 quickFlights 结果自动带上）；注意事项、装备清单、天气提醒写进 tips（Markdown）。
             返回 error 时按 problems 改好再调用一次。""")
     public Map<String, Object> saveTripPlan(
             @ToolParam(description = "已有行程的 id；新行程不填", required = false) Long tripId,
@@ -219,6 +220,9 @@ public class TripTools {
         if (transport != null && Set.of(Itinerary.TRANSIT, Itinerary.DRIVE).contains(transport.trim().toUpperCase())) {
             itinerary = itinerary.withTransport(transport.trim().toUpperCase(), itinerary.legModes());
         }
+        // 航班按这个会话查过的填上价格和链接；只查过一个平台的酒店、航班，保存后在后台补比价
+        TripPriceCheck.Prepared prepared = priceCheck.prepare(itinerary, scope == null ? null : scope.conversationId());
+        itinerary = prepared.itinerary();
         List<String> problems = new ArrayList<>(itinerary.problems(start, end));
         for (Itinerary.Stay st : itinerary.stays()) {
             if (st.nights() == 0) {
@@ -240,11 +244,17 @@ public class TripTools {
                 "AI");
         Trip trip = detail.trip();
         tripEditor.ensureGeoLater(trip.getId(), detail.version().getVersion());
+        priceCheck.start(ToolContexts.user(toolContext), trip.getId(), prepared.targets());
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("tripId", trip.getId());
         out.put("version", detail.version().getVersion());
         out.put("status", trip.getStatus());
-        if (cards.emit("trip", tripCard(trip, detail.version().getVersion(), itinerary), summary(trip, itinerary))) {
+        Map<String, Object> card = tripCard(trip, detail.version().getVersion(), itinerary);
+        card.put("checking", TripPriceCheck.checking(prepared.targets()));
+        if (!prepared.targets().isEmpty()) {
+            out.put("prices", "选中的酒店、航班正在后台补其他平台的价格，行程里会自动更新；回答里说一句价格还在比，不满意可以直接说或在行程里点换");
+        }
+        if (cards.emit("trip", card, summary(trip, itinerary))) {
             out.put("card", "行程已作为卡片展示给用户，用户点开能看逐日详情。回答里不要再写逐日行程，只用两三句说整体思路、亮点和要注意的，"
                     + "最后问用户是否确认保存或要调整哪里");
         }

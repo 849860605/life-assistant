@@ -5,17 +5,25 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.lifeassistant.common.error.BizException;
 import com.lifeassistant.common.error.ErrorCode;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
+import java.security.SecureRandom;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
+import java.util.Locale;
 import java.util.Optional;
 
-/** 普通用户的注册、登录校验、基本信息查询，以及后台用的新建、重置密码、启用停用。 */
+/** 普通用户的注册（后台建、邮箱注册）、登录校验、基本信息查询、绑定邮箱，以及后台用的新建、重置密码、启用停用。 */
 @Service
 @RequiredArgsConstructor
 public class UserService {
+
+    /** 账号来源：自己用邮箱注册的 */
+    public static final String SOURCE_EMAIL = "EMAIL";
+    private static final String USERNAME_CHARS = "abcdefghijkmnpqrstuvwxyz23456789";
+    private static final SecureRandom RANDOM = new SecureRandom();
 
     private final UserMapper userMapper;
     private final PasswordEncoder passwordEncoder;
@@ -36,9 +44,9 @@ public class UserService {
         return user;
     }
 
-    /** 校验账号密码，失败统一报"用户名或密码错误"，不区分是哪一项错；密码正确但账号已禁用时报 403。 */
+    /** 校验账号密码（账号可以是用户名或绑定的邮箱），失败统一报"用户名或密码错误"，不区分是哪一项错；密码正确但账号已禁用时报 403。 */
     public User authenticate(String username, String rawPassword) {
-        User user = findByUsername(username)
+        User user = findByLogin(username)
                 .filter(u -> passwordEncoder.matches(rawPassword, u.getPasswordHash()))
                 .orElseThrow(() -> new BizException(ErrorCode.UNAUTHORIZED, "用户名或密码错误"));
         if (user.getStatus() == null || user.getStatus() != 1) {
@@ -67,6 +75,95 @@ public class UserService {
                 new LambdaQueryWrapper<User>().eq(User::getUsername, username)));
     }
 
+    /** 按登录名找：带 @ 的按邮箱找，否则按用户名找。 */
+    public Optional<User> findByLogin(String login) {
+        String text = login == null ? "" : login.trim();
+        return text.contains("@") ? findByEmail(text) : findByUsername(text);
+    }
+
+    /** 按邮箱找（不区分大小写，库里存小写）；邮箱格式不对时返回空。 */
+    public Optional<User> findByEmail(String email) {
+        String normalized = email == null ? "" : email.trim().toLowerCase(Locale.ROOT);
+        if (normalized.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(userMapper.selectOne(new LambdaQueryWrapper<User>().eq(User::getEmail, normalized)));
+    }
+
+    /**
+     * 邮箱注册：邮箱已验证过，用户名自动生成（u 加 8 位随机字母数字），登录用邮箱；昵称不填用邮箱 @ 前面那段。
+     * 邮箱已被占用报 CONFLICT。
+     */
+    public User registerByEmail(String email, String rawPassword, String nickname) {
+        String address = checkEmail(email);
+        PasswordPolicy.check(rawPassword);
+        if (findByEmail(address).isPresent()) {
+            throw new BizException(ErrorCode.CONFLICT, "这个邮箱已注册，直接登录或找回密码");
+        }
+        String name = blankToNull(nickname);
+        if (name == null) {
+            name = address.substring(0, address.indexOf('@'));
+        }
+        User user = new User();
+        user.setUsername(randomUsername());
+        user.setPasswordHash(passwordEncoder.encode(rawPassword));
+        user.setNickname(name.length() > 32 ? name.substring(0, 32) : name);
+        user.setTenantId(0L);
+        user.setTimezone("Asia/Shanghai");
+        user.setStatus(1);
+        user.setEmail(address);
+        user.setEmailVerifiedAt(OffsetDateTime.now());
+        user.setSource(SOURCE_EMAIL);
+        try {
+            userMapper.insert(user);
+        } catch (DuplicateKeyException e) {
+            // 两个请求同时用同一个邮箱注册
+            throw new BizException(ErrorCode.CONFLICT, "这个邮箱已注册，直接登录或找回密码");
+        }
+        return user;
+    }
+
+    /** 给已有用户绑定（或换）邮箱，邮箱已验证过；被别的账号占用时报 CONFLICT。 */
+    public User bindEmail(long userId, String email) {
+        String address = checkEmail(email);
+        User owner = findByEmail(address).orElse(null);
+        if (owner != null && owner.getId() != userId) {
+            throw new BizException(ErrorCode.CONFLICT, "这个邮箱已被其他账号绑定");
+        }
+        try {
+            userMapper.update(null, new LambdaUpdateWrapper<User>().eq(User::getId, userId)
+                    .set(User::getEmail, address)
+                    .set(User::getEmailVerifiedAt, OffsetDateTime.now())
+                    .set(User::getUpdatedAt, OffsetDateTime.now()));
+        } catch (DuplicateKeyException e) {
+            throw new BizException(ErrorCode.CONFLICT, "这个邮箱已被其他账号绑定");
+        }
+        return get(userId);
+    }
+
+    /** 邮箱格式检查，返回去空格、转小写后的邮箱；不合规抛 BAD_REQUEST。 */
+    public static String checkEmail(String email) {
+        String address = email == null ? "" : email.trim().toLowerCase(Locale.ROOT);
+        if (address.length() > 254 || !address.matches("[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}")) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "邮箱格式不对");
+        }
+        return address;
+    }
+
+    /** 生成一个没被占用的用户名：u 加 8 位小写字母数字。 */
+    private String randomUsername() {
+        for (int i = 0; i < 10; i++) {
+            StringBuilder name = new StringBuilder("u");
+            for (int j = 0; j < 8; j++) {
+                name.append(USERNAME_CHARS.charAt(RANDOM.nextInt(USERNAME_CHARS.length())));
+            }
+            if (findByUsername(name.toString()).isEmpty()) {
+                return name.toString();
+            }
+        }
+        throw new BizException(ErrorCode.INTERNAL, "生成用户名失败，请再试一次");
+    }
+
     /** 用户总数，启动时用来判断是否要初始化首个用户。 */
     public long count() {
         return userMapper.selectCount(null);
@@ -86,6 +183,18 @@ public class UserService {
         userMapper.update(null, new LambdaUpdateWrapper<User>().eq(User::getId, userId)
                 .set(User::getPasswordHash, passwordEncoder.encode(rawPassword))
                 .set(User::getUpdatedAt, OffsetDateTime.now()));
+    }
+
+    /** 用户自己改密码：原密码不对报 401（由调用方计入错误次数），新密码按规则校验，不能和原密码一样。 */
+    public void changeOwnPassword(long userId, String oldPassword, String newPassword) {
+        User user = get(userId);
+        if (!passwordEncoder.matches(oldPassword, user.getPasswordHash())) {
+            throw new BizException(ErrorCode.UNAUTHORIZED, "原密码不对");
+        }
+        if (oldPassword.equals(newPassword)) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "新密码不能和原密码一样");
+        }
+        resetPassword(userId, newPassword);
     }
 
     /** 启用或停用用户；停用后登录会报"账号已被禁用"，已有的登录态由调用方踢掉。 */

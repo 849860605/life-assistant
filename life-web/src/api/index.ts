@@ -7,7 +7,7 @@ import type {
   ModelChoices,
   BookingState, ChangeReason, ChatMessage, Conversation, DayPreview, FlightPick, FlightPreview, FlightRules, FlightSearch, FoodResult, DayTickets, HotelComparison, HotelSearchResult, SpotRules, TicketProduct, TuniuTicket, TicketSpot, TuniuCabin, StayPick, StayPreview, Meal, MealPreview, MemoryCategory, MemoryItem, OptimizeGoal, Place, PlacePick,
   ScheduleEvent, TokenView,
-  TripDetail, TripVersion, Trip, UserView,
+  TripDetail, TripVersion, Trip, UserView, EmailCodePurpose,
   WeatherBoard, TripForecast, SwapPreview,
 } from "./types";
 
@@ -21,6 +21,22 @@ function qs(params: Record<string, string | number | boolean | null | undefined>
 
 /** 所有后端接口，路径和后端 /api/v1 一一对应。 */
 export const api = {
+  /** 改自己的密码；改完其他设备上的登录会下线 */
+  changePassword: (oldPassword: string, newPassword: string) =>
+    request<void>("POST", "/api/v1/auth/password", { oldPassword, newPassword }),
+  /** 注册是否开放、能不能发邮件 */
+  registerOptions: () => request<{ open: boolean; mailReady: boolean }>("GET", "/api/v1/auth/register-options"),
+  /** 给邮箱发 6 位验证码（10 分钟有效），cooldown 秒后才能再要 */
+  sendEmailCode: (email: string, purpose: EmailCodePurpose) =>
+    request<{ cooldown: number }>("POST", "/api/v1/auth/email-code", { email, purpose }),
+  /** 邮箱注册，成功直接登录 */
+  register: (email: string, code: string, password: string, nickname: string) =>
+    request<{ token: string; user: UserView }>("POST", "/api/v1/auth/register", { email, code, password, nickname, device: "web" }),
+  /** 邮箱验证码重置密码，成功后所有设备的登录下线 */
+  resetPassword: (email: string, code: string, newPassword: string) =>
+    request<void>("POST", "/api/v1/auth/password/reset", { email, code, newPassword }),
+  /** 已登录用户绑定邮箱 */
+  bindEmail: (email: string, code: string) => request<UserView>("POST", "/api/v1/auth/email/bind", { email, code }),
   login: (username: string, password: string) =>
     request<{ token: string; user: UserView }>("POST", "/api/v1/auth/login", { username, password, device: "web" }),
   logout: () => request<void>("POST", "/api/v1/auth/logout"),

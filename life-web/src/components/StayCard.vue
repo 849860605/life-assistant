@@ -21,7 +21,13 @@
           <text class="muted small">/晚 · {{ stay.platform }}</text>
         </template>
         <text v-else class="muted small">暂无价格</text>
+        <text v-if="checking" class="checking small">其他平台比价中…</text>
       </view>
+    </view>
+
+    <view v-if="editable && !booked && cheaper" class="cheaper-hint">
+      <text>同片区「{{ cheaper.name }}」便宜 ¥{{ stay.price! - cheaper.price! }}/晚</text>
+      <text class="link" @click="pick(cheaper.name)">换这家</text>
     </view>
 
     <view v-if="stay.quotes?.length" class="quotes">
@@ -68,13 +74,21 @@ import { openUrl, queriedAt, shortDate } from "../utils/format";
 import { amapNavUrl, amapUrl } from "../utils/place";
 
 /** 行程里的一段住宿：酒店照片评分、各平台每晚价格和预订链接；可以从比价候选里换一家，或重新比价。 */
-const props = defineProps<{ stay: Stay; tripId: number; editable: boolean; booked?: boolean }>();
+const props = defineProps<{ stay: Stay; tripId: number; editable: boolean; booked?: boolean; checking?: boolean }>();
 const emit = defineEmits<{ (e: "saved", detail: TripDetail, note: string): void; (e: "updated", detail: TripDetail): void }>();
 
 const broken = ref(false);
 const showOptions = ref(false);
 const quoting = ref(false);
 const switching = ref(false);
+
+/** 候选里比当前便宜两成以上的最便宜一家，有就提示能换 */
+const cheaper = computed(() => {
+  const now = props.stay.price;
+  if (now == null) return null;
+  return (props.stay.options || []).filter((o) => o.price != null && o.price <= now * 0.8)
+    .sort((a, b) => a.price! - b.price!)[0] || null;
+});
 
 const nights = computed(() => {
   const a = new Date(`${props.stay.checkIn}T00:00:00`).getTime();
@@ -150,6 +164,9 @@ async function requote() {
 .stay-meta { display: flex; gap: 6px; font-size: 12px; margin-top: 2px; }
 .star { color: #f59e0b; }
 .stay-side { display: flex; flex-direction: column; align-items: flex-end; flex-shrink: 0; }
+.checking { color: var(--accent); margin-top: 2px; }
+.cheaper-hint { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; font-size: 12px; color: var(--ok); background: var(--surface-2); border-radius: 8px; padding: 6px 10px; }
+.cheaper-hint .link { cursor: pointer; }
 .price { font-size: 18px; font-weight: 800; color: var(--price); font-variant-numeric: tabular-nums; }
 .muted { color: var(--muted); }
 .small { font-size: 12px; }
