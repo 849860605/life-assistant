@@ -19,14 +19,21 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { api } from "../../api";
+import { TRIP_CHANGED } from "../../utils/events";
 
 /**
  * 改动卡：对话里局部改行程（换、删、加某几项，对调、重排某几天，换酒店）后发来的，列出改了什么。
  * 撤销 = 把改之前那一版恢复成新版本（历史不删）；之后行程又改过时先提醒，后来的改动也会一起撤掉。
+ * 撤过没有看版本历史：这一版之后有"恢复到第 N 版"（N 是改之前那一版）就算撤过，刷新页面后也能显示。
  */
 const props = defineProps<{ data: any }>();
 
 const state = ref<"idle" | "busy" | "undone">("idle");
+
+api.tripVersions(props.data.tripId).then((list) => {
+  const note = `恢复到第 ${props.data.fromVersion} 版`;
+  if (state.value === "idle" && list.some((v) => v.version > props.data.version && v.changeNote === note)) state.value = "undone";
+}).catch(() => {});
 
 function openTrip() {
   uni.navigateTo({ url: `/pages/trips/detail?id=${props.data.tripId}` });
@@ -55,6 +62,7 @@ async function undo() {
     }
     await api.restoreVersion(props.data.tripId, props.data.fromVersion);
     state.value = "undone";
+    uni.$emit(TRIP_CHANGED, props.data.tripId);
   } catch (e) {
     state.value = "idle";
     uni.showToast({ title: e instanceof Error ? e.message : "撤销失败", icon: "none" });

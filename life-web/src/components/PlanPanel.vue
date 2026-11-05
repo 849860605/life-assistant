@@ -94,7 +94,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onUnmounted, ref, watch } from "vue";
+import { TRIP_CHANGED } from "../utils/events";
 import { api } from "../api";
 import type { ItineraryDay, ItineraryItem } from "../api/types";
 import Icon from "./Icon.vue";
@@ -140,22 +141,33 @@ watch(
   { immediate: true },
 );
 
-/** 行程卡变了（换了行程或对话里改出了新版本）就取完整行程；还没补坐标时让后端补上。 */
+/** 取行程当前版本的完整内容；还没补坐标时让后端补上。 */
+async function load(id: number) {
+  try {
+    let detail = await api.trip(id);
+    if (detail.version.itinerary && !detail.version.itinerary.geo) detail = await api.tripGeo(id);
+    if (props.trip?.tripId === id && detail.version.itinerary) loadedDays.value = detail.version.itinerary.days;
+  } catch {
+    // 取不到就用卡片里的数据
+  }
+}
+
+/** 行程卡变了（换了行程或对话里改出了新版本）就重新取 */
 watch(
   () => [props.trip?.tripId, props.trip?.version] as const,
-  async ([id]) => {
+  ([id]) => {
     loadedDays.value = null;
-    if (!id) return;
-    try {
-      let detail = await api.trip(id);
-      if (detail.version.itinerary && !detail.version.itinerary.geo) detail = await api.tripGeo(id);
-      if (props.trip?.tripId === id && detail.version.itinerary) loadedDays.value = detail.version.itinerary.days;
-    } catch {
-      // 取不到就用卡片里的数据
-    }
+    if (id) load(id);
   },
   { immediate: true },
 );
+
+/** 对话里的卡片改了这个行程（比如撤销了一次修改），面板跟着刷新 */
+function onTripChanged(id: number) {
+  if (props.trip?.tripId === id) load(id);
+}
+uni.$on(TRIP_CHANGED, onTripChanged);
+onUnmounted(() => uni.$off(TRIP_CHANGED, onTripChanged));
 
 function dayOf(p: any, n: number): string {
   const d = (p.outline || []).find((x: any) => x.day === n);

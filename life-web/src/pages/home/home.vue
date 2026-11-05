@@ -168,7 +168,19 @@
         </view>
       </view>
 
-      <view class="m-card"><TodayCard :agenda="agenda" :error="agendaError" @ask="openChat" /></view>
+      <!-- 新用户还没有日程和行程：先给几句能直接点的话，告诉他星络能干嘛 -->
+      <view v-if="fresh" class="m-card m-start">
+        <view class="m-start-title">第一次用？点一句试试</view>
+        <view v-for="x in examples" :key="x.title" class="m-start-row" @click="openChat(x.ask)">
+          <DuoIcon :name="x.icon" :size="20" :tile="36" />
+          <view class="ex-body">
+            <view class="m-start-name">{{ x.title }}</view>
+            <view class="ex-sub">{{ x.ask }}</view>
+          </view>
+          <Icon name="right" :size="14" color="var(--muted)" />
+        </view>
+      </view>
+      <view v-else class="m-card"><TodayCard :agenda="agenda" :error="agendaError" @ask="openChat" /></view>
 
       <view v-if="tripCard" class="m-card m-trip" @click="openTrip(tripCard.id)">
         <image v-if="tripCover" class="tc-img" :src="tripCover" mode="aspectFill" />
@@ -259,6 +271,8 @@ const tripCard = computed(() => {
   if (trip.value) return { id: trip.value.id, title: trip.value.title, sub: `${dateRange(trip.value)} · ${statusText(trip.value)}` };
   return null;
 });
+/** 新用户：没有行程，今天也没有任何安排（手机首页把今日安排换成示例） */
+const fresh = computed(() => tripLoaded.value && !trip.value && !!agenda.value && !agenda.value.trip && !agenda.value.entries.length);
 /** 旅行中的下一站：今天还没开始的第一项行程安排 */
 const nextStop = computed(() => (agenda.value?.trip ? agenda.value.entries.find((e) => e.kind === "TRIP" && !e.past) : undefined));
 
@@ -466,6 +480,11 @@ function changeCity(c: string) {
 .m-entry-label { font-size: 11px; white-space: nowrap; }
 .m-card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 12px 14px; }
 .m-trip { display: flex; align-items: center; gap: 10px; }
+.m-start { display: flex; flex-direction: column; }
+.m-start-title { font-size: 15px; font-weight: 700; padding-bottom: 4px; }
+.m-start-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); }
+.m-start-title + .m-start-row { border-top: none; }
+.m-start-name { font-size: 14px; font-weight: 600; }
 .m-sec { padding: 0 2px; }
 .m-recs { white-space: nowrap; }
 .m-rec { display: inline-block; width: 140px; margin-right: 10px; background: var(--surface); border-radius: 12px; overflow: hidden; border: 1px solid var(--line); vertical-align: top; padding-bottom: 8px; }
