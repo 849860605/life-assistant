@@ -101,7 +101,9 @@
               </view>
               <view v-if="m.status === 'streaming'" class="caret" />
               <view v-if="m.status === 'stopped'" class="status">已停止</view>
-              <view v-if="m.status === 'error'" class="error">{{ m.error }}</view>
+              <view v-if="m.status === 'error'" class="error">
+                {{ m.error }}<text v-if="m.quota" class="quota-link" @click="openMember">开通会员 ›</text>
+              </view>
               <view v-if="m.text && (m.status === 'done' || m.status === 'stopped')" class="answer-actions">
                 <view class="act-btn" :class="{ ok: copiedKey === m.key }" @click="copyAnswer(m)">
                   <Icon :name="copiedKey === m.key ? 'check' : 'copy'" :size="14" color="currentColor" />
@@ -159,7 +161,7 @@
 import { computed, nextTick, reactive, ref, watch } from "vue";
 import { onLoad, onShow } from "@dcloudio/uni-app";
 import { api } from "../../api";
-import { getToken, showError } from "../../api/http";
+import { ApiError, getToken, showError } from "../../api/http";
 import { streamMessage } from "../../api/sse";
 import type { Card, ChatMessage, Conversation, Progress } from "../../api/types";
 import MarkdownView from "../../components/MarkdownView.vue";
@@ -189,6 +191,8 @@ interface UiMessage {
   skillName?: string;
   status?: "waiting" | "streaming" | "done" | "stopped" | "error";
   error?: string;
+  /** 今天的对话次数用完了：错误下面给个开通会员的入口 */
+  quota?: boolean;
   /** 用户消息带的附件 */
   files?: Attached[];
   /** 回答下面的快捷回复，只在最新一条回答下显示 */
@@ -552,6 +556,7 @@ async function send(raw: string, files: Attached[] = [], chip = false) {
     } else {
       answer.status = "error";
       answer.error = e instanceof Error ? e.message : String(e);
+      answer.quota = e instanceof ApiError && e.code === 402;
     }
   } finally {
     sending.value = false;
@@ -600,6 +605,11 @@ function scrollToBottom() {
   nextTick(() => {
     scrollTop.value = scrollTop.value === 1e7 ? 1e7 + 1 : 1e7;
   });
+}
+
+/** 对话次数用完时去会员页 */
+function openMember() {
+  uni.navigateTo({ url: "/pages/member/member" });
 }
 </script>
 
@@ -736,6 +746,7 @@ function scrollToBottom() {
   border-radius: 8px;
   font-size: 14px;
 }
+.quota-link { margin-left: 8px; color: var(--accent); font-weight: 600; cursor: pointer; }
 .caret {
   display: inline-block;
   width: 8px;

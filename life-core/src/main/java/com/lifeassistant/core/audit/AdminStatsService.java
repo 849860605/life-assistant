@@ -26,10 +26,13 @@ public class AdminStatsService {
     public record Page<T>(long total, List<T> items) {
     }
 
-    /** 用户列表的一行：最近活跃取最近一次对话的更新时间；source 是 ADMIN 后台建的或 EMAIL 自己注册的。 */
+    /**
+     * 用户列表的一行：最近活跃取最近一次对话的更新时间；source 是 ADMIN 后台建的或 EMAIL 自己注册的；
+     * memberUntil 是会员到期时间（从没开通过为空）。
+     */
     public record UserRow(long id, String username, String nickname, String email, String source, int status,
                           OffsetDateTime createdAt, OffsetDateTime lastLoginAt, OffsetDateTime lastActiveAt,
-                          long conversations, long trips) {
+                          long conversations, long trips, OffsetDateTime memberUntil) {
     }
 
     /**
@@ -121,13 +124,14 @@ public class AdminStatsService {
                 SELECT u.id, u.username, u.nickname, u.email, u.source, u.status, u.created_at, u.last_login_at,
                   (SELECT max(c.updated_at) FROM t_conversation c WHERE c.user_id = u.id) AS last_active_at,
                   (SELECT count(*) FROM t_conversation c WHERE c.user_id = u.id) AS conversations,
-                  (SELECT count(*) FROM t_trip t WHERE t.user_id = u.id) AS trips
+                  (SELECT count(*) FROM t_trip t WHERE t.user_id = u.id) AS trips,
+                  (SELECT ms.expires_at FROM t_membership ms WHERE ms.user_id = u.id) AS member_until
                 FROM t_user u""" + where + " ORDER BY u.id LIMIT ? OFFSET ?",
                 (rs, i) -> new UserRow(rs.getLong("id"), rs.getString("username"), rs.getString("nickname"),
                         rs.getString("email"), rs.getString("source"), rs.getInt("status"), rs.getObject("created_at", OffsetDateTime.class),
                         rs.getObject("last_login_at", OffsetDateTime.class),
                         rs.getObject("last_active_at", OffsetDateTime.class), rs.getLong("conversations"),
-                        rs.getLong("trips")), args.toArray());
+                        rs.getLong("trips"), rs.getObject("member_until", OffsetDateTime.class)), args.toArray());
         return new Page<>(total, rows);
     }
 

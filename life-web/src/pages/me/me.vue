@@ -10,6 +10,10 @@
     </view>
 
     <view class="card links">
+      <view class="link-row" @click="go('/pages/member/member')">
+        <text>星络会员</text>
+        <text class="muted">{{ member ? (member.active ? `有效期至 ${memberDate} ›` : `今天还能聊 ${Math.max(0, member.dailyLimit - member.todayUsed)} 次 · 开通会员 ›`) : "›" }}</text>
+      </view>
       <view class="link-row" @click="goSchedule"><text>我的日程和提醒</text><text class="muted">›</text></view>
       <view class="link-row" @click="go('/pages/chat/chat')"><text>对话记录</text><text class="muted">›</text></view>
       <view class="link-row" @click="mail.open = !mail.open">
@@ -152,7 +156,7 @@ import { useWide } from "../../utils/screen";
 import { api } from "../../api";
 import { showError, toLogin } from "../../api/http";
 import { looksLikeEmail, passwordProblem } from "../../utils/password";
-import type { Brief, BriefSettings, MemoryCategory, MemoryItem, TokenView, UserView } from "../../api/types";
+import type { Brief, BriefSettings, MembershipView, MemoryCategory, MemoryItem, TokenView, UserView } from "../../api/types";
 
 const CATEGORY: Record<MemoryCategory, string> = {
   PROFILE: "基本信息",
@@ -165,6 +169,12 @@ const categories = Object.keys(CATEGORY) as MemoryCategory[];
 const categoryLabels = categories.map((c) => CATEGORY[c]);
 
 const user = ref<UserView | null>(null);
+/** 会员状态，"我的"第一行显示 */
+const member = ref<MembershipView | null>(null);
+const memberDate = computed(() => {
+  const d = member.value?.expiresAt ? new Date(member.value.expiresAt) : null;
+  return d ? `${d.getMonth() + 1} 月 ${d.getDate()} 日` : "";
+});
 
 /** 修改密码表单 */
 const pw = reactive({ open: false, old: "", next: "", again: "", saving: false });
@@ -306,6 +316,7 @@ onShow(async () => {
   }
   loadBrief();
   api.homeAddress().then((r) => (homeAddress.value = r.address || "")).catch(() => {});
+  api.membership().then((m) => (member.value = m)).catch(() => {});
 });
 
 /** 保存家的地址（高德找不到会提示换个写法），清空表示删掉；记忆列表跟着刷新 */

@@ -31,6 +31,8 @@ export interface UserRow {
   lastActiveAt: string | null;
   conversations: number;
   trips: number;
+  /** 会员到期时间，从没开通过为空 */
+  memberUntil: string | null;
 }
 
 /** 用户概要：只有计数和时间，没有对话正文、行程内容 */
@@ -199,6 +201,84 @@ function qs(params: Record<string, string | number | undefined | null>): string 
   return parts.length ? `?${parts.join("&")}` : "";
 }
 
+/** 支付宝订单的退款请求 */
+export interface PayRefund {
+  outRequestNo: string;
+  outTradeNo: string;
+  refundAmount: string;
+  status: "PENDING" | "SUCCESS" | "FAILED";
+  message?: string | null;
+  createdAt?: string | null;
+}
+
+/** 支付宝订单：status 为 WAIT_PAY / PAID / CLOSED */
+export interface PayOrder {
+  outTradeNo: string;
+  subject: string;
+  totalAmount: string;
+  status: "WAIT_PAY" | "PAID" | "CLOSED";
+  tradeNo?: string | null;
+  paidAt?: string | null;
+  createdAt?: string | null;
+  refundedAmount: string;
+  refunds: PayRefund[];
+}
+
+/** 订单列表的一行：下单用户加订单 */
+export interface OrderRow {
+  userId: number;
+  username?: string | null;
+  nickname?: string | null;
+  order: PayOrder;
+}
+
+/** 会员设置：月度价格、一次多少天、支付宝收款配好了没有，免费用户和会员每天能对话多少次 */
+export interface MemberSetting {
+  price: string;
+  days: number;
+  payReady: boolean;
+  freeDaily: number;
+  memberDaily: number;
+}
+
+/** 一条会员变动记录：source 为 PAY 付费开通 / ADMIN 后台调整，days 为负是扣减 */
+export interface MemberLog {
+  id: number;
+  userId: number;
+  days: number;
+  source: "PAY" | "ADMIN";
+  outTradeNo: string | null;
+  adminName: string | null;
+  note: string | null;
+  expiresBefore: string | null;
+  expiresAfter: string;
+  createdAt: string;
+}
+
+/** 会员变动记录列表的一行：用户名、昵称加记录 */
+export interface MemberLogRow {
+  username: string | null;
+  nickname: string | null;
+  log: MemberLog;
+}
+
+/** 某个用户的会员状态、今天的对话次数和会员记录 */
+export interface MemberStatus {
+  active: boolean;
+  expiresAt?: string | null;
+  todayUsed: number;
+  dailyLimit: number;
+  logs: MemberLog[];
+}
+
+/** 账单概况：本月实收（已付款减已退款）、本月付费订单数、有效会员数、累计实收 */
+export interface BillingStats {
+  monthIncome: number;
+  monthPaidOrders: number;
+  activeMembers: number;
+  totalIncome: number;
+}
+
 export const api = {
   login: (username: string, password: string) =>
     request<{ token: string; admin: Admin }>("POST", "/auth/login", { username, password }, true),
@@ -248,4 +328,17 @@ export const api = {
   setIntegrationEnabled: (code: string, enabled: boolean) =>
     request<Integration>("POST", `/integrations/${code}/status`, { enabled }),
   testIntegration: (code: string) => request<IntegrationTest>("POST", `/integrations/${code}/test`),
+
+  payOrders: (limit = 100) => request<OrderRow[]>("GET", `/pay/orders?limit=${limit}`),
+  queryPayOrder: (no: string) => request<{ state: string; message?: string | null; order: PayOrder }>("POST", `/pay/orders/${no}/query`),
+  refundPayOrder: (no: string, amount: string, reason?: string) => request<PayRefund>("POST", `/pay/orders/${no}/refunds`, { amount, reason }),
+  retryRefund: (no: string) => request<PayRefund>("POST", `/pay/refunds/${no}/retry`),
+  queryRefund: (no: string) => request<PayRefund>("POST", `/pay/refunds/${no}/query`),
+  memberSetting: () => request<MemberSetting>("GET", "/pay/member"),
+  setMemberPrice: (price: string) => request<MemberSetting>("PUT", "/pay/member/price", { price }),
+  memberStatus: (userId: number) => request<MemberStatus>("GET", `/pay/members/${userId}`),
+  grantMember: (userId: number, days: number, note?: string) => request<MemberStatus>("POST", `/pay/members/${userId}/grant`, { days, note }),
+  setChatQuota: (freeDaily: number, memberDaily: number) => request<MemberSetting>("PUT", "/pay/member/quota", { freeDaily, memberDaily }),
+  billingStats: () => request<BillingStats>("GET", "/pay/stats"),
+  memberLogs: (limit = 100) => request<MemberLogRow[]>("GET", `/pay/member-logs?limit=${limit}`),
 };

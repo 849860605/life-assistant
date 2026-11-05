@@ -10,6 +10,7 @@ import com.lifeassistant.core.conversation.ChatMessageEntity;
 import com.lifeassistant.core.conversation.Conversation;
 import com.lifeassistant.core.conversation.ConversationService;
 import com.lifeassistant.core.file.UploadService;
+import com.lifeassistant.core.member.ChatQuota;
 import com.lifeassistant.core.orchestrator.ChatEvent;
 import com.lifeassistant.core.orchestrator.ChatOrchestrator;
 import jakarta.validation.Valid;
@@ -46,6 +47,7 @@ public class ConversationController {
     private final ToolCallLogMapper callLog;
     private final ObjectMapper objectMapper;
     private final CardHub cardHub;
+    private final ChatQuota chatQuota;
 
     /**
      * 发消息请求体：内容最长 4000 字；files 是这条消息带的上传文件 id，最多 5 个；
@@ -82,6 +84,8 @@ public class ConversationController {
     public Flux<ServerSentEvent<ChatEvent>> send(@PathVariable String id, @Valid @RequestBody SendMessageRequest request) {
         // 身份必须在请求线程里取，后面的图和工具都在其他线程执行
         UserCtx ctx = authFacade.current();
+        // 每天的对话次数：免费用户和会员上限不同，超了直接报错，不进模型
+        chatQuota.consume(ctx.userId());
         String input = uploadService.compose(ctx, request.content(), request.files());
         boolean chip = Boolean.TRUE.equals(request.chip());
         if (chip) {

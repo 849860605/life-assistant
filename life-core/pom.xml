@@ -130,6 +130,11 @@
             <artifactId>poi-ooxml</artifactId>
             <version>5.4.1</version>
         </dependency>
+        <!-- 支付宝收款：网页支付下单、查询、退款、关单和异步通知验签 -->
+        <dependency>
+            <groupId>com.alipay.sdk</groupId>
+            <artifactId>alipay-sdk-java</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>

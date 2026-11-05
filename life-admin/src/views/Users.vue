@@ -42,6 +42,12 @@
         <el-table-column label="状态" width="80">
           <template #default="{ row }"><el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">{{ row.status === 1 ? "正常" : "已停用" }}</el-tag></template>
         </el-table-column>
+        <el-table-column label="会员" width="110">
+          <template #default="{ row }">
+            <el-tag v-if="row.memberUntil && new Date(row.memberUntil) > new Date()" size="small" type="warning">到 {{ fmtDate(row.memberUntil) }}</el-tag>
+            <span v-else class="muted small">{{ row.memberUntil ? "已过期" : "—" }}</span>
+          </template>
+        </el-table-column>
         <el-table-column label="对话" width="70" align="right"><template #default="{ row }"><span class="num">{{ row.conversations }}</span></template></el-table-column>
         <el-table-column label="行程" width="70" align="right"><template #default="{ row }"><span class="num">{{ row.trips }}</span></template></el-table-column>
         <el-table-column label="最近活跃" width="110"><template #default="{ row }">{{ fromNow(row.lastActiveAt) }}</template></el-table-column>
@@ -115,6 +121,27 @@
           <div class="sum"><div class="sum-v num">{{ detail.summary.events }}</div><div class="muted small">日程</div></div>
           <div class="sum"><div class="sum-v num">{{ detail.summary.memories }}</div><div class="muted small">记忆</div></div>
         </div>
+        <div class="sum-title">会员</div>
+        <div v-if="member" class="member">
+          <div class="row-between">
+            <span>
+              <el-tag :type="member.active ? 'warning' : 'info'" size="small">{{ member.active ? "会员" : "免费用户" }}</el-tag>
+              <span class="small"> {{ member.expiresAt ? (member.active ? "到期 " : "已于 ") + fmtTime(member.expiresAt) + (member.active ? "" : " 到期") : "从没开通过" }}</span>
+            </span>
+            <span class="muted small">今天对话 {{ member.todayUsed }} / {{ member.dailyLimit }}</span>
+          </div>
+          <div class="grant">
+            <el-button v-for="d in [30, 90, 365]" :key="d" size="small" @click="grantMember(d)">+{{ d }} 天</el-button>
+            <el-button size="small" @click="grantCustom">自定义</el-button>
+          </div>
+          <div v-for="l in member.logs.slice(0, 8)" :key="l.id" class="mlog small">
+            <span class="num">{{ fmtTime(l.createdAt) }}</span>
+            <span>{{ l.source === "PAY" ? "付费开通" : "后台" + (l.adminName ? `（${l.adminName}）` : "") }}</span>
+            <span :class="l.days > 0 ? 'plus' : 'muted'">{{ l.days > 0 ? "+" : "" }}{{ l.days }} 天</span>
+            <span v-if="l.note" class="muted">{{ l.note }}</span>
+          </div>
+        </div>
+        <div v-else class="muted small">加载中…</div>
         <div class="sum-title">近 30 天模型用量</div>
         <div class="sums three">
           <div class="sum"><div class="sum-v num">{{ num(detail.summary.llmCalls30d) }}</div><div class="muted small">调用次数</div></div>
@@ -131,8 +158,8 @@
 import { onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from "element-plus";
 import { Plus, Search } from "@element-plus/icons-vue";
-import { api, type UserDetail, type UserRow } from "../api";
-import { fmtTime, fromNow, money, narrow, num, passwordRules, randomPassword, usernameRules } from "../utils";
+import { api, type MemberStatus, type UserDetail, type UserRow } from "../api";
+import { fmtDate, fmtTime, fromNow, money, narrow, num, passwordRules, randomPassword, usernameRules } from "../utils";
 
 /** App 用户管理：注册开关、搜索分页、新建、详情（只有统计）、重置密码、启用停用 */
 const keyword = ref("");
@@ -266,10 +293,41 @@ async function toggle(row: UserRow) {
 // 详情
 const detailOpen = ref(false);
 const detail = ref<UserDetail | null>(null);
+const member = ref<MemberStatus | null>(null);
 async function openDetail(row: UserRow) {
   detail.value = null;
+  member.value = null;
   detailOpen.value = true;
   detail.value = await api.user(row.id);
+  member.value = await api.memberStatus(row.id);
+}
+
+/** 给当前打开的用户加会员天数，要填个原因（比如"送朋友"），记进会员账单 */
+async function grantMember(days: number) {
+  if (!detail.value) return;
+  const { value } = await ElMessageBox.prompt(`给 ${detail.value.nickname || detail.value.username} 加 ${days} 天会员，原因（可不填）：`, "开通会员", {
+    inputPlaceholder: "例如：送朋友、补偿",
+    confirmButtonText: "开通",
+  });
+  member.value = await api.grantMember(detail.value.id, days, value || undefined);
+  ElMessage.success("已开通");
+  load();
+}
+
+/** 自定义天数：负数是扣（比如退款后扣回） */
+async function grantCustom() {
+  if (!detail.value) return;
+  const { value } = await ElMessageBox.prompt("天数（负数是扣，例如 -30）和原因，用空格隔开：", "调整会员", {
+    inputPlaceholder: "例如：-30 退款扣回",
+    inputPattern: /^-?\d{1,4}(\s+.*)?$/,
+    inputErrorMessage: "先写天数，例如 -30 退款扣回",
+  });
+  const [n, ...rest] = value.trim().split(/\s+/);
+  const days = Number(n);
+  if (!days) return;
+  member.value = await api.grantMember(detail.value.id, days, rest.join(" ") || undefined);
+  ElMessage.success(days > 0 ? `已加 ${days} 天` : `已扣 ${-days} 天`);
+  load();
 }
 
 onMounted(() => {
@@ -325,6 +383,12 @@ onMounted(() => {
   line-height: 1.6;
   padding-left: 84px;
 }
+.member { display: flex; flex-direction: column; gap: 8px; }
+.row-between { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.grant { display: flex; flex-wrap: wrap; gap: 6px; }
+.grant .el-button { margin: 0; }
+.mlog { display: flex; gap: 8px; flex-wrap: wrap; }
+.plus { color: var(--el-color-success); }
 .sum-title {
   font-weight: 700;
   margin: 20px 0 10px;

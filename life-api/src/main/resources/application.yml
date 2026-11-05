@@ -190,3 +190,20 @@ life:
     local-dir: ${LIFE_STORAGE_DIR:data/files}
   web:
     allowed-origins: ${LIFE_WEB_ORIGINS:http://localhost:5173}
+  # 支付宝 AI 网页应用收款。sandbox 读项目根目录的 .alipay-sandbox.json（已在 .gitignore 里），走沙箱网关；
+  # production 读下面的 ALIPAY_* 正式应用配置，走正式网关。密钥不要写进这个文件
+  pay:
+    alipay:
+      mode: ${ALIPAY_MODE:sandbox}
+      sandbox-config: ${ALIPAY_SANDBOX_CONFIG:}
+      app-id: ${ALIPAY_APP_ID:}
+      private-key: ${ALIPAY_PRIVATE_KEY:}
+      alipay-public-key: ${ALIPAY_PUBLIC_KEY:}
+      seller-id: ${ALIPAY_SELLER_ID:}
+      gateway: ${ALIPAY_GATEWAY:https://openapi.alipay.com/gateway.do}
+      # 异步通知要公网 HTTPS 地址（如 https://域名/api/v1/pay/alipay/notify）；本地没有就留空，不传给支付宝，靠主动查询确认
+      notify-url: ${ALIPAY_NOTIFY_URL:}
+      # 付款后回到的结果页。本地默认经前端开发服务（5173，/api 转发到后端）；线上改成 https://域名/api/v1/pay/alipay/return
+      return-url: ${ALIPAY_RETURN_URL:http://localhost:5173/api/v1/pay/alipay/return}
+      # 结果页上“回到星络”的链接
+      app-page: ${ALIPAY_APP_PAGE:/#/pages/member/member}

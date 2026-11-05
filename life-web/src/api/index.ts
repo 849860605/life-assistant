@@ -6,7 +6,7 @@ import type {
   UploadView,
   ModelChoices,
   BookingState, ChangeReason, ChatMessage, Conversation, DayPreview, FlightPick, FlightPreview, FlightRules, FlightSearch, FoodResult, DayTickets, HotelComparison, HotelSearchResult, SpotRules, TicketProduct, TuniuTicket, TicketSpot, TuniuCabin, StayPick, StayPreview, Meal, MealPreview, MemoryCategory, MemoryItem, OptimizeGoal, Place, PlacePick,
-  ScheduleEvent, TokenView,
+  ScheduleEvent, TokenView, PayOrder, PayQuery, MembershipView, MembershipLog,
   TripDetail, TripVersion, Trip, UserView, EmailCodePurpose,
   WeatherBoard, TripForecast, SwapPreview,
 } from "./types";
@@ -184,4 +184,14 @@ export const api = {
   tokens: () => request<TokenView[]>("GET", "/api/v1/tokens"),
   createToken: (name: string, scope: string) => request<TokenView>("POST", "/api/v1/tokens", { name, scope }),
   revokeToken: (id: number) => request<void>("DELETE", `/api/v1/tokens/${id}`),
+
+  /** 会员状态、价格，能不能付款 */
+  membership: () => request<MembershipView>("GET", "/api/v1/membership"),
+  /** 我的会员记录：付费开通、星络赠送或调整 */
+  membershipLogs: () => request<MembershipLog[]>("GET", "/api/v1/membership/logs"),
+  /** 买一个月会员：返回订单号和支付表单 HTML（要渲染后自动提交，不能当链接跳转） */
+  createMemberOrder: () => request<{ outTradeNo: string; formHtml: string }>("POST", "/api/v1/pay/alipay/orders"),
+  alipayOrders: () => request<PayOrder[]>("GET", "/api/v1/pay/alipay/orders"),
+  /** 向支付宝查询并同步订单状态 */
+  queryAlipayOrder: (outTradeNo: string) => request<PayQuery>("POST", `/api/v1/pay/alipay/orders/${outTradeNo}/query`),
 };

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lifeassistant.common.auth.UserCtx;
 import com.lifeassistant.core.conversation.ConversationService;
 import com.lifeassistant.core.mail.EmailSender;
+import com.lifeassistant.core.member.ChatQuota;
 import com.lifeassistant.core.orchestrator.ChatEvent;
 import com.lifeassistant.core.orchestrator.ChatOrchestrator;
 import com.lifeassistant.core.orchestrator.RouterService;
@@ -113,6 +114,8 @@ class LifeApiIntegrationTest {
     ScheduleService scheduleService;
     @Autowired
     ObjectMapper objectMapper;
+    @Autowired
+    ChatQuota chatQuota;
 
     String token;
 
@@ -181,6 +184,50 @@ class LifeApiIntegrationTest {
         JsonNode logs = body(call(admin, HttpMethod.GET, "/admin/api/v1/op-logs?size=50", null)).path("data").path("items");
         assertThat(logs.findValuesAsText("action")).contains("CREATE_USER", "RESET_USER_PASSWORD", "DISABLE_USER",
                 "CREATE_ADMIN", "CHANGE_OWN_PASSWORD");
+    }
+
+    @Test
+    void membershipGrantsTimeAndRaisesDailyQuota() throws Exception {
+        String admin = adminLogin("admin", "admin-pass-123");
+        long daveId = body(call(admin, HttpMethod.POST, "/admin/api/v1/users",
+                Map.of("username", "dave", "password", "dave-pass-1234"))).path("data").path("id").asLong();
+        String dave = loginAs("dave", "dave-pass-1234");
+        assertThat(body(call(dave, HttpMethod.GET, "/api/v1/membership", null)).path("data").path("active").asBoolean()).isFalse();
+
+        // 免费 1 次、会员 2 次：免费用户第二次就被挡住，发消息接口返回 402
+        body(call(admin, HttpMethod.PUT, "/admin/api/v1/pay/member/quota", Map.of("freeDaily", 1, "memberDaily", 2)));
+        try {
+            chatQuota.consume(daveId);
+            String conversationId = body(call(dave, HttpMethod.POST, "/api/v1/conversations", Map.of())).path("data").path("id").asText();
+            ResponseEntity<String> blocked = call(dave, HttpMethod.POST, "/api/v1/conversations/" + conversationId + "/messages",
+                    Map.of("content", "你好"));
+            assertThat(blocked.getStatusCode()).isEqualTo(HttpStatus.PAYMENT_REQUIRED);
+            assertThat(blocked.getBody()).contains("开通会员");
+
+            // 后台送 30 天：变成会员，次数上限换成会员的，再加 30 天从原到期日往后顺延
+            JsonNode first = body(call(admin, HttpMethod.POST, "/admin/api/v1/pay/members/" + daveId + "/grant",
+                    Map.of("days", 30, "note", "送朋友"))).path("data");
+            assertThat(first.path("active").asBoolean()).isTrue();
+            assertThat(first.path("dailyLimit").asInt()).isEqualTo(2);
+            chatQuota.consume(daveId);
+            JsonNode second = body(call(admin, HttpMethod.POST, "/admin/api/v1/pay/members/" + daveId + "/grant",
+                    Map.of("days", 30))).path("data");
+            assertThat(Duration.between(OffsetDateTime.parse(first.path("expiresAt").asText()),
+                    OffsetDateTime.parse(second.path("expiresAt").asText())).toDays()).isEqualTo(30);
+
+            // 账单两条，新的在前，第二条记着变动前的到期时间；用户自己看不到后台备注
+            JsonNode logs = second.path("logs");
+            assertThat(logs).hasSize(2);
+            assertThat(logs.get(0).path("expiresBefore").asText()).isEqualTo(first.path("expiresAt").asText());
+            assertThat(logs.get(1).path("note").asText()).isEqualTo("送朋友");
+            JsonNode mine = body(call(dave, HttpMethod.GET, "/api/v1/membership/logs", null)).path("data");
+            assertThat(mine).hasSize(2);
+            assertThat(mine.get(0).has("note")).isFalse();
+            assertThat(body(call(admin, HttpMethod.GET, "/admin/api/v1/pay/stats", null)).path("data").path("activeMembers").asLong())
+                    .isGreaterThanOrEqualTo(1);
+        } finally {
+            body(call(admin, HttpMethod.PUT, "/admin/api/v1/pay/member/quota", Map.of("freeDaily", 20, "memberDaily", 200)));
+        }
     }
 
     @Test

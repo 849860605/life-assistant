@@ -759,3 +759,57 @@ export interface TodayAgenda {
   trip: { id: number; title: string; dayNo: number; totalDays: number } | null;
   home: string | null;
 }
+
+/** 支付宝退款请求：status 为 PENDING（结果待确认）/ SUCCESS / FAILED；金额是两位小数的字符串 */
+export interface PayRefund {
+  outRequestNo: string;
+  outTradeNo: string;
+  refundAmount: string;
+  status: "PENDING" | "SUCCESS" | "FAILED";
+  message?: string | null;
+  createdAt?: string | null;
+}
+
+/** 支付宝网页支付订单：status 为 WAIT_PAY / PAID / CLOSED；refundedAmount 是已确认成功的退款合计 */
+export interface PayOrder {
+  outTradeNo: string;
+  subject: string;
+  totalAmount: string;
+  status: "WAIT_PAY" | "PAID" | "CLOSED";
+  tradeNo?: string | null;
+  paidAt?: string | null;
+  createdAt?: string | null;
+  refundedAmount: string;
+  refunds: PayRefund[];
+}
+
+/**
+ * 会员状态：active 现在是不是会员，expiresAt 到期时间，price 每 days 天的价格，payReady 收款配好了没有；
+ * todayUsed / dailyLimit 今天的对话次数和上限，freeDaily / memberDaily 免费用户和会员每天各多少次
+ */
+export interface MembershipView {
+  active: boolean;
+  expiresAt?: string | null;
+  price: string;
+  days: number;
+  payReady: boolean;
+  todayUsed: number;
+  dailyLimit: number;
+  freeDaily: number;
+  memberDaily: number;
+}
+
+/** 一条会员记录：source 为 PAY 付费开通 / ADMIN 星络赠送或调整，days 为负是扣减 */
+export interface MembershipLog {
+  days: number;
+  source: "PAY" | "ADMIN";
+  expiresAfter: string;
+  createdAt: string;
+}
+
+/** 主动查询结果：state 为 PAID / PENDING_PAYMENT / CLOSED / UNKNOWN */
+export interface PayQuery {
+  state: "PAID" | "PENDING_PAYMENT" | "CLOSED" | "UNKNOWN";
+  message?: string | null;
+  order: PayOrder;
+}

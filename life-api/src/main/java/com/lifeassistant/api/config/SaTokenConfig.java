@@ -23,7 +23,9 @@ public class SaTokenConfig implements WebMvcConfigurer {
                     .notMatch("/api/v1/auth/login", "/api/v1/auth/register-options", "/api/v1/auth/email-code",
                             "/api/v1/auth/register", "/api/v1/auth/password/reset", "/api/v1/calendar/feed/**", "/api/v1/maps/static",
                             "/api/v1/maps/amap/**",
-                            "/api/v1/trips/*/pdf")
+                            "/api/v1/trips/*/pdf",
+                            // 支付宝异步通知、付款后回跳的结果页和结果查询：支付宝和浏览器回跳都不带登录态，接口里靠验签校验
+                            "/api/v1/pay/alipay/notify", "/api/v1/pay/alipay/return", "/api/v1/pay/alipay/return/status")
                     .check(r -> StpUtil.checkLogin());
             SaRouter.match("/admin/api/v1/**")
                     .notMatch("/admin/api/v1/auth/login")

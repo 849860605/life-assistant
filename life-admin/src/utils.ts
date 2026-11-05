@@ -12,6 +12,11 @@ export function fmtTime(iso?: string | null): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+/** 日期显示成"2026-11-03"，空值显示"—" */
+export function fmtDate(iso?: string | null): string {
+  return iso ? fmtTime(iso).slice(0, 10) : "—";
+}
+
 /** 相对时间："刚刚""3 小时前""5 天前"，超过 30 天显示日期 */
 export function fromNow(iso?: string | null): string {
   if (!iso) return "从未";
@@ -61,6 +66,11 @@ export const ACTION_LABELS: Record<string, string> = {
   ENABLE_INTEGRATION: "启用第三方平台",
   DISABLE_INTEGRATION: "停用第三方平台",
   TEST_INTEGRATION: "测试第三方平台",
+  REFUND_ORDER: "订单退款",
+  RETRY_REFUND: "重试退款",
+  SET_MEMBER_PRICE: "修改会员价格",
+  GRANT_MEMBER: "调整会员天数",
+  SET_CHAT_QUOTA: "修改每天对话次数",
 };
 
 export function actionLabel(a: string): string {
