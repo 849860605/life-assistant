@@ -8,7 +8,7 @@ import type {
   BookingState, ChangeReason, ChatMessage, Conversation, DayPreview, FlightPick, FlightPreview, FlightRules, FlightSearch, FoodResult, DayTickets, HotelComparison, HotelSearchResult, SpotRules, TicketProduct, TuniuTicket, TicketSpot, TuniuCabin, StayPick, StayPreview, Meal, MealPreview, MemoryCategory, MemoryItem, OptimizeGoal, Place, PlacePick,
   ScheduleEvent, TokenView, PayOrder, PayQuery, MembershipView, MembershipLog,
   TripDetail, TripVersion, Trip, UserView, EmailCodePurpose,
-  WeatherBoard, TripForecast, SwapPreview,
+  WeatherBoard, TripForecast, SwapPreview, TripBooking, TripExpense, BookingInput, ExpenseInput, Favorite, UserAddress,
 } from "./types";
 
 /** 拼查询串，跳过空值。 */
@@ -42,7 +42,9 @@ export const api = {
   logout: () => request<void>("POST", "/api/v1/auth/logout"),
   me: () => request<UserView>("GET", "/api/v1/auth/me"),
 
-  conversations: () => request<Conversation[]>("GET", "/api/v1/conversations?limit=50"),
+  conversations: (q?: string) => request<Conversation[]>("GET", "/api/v1/conversations" + qs({ limit: 50, q: q || undefined })),
+  pinConversation: (id: string, pinned: boolean) => request<Conversation>("POST", `/api/v1/conversations/${id}/pin`, { pinned }),
+  renameConversation: (id: string, title: string) => request<Conversation>("PUT", `/api/v1/conversations/${id}`, { title }),
   createConversation: () => request<Conversation>("POST", "/api/v1/conversations"),
   deleteConversation: (id: string) => request<void>("DELETE", `/api/v1/conversations/${id}`),
   brief: () => request<Brief>("GET", "/api/v1/brief"),
@@ -56,6 +58,7 @@ export const api = {
     request<BriefSettings>("PUT", "/api/v1/brief/settings", s),
   pushBrief: () => request<Brief>("POST", "/api/v1/brief/push"),
   /** 上传文件并识别，图片和扫描件要十几秒 */
+  transcribe: (file: File) => upload<{ text: string }>("/api/v1/speech/transcribe", { path: URL.createObjectURL(file), name: file.name, file }),
   uploadFile: (file: { path: string; name?: string; file?: File }) => upload<UploadView>("/api/v1/files", file),
   messages: (id: string) => request<ChatMessage[]>("GET", `/api/v1/conversations/${id}/messages?limit=200`),
   /** 回答还没结束时补充一句；accepted 为 false 表示没有正在进行的回答，要正常发送 */
@@ -69,6 +72,18 @@ export const api = {
   tripEvents: (id: number) => request<ScheduleEvent[]>("GET", `/api/v1/trips/${id}/events`),
   confirmTrip: (id: number) => request<Trip>("POST", `/api/v1/trips/${id}/confirm`),
   deleteTrip: (id: number) => request<void>("DELETE", `/api/v1/trips/${id}`),
+  updateTripInfo: (id: number, body: { title: string; people: number | null; budget: string | null; budgetCurrency: string }) =>
+    request<Trip>("PUT", `/api/v1/trips/${id}/info`, body),
+  tripBookings: (id: number) => request<TripBooking[]>("GET", `/api/v1/trips/${id}/bookings`),
+  createBooking: (id: number, body: BookingInput) => request<TripBooking>("POST", `/api/v1/trips/${id}/bookings`, body),
+  updateBooking: (id: number, bookingId: number, body: BookingInput) =>
+    request<TripBooking>("PUT", `/api/v1/trips/${id}/bookings/${bookingId}`, body),
+  deleteBooking: (id: number, bookingId: number) => request<void>("DELETE", `/api/v1/trips/${id}/bookings/${bookingId}`),
+  tripExpenses: (id: number) => request<TripExpense[]>("GET", `/api/v1/trips/${id}/expenses`),
+  createExpense: (id: number, body: ExpenseInput) => request<TripExpense>("POST", `/api/v1/trips/${id}/expenses`, body),
+  updateExpense: (id: number, expenseId: number, body: ExpenseInput) =>
+    request<TripExpense>("PUT", `/api/v1/trips/${id}/expenses/${expenseId}`, body),
+  deleteExpense: (id: number, expenseId: number) => request<void>("DELETE", `/api/v1/trips/${id}/expenses/${expenseId}`),
   copyTrip: (id: number, start?: string) => request<TripDetail>("POST", `/api/v1/trips/${id}/copy` + qs({ start })),
   deleteTripVersion: (id: number, version: number) => request<void>("DELETE", `/api/v1/trips/${id}/versions/${version}`),
   restoreVersion: (id: number, version: number) =>
@@ -186,6 +201,14 @@ export const api = {
   revokeToken: (id: number) => request<void>("DELETE", `/api/v1/tokens/${id}`),
 
   /** 会员状态、价格，能不能付款 */
+  addresses: () => request<UserAddress[]>("GET", "/api/v1/addresses"),
+  createAddress: (body: { label: string; address: string; isDefault: boolean }) => request<UserAddress[]>("POST", "/api/v1/addresses", body),
+  updateAddress: (id: number, body: { label: string; address: string; isDefault: boolean }) => request<UserAddress[]>("PUT", `/api/v1/addresses/${id}`, body),
+  deleteAddress: (id: number) => request<UserAddress[]>("DELETE", `/api/v1/addresses/${id}`),
+  defaultAddress: (id: number) => request<UserAddress[]>("POST", `/api/v1/addresses/${id}/default`),
+  favorites: (kind?: string, q?: string) => request<Favorite[]>("GET", "/api/v1/favorites" + qs({ kind, q })),
+  addFavorite: (body: Omit<Favorite, "id" | "createdAt">) => request<Favorite>("POST", "/api/v1/favorites", body),
+  removeFavorite: (id: number) => request<void>("DELETE", `/api/v1/favorites/${id}`),
   membership: () => request<MembershipView>("GET", "/api/v1/membership"),
   /** 我的会员记录：付费开通、星络赠送或调整 */
   membershipLogs: () => request<MembershipLog[]>("GET", "/api/v1/membership/logs"),
@@ -194,4 +217,5 @@ export const api = {
   alipayOrders: () => request<PayOrder[]>("GET", "/api/v1/pay/alipay/orders"),
   /** 向支付宝查询并同步订单状态 */
   queryAlipayOrder: (outTradeNo: string) => request<PayQuery>("POST", `/api/v1/pay/alipay/orders/${outTradeNo}/query`),
+  closeAlipayOrder: (outTradeNo: string) => request<PayOrder>("POST", `/api/v1/pay/alipay/orders/${outTradeNo}/close`),
 };

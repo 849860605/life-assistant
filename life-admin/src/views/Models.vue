@@ -91,6 +91,7 @@
             <div class="tags">
               <el-tag v-if="row.userSelectable" size="small" type="primary">App 可选</el-tag>
               <el-tag v-if="!row.supportsTools" size="small" type="warning">不支持工具</el-tag>
+              <el-tag v-if="row.thinking" size="small" type="info">思考·{{ LEVEL[row.thinkingLevel] || "中" }}</el-tag>
               <el-tag v-for="r in usedFor(row.id)" :key="r" size="small" type="success">{{ r }}</el-tag>
             </div>
           </template>
@@ -146,9 +147,15 @@
           <el-input id="pf-header" v-model="pf.authHeader" placeholder="留空：Authorization: Bearer" />
           <div class="field-hint">个别厂商要求把 Key 放在别的请求头里，例如小红书点点是 api-key</div>
         </el-form-item>
-        <el-form-item label="关闭思考">
-          <el-input id="pf-nothink" v-model="pf.noThinking" placeholder='可不填，例如 {"thinking":{"type":"disabled"}}' />
-          <div class="field-hint">打分、分类这类小任务会带上这个参数，让模型不先想一遍，快很多</div>
+        <el-form-item label="思考参数">
+          <el-select id="pf-style" v-model="pf.thinkingStyle" style="width: 100%">
+            <el-option v-for="s in STYLES" :key="s.value" :label="s.label" :value="s.value" />
+          </el-select>
+          <div class="field-hint">各家打开、关闭思考的写法不同，选对了才能在模型上用"思考"开关和深度。小任务（路由、打分）一律关掉思考</div>
+        </el-form-item>
+        <el-form-item v-if="pf.thinkingStyle === 'CUSTOM'" label="关闭思考">
+          <el-input id="pf-nothink" v-model="pf.noThinking" placeholder='例如 {"thinking":{"type":"disabled"}}' />
+          <div class="field-hint">关掉思考时额外带的请求参数（JSON）；自定义格式不能调深度</div>
         </el-form-item>
         <el-form-item label="启用"><el-switch v-model="pf.enabled" /></el-form-item>
         <div v-if="presetModel && !editingCode" class="field-hint indent">保存后会顺带添加模型 {{ presetModel.model }}{{ presetModel.supportsTools ? "" : "（不支持工具，不给 App 选）" }}</div>
@@ -197,6 +204,24 @@
           <div class="field-hint">星络对话要查天气、行程、酒店等工具，不支持工具的模型不能用于对话</div>
         </el-form-item>
         <el-form-item label="App 可选"><el-switch v-model="mf.userSelectable" :disabled="!mf.supportsTools" /></el-form-item>
+        <el-form-item label="思考">
+          <el-switch v-model="mf.thinking" :disabled="mfStyle === 'NONE'" />
+          <div class="field-hint">{{ mfStyle === "NONE" ? "这个提供方没设置思考参数格式，先到提供方里选" : "打开后先想一遍再回答，效果好一些，但慢好几倍、Token 多很多。对话和看图按这里，小任务一律不思考" }}</div>
+        </el-form-item>
+        <el-form-item v-if="mf.thinking && (mfStyle === 'QWEN' || mfStyle === 'OPENAI')" label="思考深度">
+          <el-radio-group v-model="mf.thinkingLevel">
+            <el-radio-button value="LOW">低</el-radio-button>
+            <el-radio-button value="MEDIUM">中</el-radio-button>
+            <el-radio-button value="HIGH">高</el-radio-button>
+            <el-radio-button v-if="mfStyle === 'QWEN'" value="CUSTOM">自定义</el-radio-button>
+          </el-radio-group>
+          <div v-if="mf.thinkingLevel === 'CUSTOM' && mfStyle === 'QWEN'" class="budget">
+            <el-input-number id="mf-budget" v-model="mf.thinkingBudget" :min="128" :max="81920" :step="1024" />
+            <span class="field-hint">Token，思考最多用这么多</span>
+          </div>
+          <div v-else class="field-hint">{{ mfStyle === "QWEN" ? "思考预算：低 1024、中 4096、高 16384 Token" : "对应 reasoning_effort：low / medium / high" }}</div>
+        </el-form-item>
+        <el-form-item v-else-if="mf.thinking && mfStyle === 'TYPE'" label="思考深度"><span class="field-hint">这家只能开或关，不能调深度</span></el-form-item>
         <el-form-item label="单价">
           <div class="prices">
             <el-input-number id="mf-pin" v-model="mf.priceInput" :min="0" :precision="2" :controls="false" placeholder="输入" />
@@ -251,15 +276,17 @@ interface Preset {
   completionsPath?: string;
   authHeader?: string;
   noThinking?: string;
+  thinkingStyle?: string;
   model?: { model: string; displayName: string; description?: string; supportsTools: boolean };
 }
 
 const PRESETS: Preset[] = [
-  { code: "dashscope", name: "通义百炼", type: "dashscope" },
-  { code: "deepseek", name: "DeepSeek", type: "openai", baseUrl: "https://api.deepseek.com", noThinking: '{"thinking":{"type":"disabled"}}' },
-  { code: "moonshot", name: "Kimi", type: "openai", baseUrl: "https://api.moonshot.cn" },
-  { code: "zhipu", name: "智谱", type: "openai", baseUrl: "https://open.bigmodel.cn/api/paas", completionsPath: "/v4/chat/completions" },
-  { code: "doubao", name: "豆包", type: "openai", baseUrl: "https://ark.cn-beijing.volces.com/api", completionsPath: "/v3/chat/completions" },
+  { code: "qwen", name: "千问（百炼）", type: "openai", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode", completionsPath: "/v1/chat/completions", thinkingStyle: "QWEN" },
+  { code: "dashscope", name: "通义百炼（原生）", type: "dashscope", thinkingStyle: "NONE" },
+  { code: "deepseek", name: "DeepSeek", type: "openai", baseUrl: "https://api.deepseek.com", thinkingStyle: "TYPE" },
+  { code: "moonshot", name: "Kimi", type: "openai", baseUrl: "https://api.moonshot.cn", thinkingStyle: "NONE" },
+  { code: "zhipu", name: "智谱", type: "openai", baseUrl: "https://open.bigmodel.cn/api/paas", completionsPath: "/v4/chat/completions", thinkingStyle: "TYPE" },
+  { code: "doubao", name: "豆包", type: "openai", baseUrl: "https://ark.cn-beijing.volces.com/api", completionsPath: "/v3/chat/completions", thinkingStyle: "TYPE" },
   {
     code: "dots",
     name: "小红书点点",
@@ -269,8 +296,18 @@ const PRESETS: Preset[] = [
     authHeader: "api-key",
     model: { model: "dots3-note-prev", displayName: "小红书点点", description: "小红书笔记风格，回复很慢（约 1 分钟）", supportsTools: false },
   },
-  { code: "openai", name: "OpenAI", type: "openai", baseUrl: "https://api.openai.com" },
+  { code: "openai", name: "OpenAI", type: "openai", baseUrl: "https://api.openai.com", thinkingStyle: "OPENAI" },
 ];
+
+/** 思考参数格式：各家打开、关闭思考和调深度的写法 */
+const STYLES = [
+  { value: "QWEN", label: "千问（enable_thinking，可调思考预算）" },
+  { value: "TYPE", label: "DeepSeek / 智谱 / 豆包（thinking.type，只能开关）" },
+  { value: "OPENAI", label: "OpenAI（reasoning_effort，低中高）" },
+  { value: "CUSTOM", label: "自定义（只填关闭时带的参数）" },
+  { value: "NONE", label: "不支持 / 不设置" },
+];
+const LEVEL: Record<string, string> = { LOW: "低", MEDIUM: "中", HIGH: "高", CUSTOM: "自定义" };
 
 async function load() {
   loading.value = true;
@@ -335,7 +372,7 @@ const providerOpen = ref(false);
 const editingCode = ref("");
 const editingKeyTail = ref("");
 const preset = ref("");
-const blankProvider = (): LlmProviderForm => ({ code: "", name: "", type: "openai", baseUrl: "", completionsPath: "", apiKey: "", authHeader: "", noThinking: "", enabled: true, sort: 0 });
+const blankProvider = (): LlmProviderForm => ({ code: "", name: "", type: "openai", baseUrl: "", completionsPath: "", apiKey: "", authHeader: "", noThinking: "", thinkingStyle: "NONE", enabled: true, sort: 0 });
 const pf = reactive<LlmProviderForm>(blankProvider());
 const presetModel = computed(() => PRESETS.find((p) => p.code === preset.value)?.model);
 
@@ -348,6 +385,7 @@ function openProvider(p?: LlmProvider) {
     Object.assign(pf, {
       code: p.code, name: p.name, type: p.type, baseUrl: p.baseUrl || "", completionsPath: p.completionsPath || "",
       authHeader: p.authHeader || "", noThinking: p.noThinking || "", enabled: p.enabled, sort: p.sort,
+      thinkingStyle: p.thinkingStyle || (p.noThinking ? "CUSTOM" : "NONE"),
     });
   }
   providerOpen.value = true;
@@ -358,7 +396,7 @@ function applyPreset(p: Preset) {
   const taken = providers.value.some((x) => x.code === p.code);
   Object.assign(pf, {
     code: taken ? `${p.code}2` : p.code, name: p.name, type: p.type, baseUrl: p.baseUrl || "", completionsPath: p.completionsPath || "",
-    authHeader: p.authHeader || "", noThinking: p.noThinking || "",
+    authHeader: p.authHeader || "", noThinking: p.noThinking || "", thinkingStyle: p.thinkingStyle || "NONE",
   });
 }
 
@@ -375,6 +413,7 @@ async function saveProvider() {
         await api.createLlmModel({
           providerCode: body.code, model: m.model, displayName: m.displayName, description: m.description || null, enabled: true,
           userSelectable: false, supportsTools: m.supportsTools, priceInput: null, priceCachedInput: null, priceOutput: null, sort: 0,
+          thinking: false, thinkingLevel: "MEDIUM", thinkingBudget: null,
         });
       }
     }
@@ -403,8 +442,14 @@ const editingModelId = ref(0);
 const blankModel = (): LlmModelForm => ({
   providerCode: "", model: "", displayName: "", description: "", enabled: true, userSelectable: false, supportsTools: true,
   priceInput: null, priceCachedInput: null, priceOutput: null, sort: 0,
+  thinking: false, thinkingLevel: "MEDIUM", thinkingBudget: null,
 });
 const mf = reactive<LlmModelForm>(blankModel());
+/** 正在编辑的模型所属提供方的思考参数格式 */
+const mfStyle = computed(() => {
+  const p = providers.value.find((x) => x.code === mf.providerCode);
+  return p?.thinkingStyle || (p?.noThinking ? "CUSTOM" : "NONE");
+});
 
 /** 添加模型时从提供方拉到的型号列表 */
 const remote = reactive({ ids: [] as string[], loading: false, error: "" });
@@ -571,4 +616,5 @@ onMounted(load);
   padding-left: 96px;
 }
 .opt-tag { float: right; margin-left: 12px; }
+.budget { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
 </style>

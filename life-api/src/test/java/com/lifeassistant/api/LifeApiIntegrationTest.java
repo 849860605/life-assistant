@@ -328,6 +328,79 @@ class LifeApiIntegrationTest {
     }
 
     @Test
+    void tripLedgerKeepsBookingsAndExpensesPrivateAndCountsOnce() throws Exception {
+        User alice = userService.findByUsername("alice").orElseThrow();
+        long tripId = tripService.saveVersion(UserCtx.of(alice.getId()), null, new TripService.TripDraft(
+                "成都三日", "CITY", "成都", null, null, "正文", null), "AI").trip().getId();
+        String base = "/api/v1/trips/" + tripId;
+
+        JsonNode info = body(call(token, HttpMethod.PUT, base + "/info",
+                Map.of("title", "成都三日（改）", "people", 2, "budget", "3000", "budgetCurrency", "CNY"))).path("data");
+        assertThat(info.path("title").asText()).isEqualTo("成都三日（改）");
+        assertThat(info.path("people").asInt()).isEqualTo(2);
+
+        JsonNode booking = post(base + "/bookings", Map.of("kind", "HOTEL", "title", "春熙路酒店", "platform", "携程",
+                "amount", "688.00", "currency", "CNY", "status", "BOOKED")).path("data");
+        long bookingId = booking.path("id").asLong();
+        assertThat(booking.path("source").asText()).isEqualTo("MANUAL");
+        assertThat(booking.has("userId")).isFalse();
+
+        // 用户不能把来源写成平台同步，冒充平台确认
+        assertThat(call(token, HttpMethod.POST, base + "/bookings", Map.of("kind", "HOTEL", "title", "x", "source", "SYNC"))
+                .getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+
+        // 一条预订只能记一笔支出
+        post(base + "/expenses", Map.of("category", "STAY", "title", "酒店两晚", "amount", "688", "bookingId", bookingId));
+        assertThat(call(token, HttpMethod.POST, base + "/expenses",
+                Map.of("category", "STAY", "title", "又记一次", "amount", "688", "bookingId", bookingId))
+                .getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        post(base + "/expenses", Map.of("category", "FOOD", "title", "火锅", "amount", "20.5", "currency", "HKD"));
+        JsonNode expenses = get(base + "/expenses").path("data");
+        assertThat(expenses).hasSize(2);
+        assertThat(get(base + "/bookings").path("data").get(0).path("expenseId").asLong())
+                .isEqualTo(expenses.get(0).path("id").asLong());
+        assertThat(call(token, HttpMethod.POST, base + "/expenses", Map.of("category", "FOOD", "title", "x", "amount", "1.234"))
+                .getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+
+        // 别人看不到、改不了
+        if (userService.findByUsername("bob").isEmpty()) {
+            userService.create("bob", "bob-pass-123", "Bob");
+        }
+        String bobToken = loginAs("bob", "bob-pass-123");
+        assertThat(call(bobToken, HttpMethod.GET, base + "/expenses", null).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(call(bobToken, HttpMethod.DELETE, base + "/bookings/" + bookingId, null).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+
+        // 删预订后支出保留，只是不再关联
+        assertThat(call(token, HttpMethod.DELETE, base + "/bookings/" + bookingId, null).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(get(base + "/expenses").path("data").get(0).path("bookingId").isNull()).isTrue();
+    }
+
+    @Test
+    void favoritesAreDedupedSanitizedAndPrivate() throws Exception {
+        Map<String, Object> hotel = Map.of("kind", "HOTEL", "refKey", "B0FFTEST01", "title", "测试酒店",
+                "url", "javascript:alert(1)", "city", "成都");
+        JsonNode first = post("/api/v1/favorites", hotel).path("data");
+        JsonNode again = post("/api/v1/favorites", hotel).path("data");
+        assertThat(again.path("id").asLong()).isEqualTo(first.path("id").asLong());
+        assertThat(first.path("url").isNull()).isTrue();
+        assertThat(get("/api/v1/favorites?kind=HOTEL&q=测试").path("data")).hasSize(1);
+        assertThat(call(token, HttpMethod.POST, "/api/v1/favorites", Map.of("kind", "CAR", "refKey", "x", "title", "x"))
+                .getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+
+        if (userService.findByUsername("bob").isEmpty()) {
+            userService.create("bob", "bob-pass-123", "Bob");
+        }
+        String bobToken = loginAs("bob", "bob-pass-123");
+        assertThat(objectMapper.readTree(call(bobToken, HttpMethod.GET, "/api/v1/favorites", null).getBody())
+                .path("data")).isEmpty();
+        assertThat(call(bobToken, HttpMethod.DELETE, "/api/v1/favorites/" + first.path("id").asLong(), null)
+                .getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(call(token, HttpMethod.DELETE, "/api/v1/favorites/" + first.path("id").asLong(), null)
+                .getStatusCode()).isEqualTo(HttpStatus.OK);
+    }
+
+    @Test
     void calendarFeedWorksWithTokenOnly() throws Exception {
         post("/api/v1/events", Map.of("title", "爬泰山", "startAt", "2026-11-07T04:00:00+08:00",
                 "location", "泰山红门", "remindMinutesBefore", 60));

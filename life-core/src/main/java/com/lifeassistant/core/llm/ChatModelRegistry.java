@@ -12,7 +12,6 @@ import org.springframework.ai.model.NoopApiKey;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.model.tool.ToolCallingManager;
 import org.springframework.ai.openai.OpenAiChatModel;
-import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -132,15 +131,35 @@ public class ChatModelRegistry {
         return ModelSpec.parse(spec, properties.getLlm().getDefaultProvider(), providers().keySet());
     }
 
-    /** 取提供方对应的 ChatClient，第一次用时创建并缓存，配置变了重建；提供方没配置或没填 Key 抛 BizException。 */
+    /** 取提供方对应的 ChatClient（不带思考参数），第一次用时创建并缓存，配置变了重建；提供方没配置或没填 Key 抛 BizException。 */
     public ChatClient client(ModelSpec spec) {
+        return client(spec, Map.of());
+    }
+
+    /** 对话用的 ChatClient：按这个模型在后台的思考设置（开关、深度）带上思考参数。 */
+    public ChatClient chatClient(ModelSpec spec) {
+        return client(spec, thinkingParams(spec, false));
+    }
+
+    /** 简单任务（路由、打分、追问建议、美食意图）用的 ChatClient：不管模型怎么设，都关掉思考。 */
+    public ChatClient quickClient(ModelSpec spec) {
+        return client(spec, thinkingParams(spec, true));
+    }
+
+    /**
+     * 按提供方和附加请求参数缓存 ChatClient。附加参数（思考开关）在发请求时写进请求体（见 ExtraBodyClients）：
+     * Spring AI 1.1 无论调用参数还是默认参数里的 extraBody 都发不出去。
+     */
+    private ChatClient client(ModelSpec spec, Map<String, Object> extraBody) {
         LifeProperties.Provider provider = provider(spec.provider());
-        Cached cached = clients.get(spec.provider());
+        boolean extra = provider != null && "openai".equals(provider.getType()) && !extraBody.isEmpty();
+        String key = spec.provider() + (extra ? "|" + extraBody : "");
+        Cached cached = clients.get(key);
         if (cached != null && provider != null && cached.provider().equals(provider)) {
             return cached.client();
         }
-        ChatClient client = ChatClient.builder(createModel(spec.provider())).build();
-        clients.put(spec.provider(), new Cached(copy(provider), client));
+        ChatClient client = ChatClient.builder(createModel(spec.provider(), null, extra ? extraBody : null)).build();
+        clients.put(key, new Cached(copy(provider), client));
         return client;
     }
 
@@ -153,17 +172,42 @@ public class ChatModelRegistry {
     }
 
     /**
-     * 简单任务（打分、分类）用的参数：在 options 的基础上关掉思考，省下模型先想一遍的时间；
-     * 提供方没配 no-thinking 时和 options 一样。
+     * 思考相关的请求参数，按提供方的思考参数格式拼：
+     * QWEN 是 enable_thinking（开时带 thinking_budget），TYPE 是 thinking.type（DeepSeek、智谱、豆包，不能调深度），
+     * OPENAI 是 reasoning_effort，CUSTOM 只在关闭时带后台填的 JSON，NONE 什么都不带。
+     * 格式没配时：配了关闭参数按 CUSTOM，否则按 NONE。forceOff 为 true 时一律按关闭。
      */
-    public ChatOptions quickOptions(ModelSpec spec, Double temperature) {
+    public Map<String, Object> thinkingParams(ModelSpec spec, boolean forceOff) {
         LifeProperties.Provider provider = provider(spec.provider());
-        if (provider == null || !"openai".equals(provider.getType()) || provider.getNoThinking() == null
-                || provider.getNoThinking().isEmpty()) {
-            return options(spec, temperature);
+        if (provider == null) {
+            return Map.of();
         }
-        return OpenAiChatOptions.builder().model(spec.model()).temperature(temperature)
-                .extraBody(provider.getNoThinking()).build();
+        LlmCatalog.Thinking t = catalog == null ? null : catalog.thinking(spec.id());
+        boolean on = !forceOff && t != null && t.enabled();
+        boolean hasOff = provider.getNoThinking() != null && !provider.getNoThinking().isEmpty();
+        String style = provider.getThinkingStyle() != null ? provider.getThinkingStyle() : hasOff ? "CUSTOM" : "NONE";
+        String level = t == null || t.level() == null ? "MEDIUM" : t.level();
+        return switch (style) {
+            case "QWEN" -> on ? Map.of("enable_thinking", true, "thinking_budget", budget(level, t)) : Map.of("enable_thinking", false);
+            case "TYPE" -> Map.of("thinking", Map.of("type", on ? "enabled" : "disabled"));
+            case "OPENAI" -> Map.of("reasoning_effort", on ? switch (level) {
+                case "LOW" -> "low";
+                case "HIGH" -> "high";
+                default -> "medium";
+            } : "minimal");
+            case "CUSTOM" -> on || !hasOff ? Map.of() : provider.getNoThinking();
+            default -> Map.of();
+        };
+    }
+
+    /** 思考预算（Token）：低 1024、中 4096、高 16384，自定义用后台填的 */
+    private static int budget(String level, LlmCatalog.Thinking t) {
+        return switch (level) {
+            case "LOW" -> 1024;
+            case "HIGH" -> 16384;
+            case "CUSTOM" -> t != null && t.budget() != null ? t.budget() : 4096;
+            default -> 4096;
+        };
     }
 
     /**
@@ -172,13 +216,11 @@ public class ChatModelRegistry {
      */
     public String ping(ModelSpec spec) {
         LifeProperties.Provider provider = provider(spec.provider());
-        ChatOptions options = provider != null && "openai".equals(provider.getType()) && provider.getNoThinking() != null
-                && !provider.getNoThinking().isEmpty()
-                ? OpenAiChatOptions.builder().model(spec.model()).maxTokens(200).extraBody(provider.getNoThinking()).build()
-                : ToolCallingChatOptions.builder().model(spec.model()).maxTokens(200).build();
+        Map<String, Object> off = thinkingParams(spec, true);
+        ChatOptions options = ToolCallingChatOptions.builder().model(spec.model()).maxTokens(200).build();
         // 只试一次：默认的重试要好几分钟才报错，测试时直接看到原因更有用
-        ChatClient once = ChatClient.builder(createModel(spec.provider(),
-                RetryTemplate.builder().maxAttempts(1).build())).build();
+        ChatClient once = ChatClient.builder(createModel(spec.provider(), RetryTemplate.builder().maxAttempts(1).build(),
+                provider != null && "openai".equals(provider.getType()) && !off.isEmpty() ? off : null)).build();
         return once.prompt().user("请只回复两个字：你好").options(options).call().content();
     }
 
@@ -238,11 +280,12 @@ public class ChatModelRegistry {
 
     /** 按提供方类型创建 ChatModel，用默认的重试策略。 */
     ChatModel createModel(String name) {
-        return createModel(name, null);
+        return createModel(name, null, null);
     }
 
     /** 按提供方类型创建 ChatModel：dashscope 走百炼原生接口，openai 走 OpenAI 兼容接口；retry 为空用默认重试。 */
-    ChatModel createModel(String name, RetryTemplate retry) {
+    /** extraBody 是每次请求都带的附加参数（思考开关），只对 OpenAI 兼容接口有效，可为空。 */
+    ChatModel createModel(String name, RetryTemplate retry, Map<String, Object> extraBody) {
         LifeProperties.Provider provider = provider(name);
         if (provider == null) {
             throw new BizException(ErrorCode.INTERNAL, "没有配置模型提供方 " + name + "，到后台的模型配置里加上");
@@ -278,6 +321,10 @@ public class ChatModelRegistry {
                 }
                 if (hasText(provider.getCompletionsPath())) {
                     api.completionsPath(provider.getCompletionsPath());
+                }
+                if (extraBody != null && !extraBody.isEmpty()) {
+                    // 思考开关等附加参数在序列化请求体时写进去（Spring AI 自己的 extraBody 发不出去）
+                    api.restClientBuilder(ExtraBodyClients.restClient(extraBody)).webClientBuilder(ExtraBodyClients.webClient(extraBody));
                 }
                 OpenAiChatModel.Builder model = OpenAiChatModel.builder().openAiApi(api.build())
                         .toolCallingManager(toolCallingManager);

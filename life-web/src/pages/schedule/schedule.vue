@@ -1,6 +1,9 @@
 <template>
-  <Shell active="schedule">
-  <view class="container">
+  <Shell :active="tab === 'trips' ? 'trips' : 'schedule'">
+  <view class="page-wrap arrange">
+    <ArrangeTabs v-model="tab" />
+    <TripsView v-if="tab === 'trips'" ref="tripsView" />
+    <template v-else>
     <view class="top">
       <text class="muted">未来 60 天</text>
       <button class="btn small" @click="showForm = !showForm">{{ showForm ? "收起" : "新建日程" }}</button>
@@ -43,6 +46,7 @@
         </view>
       </view>
     </view>
+    </template>
   </view>
 
   <view v-if="detail" class="sheet-mask" @click.self="closeDetail">
@@ -70,12 +74,14 @@
 
 <script setup lang="ts">
 import Shell from "../../components/Shell.vue";
-import { computed, reactive, ref } from "vue";
-import { onShow } from "@dcloudio/uni-app";
+import { computed, reactive, ref, watch } from "vue";
+import { onLoad, onShow } from "@dcloudio/uni-app";
 import { api } from "../../api";
 import { showError } from "../../api/http";
 import type { AgendaEntry, ScheduleEvent } from "../../api/types";
 import Icon from "../../components/Icon.vue";
+import ArrangeTabs from "../../components/ArrangeTabs.vue";
+import TripsView from "../../components/TripsView.vue";
 import { dayLabel, hm, toOffsetIso, ymd } from "../../utils/format";
 import { currentCity } from "../../utils/place";
 import { canGo, leaveText, navigate, searchPlace, takePendingEvent, takeTaxi, taxiText } from "../../utils/today";
@@ -113,7 +119,27 @@ const detail = ref<ScheduleEvent | null>(null);
 const detailEntry = ref<AgendaEntry | null>(null);
 const city = currentCity();
 
-onShow(load);
+/** 「我的安排」当前标签：日程或行程；链接带 ?tab=trips 时直接看行程 */
+const tab = ref<"schedule" | "trips">("schedule");
+const tripsView = ref<InstanceType<typeof TripsView> | null>(null);
+let shown = false;
+
+onLoad((q) => {
+  if (q?.tab === "trips") tab.value = "trips";
+  if (q?.new) showForm.value = true;
+});
+
+// 回到页面时刷新当前标签（第一次由各自加载）
+onShow(() => {
+  if (tab.value === "trips") {
+    if (shown) tripsView.value?.load();
+  } else load();
+  shown = true;
+});
+
+watch(tab, (t) => {
+  if (t === "schedule" && !loaded.value) load();
+});
 
 /** 读今天起 60 天内的日程；首页点了某一项进来的，读完打开它的详情。 */
 async function load() {

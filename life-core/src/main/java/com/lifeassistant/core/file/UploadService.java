@@ -130,6 +130,11 @@ public class UploadService {
         return new Opened(row.getName(), UploadKind.mime(row.getName()), storage.get(row.getStorageKey()));
     }
 
+    /** 校验文件是这个用户上传的，返回文件名（行程预订挂凭证时用）；不是或不存在报"文件不存在"。 */
+    public String ownedName(Long userId, String id) {
+        return owned(userId, id).getName();
+    }
+
     /** 打开的原文件。 */
     public record Opened(String name, String mime, InputStream content) {
     }

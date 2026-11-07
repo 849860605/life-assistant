@@ -89,7 +89,7 @@ public class AlipayCallbackController {
               <div id="detail" class="muted"></div>
               <div class="muted">最终结果以支付宝通知和服务端查询为准</div>
               <button id="retry" type="button" hidden>重新查询</button>
-              <div><a class="btn" href="{{APP_PAGE}}">回到星络</a></div>
+              <div><a id="back" class="btn" href="{{APP_PAGE}}">回到星络</a></div>
             </div>
             <script>
             (function () {
@@ -104,8 +104,15 @@ public class AlipayCallbackController {
               var stateEl = document.getElementById("state");
               var detailEl = document.getElementById("detail");
               var retry = document.getElementById("retry");
+              var back = document.getElementById("back");
+              var appPage = back.getAttribute("href");
               var params = {};
               new URLSearchParams(window.location.search).forEach(function (v, k) { params[k] = v; });
+              // 回到会员页时带上订单号，会员页按它向服务端确认这一笔的结果
+              function backTo(no) {
+                if (no) back.href = appPage + (appPage.indexOf("?") >= 0 ? "&" : "?") + "order=" + encodeURIComponent(no);
+              }
+              backTo(params.out_trade_no);
               function show(view) {
                 var label = labels[view.state] || labels.UNKNOWN;
                 stateEl.textContent = label[0];
@@ -113,6 +120,7 @@ public class AlipayCallbackController {
                 var lines = [];
                 if (view.subject) lines.push(view.subject + (view.totalAmount ? "，" + view.totalAmount + " 元" : ""));
                 if (view.outTradeNo) lines.push("订单号 " + view.outTradeNo);
+                backTo(view.outTradeNo);
                 if (view.message) lines.push(view.message);
                 detailEl.textContent = lines.join("　");
                 retry.hidden = !(view.state === "PENDING_PAYMENT" || view.state === "UNKNOWN");

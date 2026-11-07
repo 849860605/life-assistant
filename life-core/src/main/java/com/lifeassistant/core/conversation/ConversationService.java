@@ -6,6 +6,7 @@ import com.lifeassistant.common.auth.UserCtx;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lifeassistant.common.error.BizException;
+import com.lifeassistant.common.error.ErrorCode;
 import com.lifeassistant.core.card.Card;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -54,10 +55,50 @@ public class ConversationService {
 
     /** 当前用户的会话，按更新时间倒序，limit 限制在 1–100。 */
     public List<Conversation> list(UserCtx ctx, int limit) {
-        return conversationMapper.selectList(new LambdaQueryWrapper<Conversation>()
-                .eq(Conversation::getUserId, ctx.userId())
-                .orderByDesc(Conversation::getUpdatedAt)
-                .last("LIMIT " + Math.min(Math.max(limit, 1), 100)));
+        return list(ctx, limit, null);
+    }
+
+    /**
+     * 当前用户的会话，按更新时间倒序，limit 限制在 1–100；keyword 不为空时只要标题或消息内容里包含它的
+     * （不区分大小写，% 和 _ 按普通字符处理）。
+     */
+    public List<Conversation> list(UserCtx ctx, int limit, String keyword) {
+        LambdaQueryWrapper<Conversation> query = new LambdaQueryWrapper<Conversation>()
+                .eq(Conversation::getUserId, ctx.userId());
+        if (keyword != null && !keyword.isBlank()) {
+            String pattern = "%" + keyword.trim().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%";
+            query.and(w -> w.apply("title ILIKE {0}", pattern)
+                    .or().apply("EXISTS (SELECT 1 FROM t_chat_message m WHERE m.conversation_id = t_conversation.id"
+                            + " AND m.content ILIKE {0})", pattern));
+        }
+        // 置顶的在前（按置顶时间倒序），其余按更新时间倒序
+        return conversationMapper.selectList(query
+                .last("ORDER BY pinned_at DESC NULLS LAST, updated_at DESC LIMIT " + Math.min(Math.max(limit, 1), 100)));
+    }
+
+    /** 校验归属后置顶或取消置顶。 */
+    public Conversation pin(UserCtx ctx, String conversationId, boolean pinned) {
+        Conversation conversation = getOwned(ctx, conversationId);
+        OffsetDateTime at = pinned ? OffsetDateTime.now() : null;
+        conversationMapper.update(new LambdaUpdateWrapper<Conversation>()
+                .eq(Conversation::getId, conversationId)
+                .set(Conversation::getPinnedAt, at));
+        conversation.setPinnedAt(at);
+        return conversation;
+    }
+
+    /** 校验归属后改会话标题，去掉首尾空白，1–60 个字。 */
+    public Conversation rename(UserCtx ctx, String conversationId, String title) {
+        Conversation conversation = getOwned(ctx, conversationId);
+        String clean = title == null ? "" : title.trim();
+        if (clean.isEmpty() || clean.length() > 60) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "标题要 1 到 60 个字");
+        }
+        conversationMapper.update(new LambdaUpdateWrapper<Conversation>()
+                .eq(Conversation::getId, conversationId)
+                .set(Conversation::getTitle, clean));
+        conversation.setTitle(clean);
+        return conversation;
     }
 
     /** 校验归属后取会话最近的消息，limit 限制在 1–500。 */

@@ -62,7 +62,7 @@ public class SkillRunner {
         tools.add(memoryTools);
         AtomicReference<ChatResponse> last = new AtomicReference<>();
 
-        return chatModels.client(model).prompt()
+        return chatModels.chatClient(model).prompt()
                 .system(systemPrompt(skill, ctx))
                 .user(input)
                 .options(ChatModelRegistry.options(model, null))

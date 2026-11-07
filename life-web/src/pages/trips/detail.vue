@@ -3,21 +3,24 @@
   <view v-if="wide && days.length" class="editor">
     <view class="ed-head">
       <view class="back" @click="goBack"><Icon name="back" :size="22" color="var(--ink)" /></view>
-      <text class="ed-title">{{ trip?.title }} 行程编辑</text>
-      <text class="tag" :class="trip?.status === 'DRAFT' ? '' : 'ok'">{{ trip?.status === "DRAFT" ? "草稿" : "已确认" }}</text>
+      <text class="ed-title">{{ trip?.title }}</text>
+      <text class="tag" :class="trip?.status === 'DRAFT' ? '' : 'ok'">{{ trip?.status === "DRAFT" ? "方案 · 未保存" : "已保存的行程" }}</text>
       <text v-if="!isCurrent" class="tag">正在看第 {{ detail?.version.version }} 版</text>
       <button v-if="!isCurrent" class="btn small" @click="useVersion">用这一版</button>
       <button v-if="versions.length > 1" class="btn danger small" @click="removeVersion">删除第 {{ detail?.version.version }} 版</button>
       <view class="ed-actions">
-        <view class="ghost-act" @click="notYet('分享')"><Icon name="send" :size="15" color="var(--ink)" />分享</view>
+        <FavButton v-if="trip?.status === 'DRAFT'" :item="planFav" label="收藏方案" />
+        <view class="ghost-act" @click="openInfo"><Icon name="more" :size="15" color="var(--ink)" />编辑</view>
+        <view class="ghost-act" @click="share"><Icon name="send" :size="15" color="var(--ink)" />分享</view>
         <view class="ghost-act" @click="downloadPdf"><Icon name="layers" :size="15" color="var(--ink)" />下载PDF</view>
         <button class="btn ghost small" @click="changeNeeds">修改需求</button>
-        <button v-if="trip?.status === 'DRAFT'" class="btn small" @click="confirmTrip">确认行程</button>
+        <button v-if="trip?.status === 'DRAFT'" class="btn small" @click="confirmTrip">保存为行程</button>
       </view>
     </view>
     <view class="ed-chips">
       <view class="ed-chip"><Icon name="calendar" :size="15" color="var(--accent)" />{{ cnDate(trip?.startDate) }} – {{ cnDate(trip?.endDate) }}（{{ days.length }}天{{ Math.max(days.length - 1, 0) }}晚）</view>
       <view v-if="trip?.destination" class="ed-chip"><Icon name="pin" :size="15" color="var(--accent)" />{{ trip.destination }}</view>
+      <view class="ed-chip" @click="openInfo"><Icon name="users" :size="15" color="var(--accent)" />{{ trip?.people ? `${trip.people} 人` : "人数未填" }}</view>
       <view class="ed-chip"><Icon name="wallet" :size="15" color="var(--accent)" />景点餐饮约 ¥{{ totalCost }}/人<text v-if="stayCost"> · 住宿约 ¥{{ stayCost }}/间</text></view>
       <view v-if="versions.length > 1" class="ed-chip ver-chip">
         <text class="muted">版本</text>
@@ -35,15 +38,18 @@
       <text class="saved-link" @click="go(`/pages/plan/updated?id=${tripId}&from=${saved.from}&to=${saved.to}`)">查看前后对比 ›</text>
       <view class="saved-x" @click="saved = null"><Icon name="close" :size="14" color="var(--muted)" /></view>
     </view>
+    <view v-if="trip?.status === 'DRAFT'" class="notice warn draft-note">这是星络生成的方案，还没保存为行程。可以先调整，满意了点「保存为行程」。</view>
+    <view class="ttabs" role="tablist">
+      <view v-for="t in TTABS" :key="t.key" class="ttab" :class="{ on: ttab === t.key }" role="tab" @click="setTab(t.key)">{{ t.label }}</view>
+    </view>
 
-    <view class="ed-cols">
+    <view v-if="ttab === 'schedule'" class="ed-cols">
       <!-- 左：当天时间线 -->
       <view class="ed-left">
         <view class="ed-days">
           <view v-for="(d, i) in days" :key="d.date" class="ed-day" :class="{ on: i === dayIndex }" @click="dayIndex = i">
             <text class="ed-day-no">D{{ i + 1 }}</text><text class="ed-day-date">{{ shortDate(d.date) }}</text>
           </view>
-          <view class="add-day" @click="notYet('添加一天')"><Icon name="plus" :size="14" color="var(--accent)" />添加一天</view>
         </view>
         <view class="day-h">
           <text class="day-h-no">D{{ dayIndex + 1 }}</text>
@@ -217,6 +223,8 @@
         </view>
       </view>
     </view>
+    <TripExpenses v-else-if="ttab === 'expense' && trip" :trip="trip" :estimate="{ perPerson: totalCost, stayPerRoom: stayCost }" @edit-info="openInfo" />
+    <TripBookings v-else-if="trip" :trip-id="tripId" />
 
     <ReplaceModal v-if="replacing" :trip-id="tripId" :item="replacing" :day-no="dayIndex + 1" :reason="replaceReason" :city="city" :check-in="replaceDates[0]" :check-out="replaceDates[1]" @close="replacing = null" @saved="onSaved" />
   </view>
@@ -225,11 +233,17 @@
     <view v-if="trip" class="head">
       <view class="title-row">
         <text class="title">{{ trip.title }}</text>
-        <text class="tag" :class="trip.status === 'DRAFT' ? '' : 'ok'">{{ trip.status === "DRAFT" ? "草稿" : "已确认" }}</text>
+        <text class="tag" :class="trip.status === 'DRAFT' ? '' : 'ok'">{{ trip.status === "DRAFT" ? "方案 · 未保存" : "已保存" }}</text>
         <text v-if="!isCurrent" class="tag">正在看第 {{ detail?.version.version }} 版</text>
       </view>
-      <view class="meta">{{ trip.destination }} · {{ cnDate(trip.startDate) }} – {{ cnDate(trip.endDate) }}</view>
-      <view class="m-pdf" @click="downloadPdf"><Icon name="layers" :size="14" color="var(--accent)" />导出 PDF</view>
+      <view class="meta">{{ trip.destination }} · {{ cnDate(trip.startDate) }} – {{ cnDate(trip.endDate) }}{{ trip.people ? ` · ${trip.people} 人` : "" }}</view>
+      <view class="m-acts">
+        <FavButton v-if="trip.status === 'DRAFT'" :item="planFav" label="收藏方案" />
+        <text class="m-pdf" @click="openInfo">编辑</text>
+        <text class="m-pdf" @click="share">分享</text>
+        <text class="m-pdf" @click="downloadPdf">导出 PDF</text>
+      </view>
+      <view v-if="trip.status === 'DRAFT'" class="notice warn">这是星络生成的方案，还没保存为行程。</view>
     </view>
     <view v-if="saved" class="saved">
       <Icon name="checkCircle" :size="16" color="var(--ok)" />
@@ -238,11 +252,16 @@
       <view class="saved-x" @click="saved = null"><Icon name="close" :size="14" color="var(--muted)" /></view>
     </view>
 
-    <view class="tabs">
-      <text v-for="t in TABS" :key="t" class="tab" :class="{ active: tab === t }" @click="switchTab(t)">{{ t }}</text>
+    <view class="ttabs m-ttabs" role="tablist">
+      <view v-for="t in TTABS" :key="t.key" class="ttab" :class="{ on: ttab === t.key }" role="tab" @click="setTab(t.key)">{{ t.label }}</view>
     </view>
+    <TripExpenses v-if="ttab === 'expense' && trip" :trip="trip" :estimate="{ perPerson: totalCost, stayPerRoom: stayCost }" @edit-info="openInfo" />
+    <TripBookings v-else-if="ttab === 'booking' && trip" :trip-id="tripId" />
 
-    <template v-if="days.length">
+    <template v-if="days.length && ttab === 'schedule'">
+      <view class="m-links">
+        <text v-for="t in SHORTCUTS" :key="t" class="m-link" @click="switchTab(t)">{{ t }}</text>
+      </view>
       <scroll-view scroll-x class="days">
         <view class="days-inner">
           <view v-for="(d, i) in days" :key="d.date" class="day-tab" :class="{ active: i === dayIndex }" @click="dayIndex = i">
@@ -252,7 +271,7 @@
         </view>
       </scroll-view>
 
-      <view v-if="tab === '行程总览' && day" class="timeline">
+      <view v-if="day" class="timeline">
         <view v-if="isCurrent" class="m-mode">
           <text class="muted small">出行方式</text>
           <view class="m-mode-seg"><text v-for="m in MODES" :key="m.v" class="m-mode-item" :class="{ on: transport === m.v }" @click="setTransport(m.v)">{{ m.label }}</text></view>
@@ -312,28 +331,12 @@
         </view>
       </view>
 
-      <view v-if="tab === '费用明细'" class="costs">
-        <view v-for="(d, i) in days" :key="d.date" class="cost-day">
-          <view class="cost-day-head"><text>D{{ i + 1 }} · {{ shortDate(d.date) }}</text><text class="price">¥{{ dayCost(d) }}</text></view>
-          <view v-for="item in d.items.filter((x) => x.cost)" :key="item.id" class="cost-row">
-            <text>{{ item.name }}</text><text class="muted">¥{{ item.cost }}</text>
-          </view>
-        </view>
-        <view class="cost-total"><text>景点和餐饮合计（每人）</text><text class="price big">¥{{ totalCost }}</text></view>
-        <view v-for="st in stays" :key="st.id" class="cost-row">
-          <text>住宿 · {{ st.name }}（{{ nightsOf(st) }} 晚）</text>
-          <text class="muted">{{ st.price ? `¥${st.price} × ${nightsOf(st)} = ¥${st.price * nightsOf(st)}` : "暂无价格" }}</text>
-        </view>
-        <view v-if="stayCost" class="cost-total"><text>住宿合计（每间）</text><text class="price big">¥{{ stayCost }}</text></view>
-        <view class="muted small">不含机票；住宿是比价时的每晚最低价，以预订页为准。</view>
-      </view>
-
-      <view v-if="tips && tab === '行程总览'" class="tips">
+      <view v-if="tips" class="tips">
         <view class="tips-title">注意事项</view>
         <MarkdownView :text="tips" />
       </view>
     </template>
-    <view v-else-if="detail" class="card body">
+    <view v-else-if="detail && ttab === 'schedule'" class="card body">
       <MarkdownView :text="detail.version.content || ''" />
     </view>
 
@@ -355,9 +358,29 @@
 
     <view v-if="trip" class="bottom">
       <button v-if="!isCurrent" class="btn" @click="useVersion">用这一版</button>
-      <button v-else-if="trip.status === 'DRAFT'" class="btn" @click="confirmTrip">确认这个行程</button>
+      <button v-else-if="trip.status === 'DRAFT'" class="btn" @click="confirmTrip">保存为行程</button>
       <button v-if="versions.length > 1" class="btn danger" @click="removeVersion">删除第 {{ detail?.version.version }} 版</button>
       <button v-else class="btn danger" @click="removeTrip">删除行程</button>
+    </view>
+  </view>
+  <view v-if="info" class="info-mask" @click.self="info = null">
+    <view class="info-sheet" role="dialog" aria-label="编辑行程信息">
+      <view class="info-title">编辑行程信息</view>
+      <view class="info-field"><text class="info-label">名称</text><input id="trip-title" v-model="info.title" class="input" maxlength="60" /></view>
+      <view class="info-row">
+        <view class="info-field"><text class="info-label">人数</text><input id="trip-people" v-model="info.people" class="input" type="number" maxlength="2" placeholder="可不填" /></view>
+        <view class="info-field grow"><text class="info-label">总预算</text><input id="trip-budget" v-model="info.budget" class="input" type="digit" placeholder="可不填" /></view>
+        <view class="info-field">
+          <text class="info-label">币种</text>
+          <picker :range="CURRENCIES" :value="CURRENCIES.indexOf(info.currency)" @change="info.currency = CURRENCIES[Number($event.detail.value)]"><view class="input info-picker">{{ info.currency }}</view></picker>
+        </view>
+      </view>
+      <view class="muted small">日期和每天的安排在对话里让星络改，或者用"修改需求"。</view>
+      <view v-if="infoError" class="info-err">{{ infoError }}</view>
+      <view class="info-acts">
+        <button class="btn ghost" @click="info = null">取消</button>
+        <button class="btn" :disabled="infoSaving" @click="saveInfo">{{ infoSaving ? "保存中…" : "保存" }}</button>
+      </view>
     </view>
   </view>
   </Shell>
@@ -376,6 +399,10 @@ import ReplaceModal from "../../components/ReplaceModal.vue";
 import StayCard from "../../components/StayCard.vue";
 import LegRow from "../../components/LegRow.vue";
 import Shell from "../../components/Shell.vue";
+import TripBookings from "../../components/TripBookings.vue";
+import FavButton from "../../components/FavButton.vue";
+import TripExpenses from "../../components/TripExpenses.vue";
+import { CURRENCIES } from "../../utils/money";
 import { useWide } from "../../utils/screen";
 import { doneable, doneText, hm, mdw, openUrl, shortDate } from "../../utils/format";
 import { hotelPrice, loadHotelPrices, priceText, stayDates, type HotelPrice } from "../../utils/hotelPrice";
@@ -386,7 +413,15 @@ import { amapNavUrl, amapUrl, cityOf, dayMapUrl, dayTravel, distanceText, durati
  * 行程详情（原型④）：按天切换的时间线，每项可以保留、换一个、不感兴趣，改完存成新版本。
  * 坐标、照片、路程由后端从高德补；电脑上中栏和右栏的美食、酒店、附近景点按当天第一个景点的位置从高德查。
  */
-const TABS = ["行程总览", "地图路线", "美食推荐", "机票比价", "景点门票", "费用明细"];
+/** 固定三个标签：日程、费用、预订信息；当前标签写在链接里（?tab=），刷新、返回、分享链接都能回到同一个 */
+const TTABS = [
+  { key: "schedule", label: "日程" },
+  { key: "expense", label: "费用" },
+  { key: "booking", label: "预订信息" },
+] as const;
+type TripTab = (typeof TTABS)[number]["key"];
+/** 手机上日程标签里的快捷入口：地图、美食、机票、门票（各自是单独的页面） */
+const SHORTCUTS = ["地图路线", "美食推荐", "机票比价", "景点门票"];
 const TYPE_ICON: Record<string, string> = { SPOT: "pin", FOOD: "food", HOTEL: "bed", TRANSPORT: "car", FREE: "sparkle" };
 /** 这些类型能保留、换、删；交通和自由活动不能 */
 const EDITABLE = ["SPOT", "FOOD", "HOTEL"];
@@ -400,6 +435,11 @@ const detail = ref<TripDetail | null>(null);
 const versions = ref<TripVersion[]>([]);
 const events = ref<ScheduleEvent[]>([]);
 const tab = ref("行程总览");
+const ttab = ref<TripTab>("schedule");
+/** 编辑行程信息（名称、人数、预算）的表单 */
+const info = ref<{ title: string; people: string; budget: string; currency: string } | null>(null);
+const infoError = ref("");
+const infoSaving = ref(false);
 const dayIndex = ref(0);
 const wide = useWide();
 const rightTab = ref("map");
@@ -419,6 +459,14 @@ const broken = reactive<Record<string, boolean>>({});
 let loaded = false;
 
 const trip = computed(() => detail.value?.trip);
+/** 收藏方案用的信息（只是收藏，不等于保存为行程） */
+const planFav = computed(() => ({
+  kind: "PLAN" as const,
+  refKey: `trip:${tripId.value}`,
+  title: trip.value?.title || "方案",
+  subtitle: trip.value?.startDate ? `${cnDate(trip.value.startDate)} – ${cnDate(trip.value.endDate)}` : null,
+  city: trip.value?.destination || null,
+}));
 /** 行程所在城市，没有坐标的地点在高德里按名称搜时用 */
 const city = computed(() => cityOf(trip.value?.destination));
 /** 只有当前版本能改；看历史版本时隐藏操作按钮 */
@@ -578,6 +626,7 @@ const suggestions = computed(() => {
 
 onLoad(async (query) => {
   tripId.value = Number(query?.id);
+  if (TTABS.some((t) => t.key === query?.tab)) ttab.value = query!.tab as TripTab;
   if (!tripId.value) {
     uni.redirectTo({ url: "/pages/trips/trips" });
     return;
@@ -643,8 +692,56 @@ function goBack() {
   else uni.reLaunch({ url: "/pages/trips/trips" });
 }
 
-function notYet(what: string) {
-  uni.showToast({ title: `${what}还没接入`, icon: "none" });
+/** 切换标签，并把它写进地址栏（替换当前记录），刷新或复制链接都停在这个标签 */
+function setTab(t: TripTab) {
+  ttab.value = t;
+  // #ifdef H5
+  const url = `#/pages/trips/detail?id=${tripId.value}${t === "schedule" ? "" : `&tab=${t}`}`;
+  history.replaceState(history.state, "", url);
+  // #endif
+}
+
+function openInfo() {
+  const t = trip.value;
+  if (!t) return;
+  infoError.value = "";
+  info.value = { title: t.title, people: t.people ? String(t.people) : "", budget: t.budget != null ? String(t.budget) : "", currency: t.budgetCurrency || "CNY" };
+}
+
+async function saveInfo() {
+  const f = info.value;
+  if (!f) return;
+  if (!f.title.trim()) return void (infoError.value = "请填写名称");
+  if (f.people.trim() && !/^\d{1,2}$/.test(f.people.trim())) return void (infoError.value = "人数填 1 到 99");
+  if (f.budget.trim() && !/^\d+(\.\d{1,2})?$/.test(f.budget.trim())) return void (infoError.value = "预算填数字，最多两位小数");
+  infoSaving.value = true;
+  try {
+    detail.value!.trip = await api.updateTripInfo(tripId.value, {
+      title: f.title.trim(), people: f.people.trim() ? Number(f.people) : null, budget: f.budget.trim() || null, budgetCurrency: f.currency,
+    });
+    info.value = null;
+    uni.showToast({ title: "已保存", icon: "none" });
+  } catch (e) {
+    infoError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    infoSaving.value = false;
+  }
+}
+
+/** 分享：把行程整理成一段文字复制下来，发给同行的人（没有公开链接，别人看不到你的账号数据） */
+function share() {
+  const t = trip.value;
+  if (!t) return;
+  const lines = [`${t.title}`, `${cnDate(t.startDate)} – ${cnDate(t.endDate)}${t.people ? ` · ${t.people} 人` : ""}${t.destination ? ` · ${t.destination}` : ""}`];
+  days.value.forEach((d, i) => {
+    lines.push("", `D${i + 1} ${cnDate(d.date)}${d.theme ? ` ${d.theme}` : ""}`);
+    for (const it of d.items) if (it.type !== "TRANSPORT") lines.push(`${it.start || ""} ${it.name}`.trim());
+  });
+  uni.setClipboardData({
+    data: lines.join("\n"),
+    success: () => uni.showToast({ title: "行程已复制，可以粘贴发给同行的人", icon: "none" }),
+    fail: () => uni.showToast({ title: "复制失败", icon: "none" }),
+  });
 }
 
 function changeNeeds() {
@@ -911,7 +1008,7 @@ function eventTime(iso: string) {
 async function confirmTrip() {
   try {
     detail.value!.trip = await api.confirmTrip(tripId.value);
-    uni.showToast({ title: "已确认", icon: "none" });
+    uni.showToast({ title: "已保存为行程", icon: "none" });
   } catch (e) {
     showError(e);
   }
@@ -1007,7 +1104,7 @@ async function loadVersions() {
 
 <style scoped>
 /* ===== 电脑：行程编辑 ===== */
-.editor { padding: 18px 24px 28px; }
+.editor { padding: 18px 24px 28px; max-width: 1440px; margin: 0 auto; box-sizing: border-box; }
 .ed-head { display: flex; align-items: center; gap: 10px; }
 .back { cursor: pointer; padding: 4px; }
 .ed-title { font-size: 24px; font-weight: 800; }
@@ -1113,7 +1210,7 @@ async function loadVersions() {
 .times { display: flex; flex-direction: column; gap: 6px; }
 .time-row { display: flex; gap: 12px; font-size: 14px; }
 .time-k { color: var(--accent); font-variant-numeric: tabular-nums; width: 96px; flex-shrink: 0; }
-.near-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+.near-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
 .near-img { width: 100%; height: 70px; border-radius: 8px; }
 .near-name { font-weight: 700; font-size: 13px; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .near-meta { font-size: 11px; color: var(--muted); }
@@ -1249,4 +1346,29 @@ async function loadVersions() {
 .done-btn.on { border-color: transparent; background: var(--ok-soft); color: var(--ok); font-weight: 600; }
 .booked-tag { margin-left: 6px; font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 999px; background: var(--ok-soft); color: var(--ok); }
 .a.book.on, .act.book.on { background: var(--ok-soft); border-color: var(--ok); color: var(--ok); }
+
+/* 三个固定标签：日程 / 费用 / 预订信息 */
+.ttabs { display: flex; gap: 28px; border-bottom: 1px solid var(--line); margin: 4px 0 16px; }
+.ttab { padding: 10px 0; font-size: 15px; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.ttab.on { color: var(--ink); font-weight: 600; border-bottom-color: var(--ink); }
+.draft-note { margin-bottom: 8px; }
+.m-ttabs { margin: 12px 0; }
+.m-acts { display: flex; gap: 16px; }
+.m-links { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.m-link { font-size: 13px; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+.info-mask { position: fixed; inset: 0; z-index: 100; background: rgba(0, 0, 0, 0.3); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.info-sheet { width: 100%; max-width: 480px; background: var(--surface); border-radius: 14px; padding: 20px; display: flex; flex-direction: column; gap: 14px; box-sizing: border-box; }
+.info-title { font-size: 16px; font-weight: 600; }
+.info-row { display: flex; gap: 12px; }
+.info-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.info-field.grow { flex: 1; }
+.info-label { font-size: 13px; color: var(--muted); }
+.info-picker { display: flex; align-items: center; min-width: 72px; }
+.info-err { font-size: 13px; color: var(--danger); }
+.info-acts { display: flex; justify-content: flex-end; gap: 10px; }
+.info-acts .btn { margin: 0; }
+@media (max-width: 1023px) {
+  .info-mask { align-items: flex-end; padding: 0; }
+  .info-sheet { max-width: none; border-radius: 14px 14px 0 0; padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px)); }
+}
 </style>

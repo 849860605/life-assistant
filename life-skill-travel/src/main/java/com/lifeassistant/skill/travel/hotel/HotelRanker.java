@@ -147,9 +147,9 @@ public class HotelRanker {
         }
         try {
             ModelSpec model = chatModels.resolve(chatModels.models().getRouter());
-            ResponseEntity<ChatResponse, Matches> response = chatModels.client(model).prompt()
+            ResponseEntity<ChatResponse, Matches> response = chatModels.quickClient(model).prompt()
                     .system(PROMPT).user(user.toString())
-                    .options(chatModels.quickOptions(model, 0.0))
+                    .options(ChatModelRegistry.options(model, 0.0))
                     .call().responseEntity(Matches.class);
             CallRecorder.Scope scope = CallRecorder.current();
             if (response.response() != null) {

@@ -348,7 +348,7 @@ public class TripFood {
                 用户的偏好记忆：%s""".formatted(city, day.date(), items, meal.label, prefs.isEmpty() ? "无" : prefs);
         try {
             ModelSpec model = chatModels.resolve(chatModels.models().getRouter());
-            ResponseEntity<ChatResponse, FoodIntent> response = chatModels.client(model).prompt()
+            ResponseEntity<ChatResponse, FoodIntent> response = chatModels.quickClient(model).prompt()
                     .system(system)
                     .user(text)
                     .options(ChatModelRegistry.options(model, 0.0))

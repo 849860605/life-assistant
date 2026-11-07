@@ -37,6 +37,8 @@ export interface Conversation {
   skillId: string | null;
   createdAt: string;
   updatedAt: string;
+  /** 置顶时间，为空表示没置顶 */
+  pinnedAt?: string | null;
 }
 
 export interface ChatMessage {
@@ -88,6 +90,72 @@ export interface Trip {
   currentVer: number;
   status: "DRAFT" | "CONFIRMED" | "FINISHED";
   updatedAt: string;
+  /** 出行人数、总预算（用户填，可空） */
+  people?: number | null;
+  budget?: number | null;
+  budgetCurrency?: string;
+}
+
+/** 行程的一条预订：source 是来源（手动录入 / 凭证导入 / 平台同步），status 是用户标记的状态 */
+export interface TripBooking {
+  id: number;
+  tripId: number;
+  kind: "FLIGHT" | "HOTEL" | "TICKET" | "OTHER";
+  title: string;
+  platform?: string | null;
+  startAt?: string | null;
+  endAt?: string | null;
+  people?: number | null;
+  amount?: number | null;
+  currency: string;
+  bookingNo?: string | null;
+  location?: string | null;
+  status: "PLANNED" | "BOOKED" | "CANCELLED";
+  source: "MANUAL" | "IMPORT" | "SYNC";
+  note?: string | null;
+  files: { id: string; name: string | null }[];
+  /** 已经按这条预订记过的那笔支出 */
+  expenseId?: number | null;
+}
+
+/** 行程的一笔实际支出 */
+export interface TripExpense {
+  id: number;
+  tripId: number;
+  category: "TRANSPORT" | "STAY" | "FOOD" | "TICKET" | "SHOPPING" | "OTHER";
+  title: string;
+  amount: number;
+  currency: string;
+  spentOn?: string | null;
+  bookingId?: number | null;
+  note?: string | null;
+}
+
+export interface BookingInput {
+  kind: TripBooking["kind"];
+  title: string;
+  platform?: string | null;
+  startAt?: string | null;
+  endAt?: string | null;
+  people?: number | null;
+  amount?: string | null;
+  currency: string;
+  bookingNo?: string | null;
+  location?: string | null;
+  status: TripBooking["status"];
+  source: "MANUAL" | "IMPORT";
+  fileIds: string[];
+  note?: string | null;
+}
+
+export interface ExpenseInput {
+  category: TripExpense["category"];
+  title: string;
+  amount: string;
+  currency: string;
+  spentOn?: string | null;
+  bookingId?: number | null;
+  note?: string | null;
 }
 
 /** 行程里的一项安排；type 是 SPOT / FOOD / HOTEL / TRANSPORT / FREE。 */
@@ -803,6 +871,10 @@ export interface MembershipView {
 export interface MembershipLog {
   days: number;
   source: "PAY" | "ADMIN";
+  /** 付费记录对应的订单号 */
+  outTradeNo?: string | null;
+  /** 这次变动前的到期时间；为空或早于记录时间说明是开通，否则是续费 */
+  expiresBefore?: string | null;
   expiresAfter: string;
   createdAt: string;
 }
@@ -812,4 +884,25 @@ export interface PayQuery {
   state: "PAID" | "PENDING_PAYMENT" | "CLOSED" | "UNKNOWN";
   message?: string | null;
   order: PayOrder;
+}
+
+/** 一条收藏：kind 是 PLAN 方案 / HOTEL 酒店 / FOOD 美食 / SPOT 景点；refKey 用来判断是不是同一样东西 */
+export interface Favorite {
+  id: number;
+  kind: "PLAN" | "HOTEL" | "FOOD" | "SPOT";
+  refKey: string;
+  title: string;
+  subtitle?: string | null;
+  city?: string | null;
+  url?: string | null;
+  photo?: string | null;
+  createdAt: string;
+}
+
+/** 常用地址：isDefault 的是出发默认地址（首页今日安排按它算几点出发） */
+export interface UserAddress {
+  id: number;
+  label: string;
+  address: string;
+  isDefault: boolean;
 }

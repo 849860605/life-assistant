@@ -156,7 +156,7 @@
 import { computed, onUnmounted, ref } from "vue";
 import { onLoad } from "@dcloudio/uni-app";
 import { api } from "../../api";
-import { setToken } from "../../api/http";
+import { BACK_KEY, setToken } from "../../api/http";
 import { clearMediaTicket } from "../../utils/media";
 import Icon from "../../components/Icon.vue";
 import BrandMark from "../../components/BrandMark.vue";
@@ -312,13 +312,16 @@ async function submit() {
   }
 }
 
-/** 登录或注册成功：保存 token，进入首页 */
+/** 登录或注册成功：保存 token，回到登录前的页面（同一个账号时），否则进首页 */
 function finishLogin(result: { token: string; user: { id: number } }) {
   setToken(result.token);
   // 换了账号，旧的下载票据不能再用
   clearMediaTicket();
+  const sameUser = uni.getStorageSync(LAST_USER_KEY) === String(result.user.id);
   forgetOtherUser(result.user.id);
-  uni.switchTab({ url: "/pages/home/home" });
+  const back = uni.getStorageSync(BACK_KEY) as string;
+  uni.removeStorageSync(BACK_KEY);
+  uni.reLaunch({ url: sameUser && back && back.startsWith("/pages/") ? back : "/pages/home/home" });
 }
 
 const LAST_USER_KEY = "life_last_user";

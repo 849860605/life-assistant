@@ -18,4 +18,11 @@ public interface LlmCatalog {
 
     /** 型号（"提供方:型号"）的单价，没配返回 null。 */
     LifeProperties.Price price(String modelId);
+
+    /** 型号的思考设置，没配返回 null（按关闭处理）。 */
+    Thinking thinking(String modelId);
+
+    /** 思考设置：开不开、深度 LOW / MEDIUM / HIGH / CUSTOM、自定义预算（Token）。 */
+    record Thinking(boolean enabled, String level, Integer budget) {
+    }
 }

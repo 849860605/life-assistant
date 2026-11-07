@@ -48,6 +48,8 @@ public class LlmConfigService implements LlmCatalog, ApplicationRunner {
     public static final List<String> ROLES = List.of(ChatModelRegistry.SKILL, ChatModelRegistry.ROUTER,
             ChatModelRegistry.VISION);
     private static final Set<String> TYPES = Set.of("openai", "dashscope");
+    private static final Set<String> THINKING_STYLES = Set.of("QWEN", "TYPE", "OPENAI", "CUSTOM", "NONE");
+    private static final Set<String> THINKING_LEVELS = Set.of("LOW", "MEDIUM", "HIGH", "CUSTOM");
     /** 导入时给常见提供方起的中文名 */
     private static final Map<String, String> NAMES = Map.of("dashscope", "通义百炼", "deepseek", "DeepSeek",
             "moonshot", "Kimi", "zhipu", "智谱", "doubao", "豆包", "openai", "OpenAI", "dots", "小红书点点");
@@ -69,19 +71,21 @@ public class LlmConfigService implements LlmCatalog, ApplicationRunner {
 
     /** 后台看到的提供方：Key 只给后 4 位。 */
     public record ProviderView(long id, String code, String name, String type, String baseUrl, String completionsPath,
-                               String keyTail, boolean hasKey, String authHeader, String noThinking, boolean enabled,
-                               int sort, long models) {
+                               String keyTail, boolean hasKey, String authHeader, String noThinking, String thinkingStyle,
+                               boolean enabled, int sort, long models) {
     }
 
     /** 新建、修改提供方的内容：apiKey 为空表示不改（新建时就是没有 Key）。 */
     public record ProviderForm(String code, String name, String type, String baseUrl, String completionsPath,
-                               String apiKey, String authHeader, String noThinking, Boolean enabled, Integer sort) {
+                               String apiKey, String authHeader, String noThinking, String thinkingStyle, Boolean enabled,
+                               Integer sort) {
     }
 
     /** 新建、修改模型的内容。 */
     public record ModelForm(String providerCode, String model, String displayName, String description, Boolean enabled,
                             Boolean userSelectable, Boolean supportsTools, BigDecimal priceInput,
-                            BigDecimal priceCachedInput, BigDecimal priceOutput, Integer sort) {
+                            BigDecimal priceCachedInput, BigDecimal priceOutput, Integer sort, Boolean thinking,
+                            String thinkingLevel, Integer thinkingBudget) {
     }
 
     /** App 里可选的一个模型。 */
@@ -123,6 +127,13 @@ public class LlmConfigService implements LlmCatalog, ApplicationRunner {
                     p.setOutput(zero(m.getPriceOutput()));
                     return p;
                 }).orElse(null);
+    }
+
+    @Override
+    public Thinking thinking(String modelId) {
+        return snapshot().models().values().stream().filter(m -> m.spec().equals(modelId)).findFirst()
+                .map(m -> new Thinking(Boolean.TRUE.equals(m.getThinking()), m.getThinkingLevel(), m.getThinkingBudget()))
+                .orElse(null);
     }
 
     // ---------------- 启动导入 ----------------
@@ -203,7 +214,8 @@ public class LlmConfigService implements LlmCatalog, ApplicationRunner {
                     String key = decrypt(p);
                     return new ProviderView(p.getId(), p.getCode(), p.getName(), p.getType(), p.getBaseUrl(),
                             p.getCompletionsPath(), key == null ? null : tail(key), key != null, p.getAuthHeader(),
-                            p.getNoThinking(), Boolean.TRUE.equals(p.getEnabled()), p.getSort() == null ? 0 : p.getSort(),
+                            p.getNoThinking(), p.getThinkingStyle(), Boolean.TRUE.equals(p.getEnabled()),
+                            p.getSort() == null ? 0 : p.getSort(),
                             models.stream().filter(m -> p.getCode().equals(m.getProviderCode())).count());
                 }).toList();
     }
@@ -240,7 +252,8 @@ public class LlmConfigService implements LlmCatalog, ApplicationRunner {
                 .set(LlmProvider::getBaseUrl, row.getBaseUrl())
                 .set(LlmProvider::getCompletionsPath, row.getCompletionsPath())
                 .set(LlmProvider::getAuthHeader, row.getAuthHeader())
-                .set(LlmProvider::getNoThinking, row.getNoThinking()));
+                .set(LlmProvider::getNoThinking, row.getNoThinking())
+                .set(LlmProvider::getThinkingStyle, row.getThinkingStyle()));
         reload();
         return row;
     }
@@ -292,6 +305,8 @@ public class LlmConfigService implements LlmCatalog, ApplicationRunner {
         m.setUserSelectable(false);
         m.setSupportsTools(true);
         m.setSort(0);
+        m.setThinking(false);
+        m.setThinkingLevel("MEDIUM");
         apply(m, form);
         modelMapper.insert(m);
         reload();
@@ -316,7 +331,8 @@ public class LlmConfigService implements LlmCatalog, ApplicationRunner {
                 .set(LlmModel::getDescription, m.getDescription())
                 .set(LlmModel::getPriceInput, m.getPriceInput())
                 .set(LlmModel::getPriceCachedInput, m.getPriceCachedInput())
-                .set(LlmModel::getPriceOutput, m.getPriceOutput()));
+                .set(LlmModel::getPriceOutput, m.getPriceOutput())
+                .set(LlmModel::getThinkingBudget, m.getThinkingBudget()));
         reload();
         return m;
     }
@@ -424,6 +440,7 @@ public class LlmConfigService implements LlmCatalog, ApplicationRunner {
             c.setApiKey(decrypt(p));
             c.setAuthHeader(p.getAuthHeader());
             c.setNoThinking(fromJson(p.getNoThinking()));
+            c.setThinkingStyle(p.getThinkingStyle());
             providers.put(p.getCode(), c);
         }
         Map<Long, LlmModel> models = new LinkedHashMap<>();
@@ -487,6 +504,14 @@ public class LlmConfigService implements LlmCatalog, ApplicationRunner {
             fromJsonStrict(noThinking);
         }
         row.setNoThinking(noThinking);
+        String style = blankToNull(form.thinkingStyle());
+        if (style != null && !THINKING_STYLES.contains(style)) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "思考参数格式不对");
+        }
+        if ("CUSTOM".equals(style) && noThinking == null) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "选了自定义，要填关闭思考时带的参数（JSON）");
+        }
+        row.setThinkingStyle(style);
         if (StringUtils.hasText(form.apiKey())) {
             row.setApiKeyEnc(cipher.encrypt(form.apiKey().trim()));
         }
@@ -524,6 +549,24 @@ public class LlmConfigService implements LlmCatalog, ApplicationRunner {
         m.setPriceOutput(form.priceOutput());
         if (form.sort() != null) {
             m.setSort(form.sort());
+        }
+        if (form.thinking() != null) {
+            m.setThinking(form.thinking());
+        }
+        if (form.thinkingLevel() != null) {
+            if (!THINKING_LEVELS.contains(form.thinkingLevel())) {
+                throw new BizException(ErrorCode.BAD_REQUEST, "思考深度只能是低、中、高或自定义");
+            }
+            m.setThinkingLevel(form.thinkingLevel());
+        }
+        if ("CUSTOM".equals(m.getThinkingLevel())) {
+            Integer budget = form.thinkingBudget() != null ? form.thinkingBudget() : m.getThinkingBudget();
+            if (budget == null || budget < 128 || budget > 81920) {
+                throw new BizException(ErrorCode.BAD_REQUEST, "自定义思考预算要在 128 到 81920 Token 之间");
+            }
+            m.setThinkingBudget(budget);
+        } else {
+            m.setThinkingBudget(null);
         }
     }
 

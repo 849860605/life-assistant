@@ -1,42 +1,23 @@
 <template>
   <Shell active="chat" :show-recent="false" fill>
   <view class="chat" :class="{ wide, split: showPanel }">
-    <!-- 会话列表：抽屉，点"历史对话"打开 -->
-    <view class="aside" :class="{ open: showList }">
-      <view class="aside-head">
-        <text class="aside-title">会话</text>
-        <button class="btn small" @click="startNew">新对话</button>
-      </view>
-      <scroll-view scroll-y class="aside-list">
-        <view v-if="!conversations.length" class="empty">还没有会话</view>
-        <view
-          v-for="c in conversations"
-          :key="c.id"
-          class="conv"
-          :class="{ active: c.id === currentId }"
-          @click="open(c)"
-        >
-          <view class="conv-title">{{ c.title || "新对话" }}</view>
-          <view class="conv-meta">
-            <text v-if="c.skillId" class="chip" :class="c.skillId">{{ skillName(c.skillId) }}</text>
-            <text class="muted">{{ relativeTime(c.updatedAt) }}</text>
-            <text class="conv-del" @click.stop="remove(c)">删除</text>
-          </view>
-        </view>
-      </scroll-view>
+    <!-- 对话列表：电脑上是左边栏（和首页一样，可收起），手机上是抽屉 -->
+    <view v-if="!wide || showList" class="aside" :class="{ open: showList }">
+      <ConvSidebar ref="sidebar" :current-id="currentId" :collapsible="wide" @open="open" @new="startNew" @deleted="onDeleted" @collapse="toggleList" />
     </view>
-    <view v-if="showList" class="mask" @click="showList = false" />
+    <view v-if="showList && !wide" class="mask" @click="showList = false" />
 
     <view class="main">
-      <view class="toolbar">
-        <BrandMark :size="34" />
-        <view class="toolbar-title">
-          <view class="bot-name">星络 <text class="beta">Beta</text></view>
-          <view class="bot-sub">{{ currentId ? currentTitle : "旅行 · 日程 · 出行 · 生活" }}</view>
-        </view>
-        <button v-if="wide && hasPanel && panelClosed" class="btn ghost small" @click="panelClosed = false">{{ latestTrip ? "显示行程" : "显示方案" }}</button>
-        <button class="btn ghost small tb-btn" @click="toggleList"><Icon name="clock" :size="14" color="var(--accent)" /><text>历史对话</text></button>
-        <button class="btn ghost small tb-btn" @click="startNew"><Icon name="plus" :size="14" color="var(--accent)" /><text>新对话</text></button>
+      <!-- 电脑上没有标题栏：左边栏收起时左上角给个展开按钮，右侧面板收起时右上角给个显示按钮 -->
+      <view v-if="wide" class="float-bar">
+        <view v-if="!showList" class="float-btn" title="展开对话列表" @click="toggleList"><Icon name="right" :size="16" color="var(--ink)" /></view>
+        <view v-if="!showList" class="float-btn" title="新对话" @click="startNew"><Icon name="plus" :size="16" color="var(--ink)" /></view>
+        <view v-if="hasPanel && panelClosed" class="float-btn text right" @click="panelClosed = false">{{ latestTrip ? "显示行程" : "显示方案" }}</view>
+      </view>
+      <view v-else class="toolbar">
+        <view class="tb-icon" aria-label="历史对话" @click="toggleList"><Icon name="clock" :size="18" color="var(--ink)" /></view>
+        <view class="toolbar-title"><view class="bot-name">{{ currentId ? currentTitle : "新对话" }}</view></view>
+        <view class="tb-icon" aria-label="新对话" @click="startNew"><Icon name="plus" :size="18" color="var(--ink)" /></view>
       </view>
 
       <scroll-view scroll-y class="messages" :scroll-top="scrollTop" :scroll-with-animation="false">
@@ -50,7 +31,7 @@
                 <view class="greet-tip">说说你想做什么，或从下面的示例开始：</view>
                 <view class="suggestions">
                   <view v-for="s in suggestions" :key="s.text" class="suggestion" @click="send(s.text)">
-                    <DuoIcon :name="s.icon" :size="18" /><text class="suggestion-text">{{ s.text }}</text><Icon name="right" :size="14" color="var(--accent)" />
+                    <Icon :name="s.icon" :size="16" color="var(--muted)" /><text class="suggestion-text">{{ s.text }}</text><Icon name="right" :size="14" color="var(--accent)" />
                   </view>
                 </view>
               </view>
@@ -103,12 +84,16 @@
               <view v-if="m.status === 'stopped'" class="status">已停止</view>
               <view v-if="m.status === 'error'" class="error">
                 {{ m.error }}<text v-if="m.quota" class="quota-link" @click="openMember">开通会员 ›</text>
+                <text v-else-if="m === messages[messages.length - 1] && !sending" class="quota-link" @click="retry(m)">重试</text>
               </view>
               <view v-if="m.text && (m.status === 'done' || m.status === 'stopped')" class="answer-actions">
                 <view class="act-btn" :class="{ ok: copiedKey === m.key }" @click="copyAnswer(m)">
                   <Icon :name="copiedKey === m.key ? 'check' : 'copy'" :size="14" color="currentColor" />
                   <text>{{ copiedKey === m.key ? "已复制" : "复制" }}</text>
                 </view>
+              </view>
+              <view v-if="refinable(m)" class="chips refine">
+                <text v-for="r in REFINES" :key="r.label" class="chip-btn" @click="prefill(r.text)">{{ r.label }}</text>
               </view>
               <view v-if="m.suggestions?.length && m === messages[messages.length - 1] && !sending && m.status === 'done'" class="chips">
                 <text v-for="(c, i) in m.suggestions" :key="c" class="chip-btn" :class="{ first: i === 0 }" @click="send(c, [], true)">{{ c }}</text>
@@ -143,8 +128,8 @@
           />
           <view class="composer-tools">
             <view class="tool" @click="pickFiles"><Icon name="plus" :size="14" color="var(--muted)" /><text>上传文件</text></view>
-            <view class="tool" @click="notYet('深度搜索')"><Icon name="search" :size="14" color="var(--muted)" /><text>深度搜索</text></view>
             <ModelPicker class="model" :wide="wide" />
+            <VoiceButton @text="addVoice" />
             <view v-if="sending && !input.trim()" class="send stop-btn" title="停止" @click="stop"><Icon name="stop" :size="14" color="#fff" fill /></view>
             <view v-else class="send" :class="{ off: !canSend }" @click="sendInput"><Icon name="send" :size="18" color="#fff" /></view>
           </view>
@@ -168,16 +153,18 @@ import MarkdownView from "../../components/MarkdownView.vue";
 import ChatCard from "../../components/cards/ChatCard.vue";
 import Icon from "../../components/Icon.vue";
 import BrandMark from "../../components/BrandMark.vue";
-import DuoIcon from "../../components/DuoIcon.vue";
 import PlanPanel from "../../components/PlanPanel.vue";
 import ModelPicker from "../../components/ModelPicker.vue";
 import Shell from "../../components/Shell.vue";
+import ConvSidebar from "../../components/ConvSidebar.vue";
+import VoiceButton from "../../components/VoiceButton.vue";
 import { useWide } from "../../utils/screen";
 import { savePlans } from "../../utils/plans";
 import { currentCity } from "../../utils/place";
 import { markdownToPlain, relativeTime, SKILL_NAMES } from "../../utils/format";
 import { ensureMediaTicket } from "../../utils/media";
 import { fileIcon, fileUrl, splitAttachments, UPLOAD_EXTS, type Attached } from "../../utils/attach";
+import { loadDraft, saveDraft, takeHandoff } from "../../utils/handoff";
 import type { UploadView } from "../../api/types";
 
 /** 页面上的一条消息；assistant 消息的 status 跟着流式事件变化。 */
@@ -271,7 +258,7 @@ async function openFile(id: string) {
 const city = currentCity();
 const suggestions = [
   { text: `帮我规划${city} 4 天 3 晚行程`, icon: "calendar" },
-  { text: `带父母去${city}，有哪些适合的景点？`, icon: "mountain" },
+  { text: `带父母去${city}，有哪些适合的景点？`, icon: "compass" },
   { text: `${city}有哪些必吃的美食？`, icon: "food" },
   { text: `${city}这周天气怎么样？`, icon: "weather" },
   { text: `帮我找去${city}的机票`, icon: "plane" },
@@ -346,9 +333,7 @@ function copyAnswer(m: UiMessage) {
   });
 }
 
-function notYet(what: string) {
-  uni.showToast({ title: `${what}还没接入`, icon: "none" });
-}
+
 
 
 
@@ -366,9 +351,30 @@ watch([latestTrip, latestPlans], () => (panelClosed.value = false));
 watch(latestPlans, (plans) => {
   if (plans) savePlans(plans, currentId.value);
 });
-const input = ref("");
+const input = ref(loadDraft("chat"));
 const sending = ref(false);
+/** 刷新后接着看的会话 id 存在这里 */
+const LAST_KEY = "chat:last";
+/** 历史对话：手机上是抽屉；电脑上是左边一栏，可以收起，记住上次的选择 */
 const showList = ref(false);
+const sidebar = ref<InstanceType<typeof ConvSidebar> | null>(null);
+
+// 输入框的字存成草稿，刷新、出错都不丢
+watch(input, (v) => saveDraft("chat", v));
+// 记住当前会话，刷新页面后接着看
+watch(currentId, (id) => {
+  if (id) uni.setStorageSync(LAST_KEY, id);
+  else uni.removeStorageSync(LAST_KEY);
+});
+
+/** 方案或行程出来后，回答下面固定给的几种调整，点了放进输入框补充后再发 */
+const REFINES = [
+  { label: "调整预算", text: "预算调整为每人 " },
+  { label: "换掉去过的景点", text: "这些地方我去过了，换成别的：" },
+  { label: "少走点路", text: "每天少走点路，步行强度降低一些" },
+  { label: "补充条件", text: "再补充几个条件：" },
+];
+
 const scrollTop = ref(0);
 let controller: AbortController | null = null;
 let seq = 0;
@@ -378,7 +384,11 @@ const currentTitle = computed(() => {
   return c?.title || "新对话";
 });
 
-onShow(loadConversations);
+onShow(() => {
+  // 电脑上默认展开对话列表，收起过就记住
+  if (wide.value) showList.value = uni.getStorageSync("chat:list") !== "0";
+  loadConversations();
+});
 
 /** 从首页等处跳过来：q 是要直接发的问题，id 是要打开的会话。 */
 onLoad(async (query) => {
@@ -387,6 +397,13 @@ onLoad(async (query) => {
   }
   if (query?.q) {
     send(decodeURIComponent(query.q));
+  } else if (query?.handoff) {
+    const h = takeHandoff();
+    if (h) send(h.text, h.files);
+  } else if (!query?.id && !query?.new) {
+    // 直接打开或刷新：接着看上次的会话
+    const last = uni.getStorageSync(LAST_KEY) as string;
+    if (last) await open({ id: last } as Conversation, true);
   }
 });
 
@@ -395,6 +412,7 @@ async function loadConversations() {
   if (!getToken()) return;
   try {
     conversations.value = await api.conversations();
+    sidebar.value?.load();
   } catch (e) {
     showError(e);
   }
@@ -441,9 +459,35 @@ function skillName(id: string) {
   return SKILL_NAMES[id] || id;
 }
 
-/** 窄屏下打开或收起会话抽屉。 */
+/** 打开或收起历史对话（电脑上记住选择）。 */
 function toggleList() {
   showList.value = !showList.value;
+  if (wide.value) uni.setStorageSync("chat:list", showList.value ? "1" : "0");
+}
+
+/** 最新一条回答带行程或方案、已经说完时，下面给几种常用调整 */
+function refinable(m: UiMessage): boolean {
+  return m === messages.value[messages.value.length - 1] && !sending.value && m.status === "done"
+    && m.cards.some((c) => c.kind === "trip" || c.kind === "plan_options" || c.kind === "trip_change");
+}
+
+/** 语音转好的文字接在输入框后面，用户看过再发 */
+function addVoice(text: string) {
+  input.value = input.value.trim() ? `${input.value.trim()} ${text}` : text;
+}
+
+/** 把一句话放进输入框，补充完再发 */
+function prefill(text: string) {
+  input.value = text;
+}
+
+/** 出错的回答重新发一次：去掉这一问一答，用原来的文字和附件重发 */
+function retry(m: UiMessage) {
+  const i = messages.value.indexOf(m);
+  const question = messages.value[i - 1];
+  if (i < 1 || question?.role !== "user") return;
+  messages.value.splice(i - 1, 2);
+  send(question.text, question.files || []);
 }
 
 /** 回到空白的新对话；真正建会话放到发第一条消息时。 */
@@ -451,13 +495,13 @@ function startNew() {
   if (sending.value) return;
   currentId.value = null;
   messages.value = [];
-  showList.value = false;
+  if (!wide.value) showList.value = false;
 }
 
-/** 打开一个历史会话，只显示用户和助手的消息。 */
-async function open(c: Conversation) {
+/** 打开一个历史会话，只显示用户和助手的消息；quiet 时打不开（比如已删除）就静默回到新对话。 */
+async function open(c: Conversation, quiet = false) {
   if (sending.value) return;
-  showList.value = false;
+  if (!wide.value) showList.value = false;
   currentId.value = c.id;
   try {
     const history = await api.messages(c.id);
@@ -475,28 +519,17 @@ async function open(c: Conversation) {
       }));
     scrollToBottom();
   } catch (e) {
-    showError(e);
+    if (quiet) {
+      currentId.value = null;
+      messages.value = [];
+    } else showError(e);
   }
 }
 
-/** 删除会话前确认，删的是当前会话就回到新对话。 */
-function remove(c: Conversation) {
-  uni.showModal({
-    title: "删除会话",
-    content: `删除"${c.title || "新对话"}"？聊天记录会一起删掉。`,
-    confirmText: "删除",
-    confirmColor: "#B4442F",
-    success: async (res) => {
-      if (!res.confirm) return;
-      try {
-        await api.deleteConversation(c.id);
-        if (c.id === currentId.value) startNew();
-        await loadConversations();
-      } catch (e) {
-        showError(e);
-      }
-    },
-  });
+/** 会话删掉后：删的是当前会话就回到新对话，再刷新列表。 */
+async function onDeleted(c: Conversation) {
+  if (c.id === currentId.value) startNew();
+  await loadConversations();
 }
 
 /** 发一条消息并流式显示回答，第一条消息时先建会话；chip 表示点的是快捷回复（后端沿用当前技能、记下点了哪个）。 */
@@ -637,6 +670,20 @@ function openMember() {
   border-bottom: 1px solid var(--line);
 }
 .aside-head .btn { margin: 0; }
+.aside-search { display: flex; align-items: center; gap: 6px; margin: 10px 12px 4px; padding: 0 10px; height: 34px; border-radius: 8px; background: var(--surface-2); }
+.aside-search-input { flex: 1; font-size: 13px; }
+.aside-clear { display: flex; cursor: pointer; }
+.conv-rename { display: flex; align-items: center; gap: 8px; }
+.conv-top { display: flex; align-items: center; gap: 6px; }
+.conv-top .conv-title { flex: 1; min-width: 0; }
+.conv-menu { opacity: 0; }
+.conv:hover .conv-menu, .conv.active .conv-menu { opacity: 1; }
+@media (hover: none) { .conv-menu { opacity: 1; } }
+.conv-input { flex: 1; height: 32px; font-size: 14px; min-width: 0; }
+.conv-act { color: var(--accent); cursor: pointer; white-space: nowrap; font-size: 12px; }
+.conv-act.muted { color: var(--muted); }
+.conv-act.first { margin-left: auto; color: var(--muted); }
+.conv-act.first:hover { color: var(--accent); }
 .aside-title { font-weight: 600; }
 .aside-list { flex: 1; height: 0; }
 .conv {
@@ -658,7 +705,7 @@ function openMember() {
   margin-top: 4px;
   font-size: 12px;
 }
-.conv-del { margin-left: auto; color: var(--muted); padding: 2px 4px; }
+.conv-del { color: var(--muted); padding: 2px 4px; }
 .conv-del:hover { color: var(--danger); }
 .mask { display: none; }
 
@@ -673,6 +720,17 @@ function openMember() {
   background: var(--surface);
 }
 .toolbar .btn { margin: 0; }
+.tb-icon { width: 36px; height: 36px; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.toolbar .toolbar-title { flex: 1; min-width: 0; text-align: center; }
+/* 电脑：没有标题栏，悬浮的小按钮 */
+.main { position: relative; }
+.float-bar { position: absolute; top: 12px; left: 12px; right: 12px; z-index: 5; display: flex; gap: 6px; pointer-events: none; }
+.float-btn { pointer-events: auto; height: 32px; min-width: 32px; padding: 0 8px; box-sizing: border-box; border-radius: 8px; background: var(--surface); border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 13px; }
+.float-btn:hover { background: var(--surface-2); }
+.float-btn.right { margin-left: auto; }
+/* 对话列表的外框交给 ConvSidebar */
+.aside { background: transparent; border-right: none; }
+.aside :deep(.cs) { width: 100%; }
 .tb-btn { display: inline-flex; align-items: center; gap: 4px; }
 .toolbar-title {
   flex: 1;
@@ -802,8 +860,10 @@ function openMember() {
 .aside.open { transform: translateX(0); }
 .mask { display: block; position: fixed; z-index: 39; inset: 0; background: rgba(0, 0, 0, 0.3); }
 
-/* 电脑：平时对话居中占满顶栏下面的空间；有行程或方案时左边对话、右边面板 */
+/* 电脑：历史对话是左边可收起的一栏；平时对话居中占满导航下面的空间；有行程或方案时左边对话、右边面板 */
 .chat.wide { height: auto; flex: 1; min-height: 0; }
+.chat.wide .aside { position: static; transform: none; width: 260px; transition: none; height: 100%; }
+.chat.wide .thread { padding-top: 56px; }
 .chat.wide .main { background: var(--surface); }
 .chat.wide.split .main { flex: 0 0 min(560px, 42%); border-right: 1px solid var(--line); }
 .chat.wide.split .thread { padding-left: 16px; padding-right: 16px; }
@@ -856,7 +916,7 @@ function openMember() {
 .tool { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
 .model { margin-left: auto; }
 .composer-tools .send { margin-left: auto; }
-.composer-tools .model + .send { margin-left: 0; }
+.composer-tools .model ~ .send { margin-left: 0; }
 .send { width: 38px; height: 38px; border-radius: 50%; background: var(--accent); display: flex; align-items: center; justify-content: center; cursor: pointer; }
 .send.off { opacity: 0.45; cursor: default; }
 .stop-btn { background: var(--danger); }

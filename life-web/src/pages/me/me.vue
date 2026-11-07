@@ -1,21 +1,35 @@
 <template>
-  <Shell active="">
-  <view class="container">
-    <view v-if="user" class="card account">
-      <view>
+  <Shell active="me">
+  <view class="page-wrap me-page">
+    <view v-if="user" class="account">
+      <view class="avatar">{{ (user.nickname || user.username).slice(0, 1).toUpperCase() }}</view>
+      <view class="account-body">
         <view class="name">{{ user.nickname || user.username }}</view>
-        <view class="muted small">{{ user.username }} · {{ user.timezone }}</view>
+        <view class="muted small">{{ user.username }}<text v-if="user.email"> · {{ user.email }}</text> · 时区 {{ user.timezone }}</view>
       </view>
       <button class="btn ghost small" @click="logout">退出登录</button>
     </view>
 
-    <view class="card links">
-      <view class="link-row" @click="go('/pages/member/member')">
-        <text>星络会员</text>
-        <text class="muted">{{ member ? (member.active ? `有效期至 ${memberDate} ›` : `今天还能聊 ${Math.max(0, member.dailyLimit - member.todayUsed)} 次 · 开通会员 ›`) : "›" }}</text>
+    <!-- 会员：状态、有效期、今天的次数和开通/续费，放在第一屏 -->
+    <view class="card member-card">
+      <view class="mc-top">
+        <view>
+          <view class="mc-title">{{ member?.active ? "星络会员" : "免费用户" }}</view>
+          <view class="muted small">{{ member ? (member.active ? `有效期至 ${memberDate}` : member.expiresAt ? `会员已于 ${memberDate} 到期` : `开通后每天可对话 ${member.memberDaily} 次`) : "加载中…" }}</view>
+        </view>
+        <button class="btn mc-btn" @click="go('/pages/member/member')">{{ member?.active ? "续费" : `开通会员 ¥${member?.price || "9.90"}` }}</button>
       </view>
+      <view v-if="member" class="mc-usage">
+        <view class="mc-usage-text"><text>今日额度</text><text class="muted">已用 {{ member.todayUsed }} / {{ member.dailyLimit }} 次</text></view>
+        <view class="bar"><view class="bar-in" :class="{ full: member.todayUsed >= member.dailyLimit }" :style="{ width: Math.min(100, Math.round(member.todayUsed / Math.max(1, member.dailyLimit) * 100)) + '%' }" /></view>
+      </view>
+      <text class="link small" @click="go('/pages/member/member')">会员权益和记录 ›</text>
+    </view>
+
+    <view class="card links">
       <view class="link-row" @click="goSchedule"><text>我的日程和提醒</text><text class="muted">›</text></view>
       <view class="link-row" @click="go('/pages/chat/chat')"><text>对话记录</text><text class="muted">›</text></view>
+      <view class="link-row" @click="go('/pages/fav/fav')"><text>我的收藏</text><text class="muted">›</text></view>
       <view class="link-row" @click="mail.open = !mail.open">
         <text>{{ user?.email ? "邮箱" : "绑定邮箱" }}</text>
         <text class="muted">{{ mail.open ? "收起" : user?.email ? `${user.email} · 换绑 ›` : "绑了能用邮箱登录、找回密码 ›" }}</text>
@@ -49,16 +63,9 @@
       </view>
     </view>
 
-    <!-- 家庭地址：首页今日安排按它算几点出发 -->
+    <!-- 常用地址：默认地址同步成家庭地址，首页今日安排按它算几点出发 -->
     <view class="section-title">常用地址</view>
-    <view class="card home-addr">
-      <view class="muted small">设了家的地址，首页"今日安排"会按从家出发算路上多久、建议几点出发；旅行中按当晚住的酒店算。星络对话时也会知道。</view>
-      <view class="add-memory">
-        <text class="addr-label">家</text>
-        <input id="home-address" v-model="homeAddress" class="input grow" placeholder="比如：深圳市南山区科技园某某小区" />
-        <button class="btn small" :disabled="savingAddress" @click="saveAddress">{{ savingAddress ? "保存中…" : "保存" }}</button>
-      </view>
-    </view>
+    <AddressList />
 
     <!-- 记忆 -->
     <view class="section-title">助手记住的事</view>
@@ -150,6 +157,7 @@
 
 <script setup lang="ts">
 import Shell from "../../components/Shell.vue";
+import AddressList from "../../components/AddressList.vue";
 import { computed, reactive, ref } from "vue";
 import { onShow } from "@dcloudio/uni-app";
 import { useWide } from "../../utils/screen";
@@ -169,11 +177,11 @@ const categories = Object.keys(CATEGORY) as MemoryCategory[];
 const categoryLabels = categories.map((c) => CATEGORY[c]);
 
 const user = ref<UserView | null>(null);
-/** 会员状态，"我的"第一行显示 */
+/** 会员状态，第一屏显示 */
 const member = ref<MembershipView | null>(null);
 const memberDate = computed(() => {
   const d = member.value?.expiresAt ? new Date(member.value.expiresAt) : null;
-  return d ? `${d.getMonth() + 1} 月 ${d.getDate()} 日` : "";
+  return d ? `${d.getFullYear()} 年 ${d.getMonth() + 1} 月 ${d.getDate()} 日` : "";
 });
 
 /** 修改密码表单 */
@@ -263,8 +271,6 @@ const brief = reactive<BriefSettings>({ enabled: true, sendTime: "07:30", city: 
 const todayBrief = ref<Brief | null>(null);
 const pushing = ref(false);
 const wide = useWide();
-const homeAddress = ref("");
-const savingAddress = ref(false);
 
 /** 读简报设置和今天的内容；简报出错不影响页面其他部分 */
 async function loadBrief() {
@@ -315,24 +321,8 @@ onShow(async () => {
     showError(e);
   }
   loadBrief();
-  api.homeAddress().then((r) => (homeAddress.value = r.address || "")).catch(() => {});
   api.membership().then((m) => (member.value = m)).catch(() => {});
 });
-
-/** 保存家的地址（高德找不到会提示换个写法），清空表示删掉；记忆列表跟着刷新 */
-async function saveAddress() {
-  savingAddress.value = true;
-  try {
-    const r = await api.saveHomeAddress(homeAddress.value.trim());
-    homeAddress.value = r.address || "";
-    uni.showToast({ title: r.address ? "已保存" : "已删除", icon: "success" });
-    memories.value = await api.memories();
-  } catch (e) {
-    showError(e);
-  } finally {
-    savingAddress.value = false;
-  }
-}
 
 /** 日程页现在是底部标签页：手机用 switchTab，电脑上整页切换 */
 function goSchedule() {
@@ -437,9 +427,21 @@ function go(url: string) {
 </script>
 
 <style scoped>
-.account { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.me-page { max-width: 760px; }
+.account { display: flex; align-items: center; gap: 14px; padding: 4px 0; }
 .account .btn { margin: 0; }
-.name { font-size: 17px; font-weight: 600; }
+.account-body { flex: 1; min-width: 0; }
+.avatar { width: 52px; height: 52px; border-radius: 50%; background: var(--ink); color: var(--surface); font-size: 20px; font-weight: 600; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.name { font-size: 22px; font-weight: 700; }
+.member-card { display: flex; flex-direction: column; gap: 12px; padding: 18px 20px; }
+.mc-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.mc-title { font-size: 17px; font-weight: 600; }
+.mc-btn { margin: 0; height: 40px; }
+.mc-usage { display: flex; flex-direction: column; gap: 6px; }
+.mc-usage-text { display: flex; justify-content: space-between; font-size: 14px; }
+.bar { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+.bar-in { height: 100%; background: var(--accent); border-radius: 3px; }
+.bar-in.full { background: var(--warn); }
 .small { font-size: 13px; }
 .mono { font-family: var(--mono); }
 .memory {

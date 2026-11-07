@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 
@@ -28,6 +29,11 @@ public class Trip {
     private Integer currentVer;
     /** DRAFT / CONFIRMED / FINISHED */
     private String status;
+    /** 出行人数，用户填，可空 */
+    private Integer people;
+    /** 总预算，用户填，可空；币种见 budgetCurrency */
+    private BigDecimal budget;
+    private String budgetCurrency;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
 }

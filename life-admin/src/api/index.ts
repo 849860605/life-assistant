@@ -108,6 +108,8 @@ export interface LlmProvider {
   hasKey: boolean;
   authHeader: string | null;
   noThinking: string | null;
+  /** 思考参数格式：QWEN / TYPE / OPENAI / CUSTOM / NONE，空按旧规则（有关闭参数按 CUSTOM） */
+  thinkingStyle: string | null;
   enabled: boolean;
   sort: number;
   models: number;
@@ -123,6 +125,7 @@ export interface LlmProviderForm {
   apiKey: string;
   authHeader: string;
   noThinking: string;
+  thinkingStyle: string;
   enabled: boolean;
   sort: number;
 }
@@ -141,6 +144,10 @@ export interface LlmModel {
   priceCachedInput: number | null;
   priceOutput: number | null;
   sort: number;
+  /** 先思考再回答；thinkingLevel 是深度 LOW / MEDIUM / HIGH / CUSTOM，自定义时用 thinkingBudget（Token） */
+  thinking: boolean;
+  thinkingLevel: "LOW" | "MEDIUM" | "HIGH" | "CUSTOM";
+  thinkingBudget: number | null;
 }
 
 export type LlmModelForm = Omit<LlmModel, "id">;

@@ -45,7 +45,10 @@
               <text class="letter">{{ LETTERS[i] }}</text>
             </view>
             <view class="body">
-              <view class="name">{{ s.name }}<text v-if="s.level" class="lvl">{{ s.level }}A</text></view>
+              <view class="name-row">
+                <view class="name">{{ s.name }}<text v-if="s.level" class="lvl">{{ s.level }}A</text></view>
+                <FavButton :item="{ kind: 'SPOT', refKey: s.id || s.name, title: s.name, subtitle: s.category || s.address, city, url: s.url || amapUrl(s, city), photo: s.photo }" />
+              </view>
               <view class="tags">
                 <text v-if="s.category" class="tag">{{ s.category }}</text>
                 <text v-if="s.free === true" class="tag warn">免费 · 是否要预约需确认</text>
@@ -174,12 +177,13 @@
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref } from "vue";
 import Icon from "./Icon.vue";
+import FavButton from "./FavButton.vue";
 import RouteMap from "./RouteMap.vue";
 import { api } from "../api";
 import { showError } from "../api/http";
 import type { DayTickets, ItineraryDay, SpotRules, TicketProduct, TicketSpot, TripDetail, TuniuTicket } from "../api/types";
 import { ago, openUrl } from "../utils/format";
-import { cityOf, currentCity, type MapStop } from "../utils/place";
+import { amapUrl, cityOf, currentCity, type MapStop } from "../utils/place";
 import { useWide } from "../utils/screen";
 
 /**
@@ -604,4 +608,5 @@ async function loadRules(s: TicketSpot, refresh = false) {
   .grid { grid-template-columns: minmax(0, 1fr) 420px 340px; }
   .side { grid-column: 3; grid-row: 1; position: sticky; top: 20px; }
 }
+.name-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 </style>

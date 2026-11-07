@@ -54,7 +54,7 @@ public class RouterService {
         }
         try {
             ModelSpec model = chatModels.resolve(chatModels.models().getRouter());
-            ResponseEntity<ChatResponse, RouteDecision> response = chatModels.client(model).prompt()
+            ResponseEntity<ChatResponse, RouteDecision> response = chatModels.quickClient(model).prompt()
                     .system(systemPrompt(lastSkillId))
                     .user(input)
                     .options(ChatModelRegistry.options(model, 0.0))

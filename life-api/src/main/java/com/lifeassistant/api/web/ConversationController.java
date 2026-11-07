@@ -23,6 +23,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -63,10 +64,31 @@ public class ConversationController {
         return ApiResponse.ok(conversationService.create(authFacade.current(), null));
     }
 
-    /** GET /api/v1/conversations：按更新时间倒序列出自己的会话，limit 限制在 1~100。 */
+    /** GET /api/v1/conversations?q=：按更新时间倒序列出自己的会话，limit 限制在 1~100；q 按标题和消息内容搜索。 */
     @GetMapping
-    public ApiResponse<List<Conversation>> list(@RequestParam(defaultValue = "30") int limit) {
-        return ApiResponse.ok(conversationService.list(authFacade.current(), limit));
+    public ApiResponse<List<Conversation>> list(@RequestParam(defaultValue = "30") int limit,
+                                                @RequestParam(required = false) String q) {
+        return ApiResponse.ok(conversationService.list(authFacade.current(), limit, q));
+    }
+
+    /** 置顶的请求体。 */
+    public record PinRequest(boolean pinned) {
+    }
+
+    /** POST /api/v1/conversations/{id}/pin：置顶或取消置顶自己的会话。 */
+    @PostMapping("/{id}/pin")
+    public ApiResponse<Conversation> pin(@PathVariable String id, @RequestBody PinRequest request) {
+        return ApiResponse.ok(conversationService.pin(authFacade.current(), id, request.pinned()));
+    }
+
+    /** 改标题的请求体。 */
+    public record RenameRequest(@NotBlank(message = "标题不能为空") @Size(max = 60, message = "标题最多 60 个字") String title) {
+    }
+
+    /** PUT /api/v1/conversations/{id}：改自己会话的标题。 */
+    @PutMapping("/{id}")
+    public ApiResponse<Conversation> rename(@PathVariable String id, @Valid @RequestBody RenameRequest request) {
+        return ApiResponse.ok(conversationService.rename(authFacade.current(), id, request.title()));
     }
 
     /** GET /api/v1/conversations/{id}/messages：查会话最近的消息，先校验会话归属，limit 限制在 1~500。 */

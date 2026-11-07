@@ -25,6 +25,12 @@ public class LlmModel {
     private BigDecimal priceCachedInput;
     private BigDecimal priceOutput;
     private Integer sort;
+    /** 要不要先思考再回答 */
+    private Boolean thinking;
+    /** 思考深度：LOW / MEDIUM / HIGH / CUSTOM */
+    private String thinkingLevel;
+    /** 自定义思考预算（Token），thinkingLevel 为 CUSTOM 时用 */
+    private Integer thinkingBudget;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
 

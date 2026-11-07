@@ -23,4 +23,6 @@ public class Conversation {
     private String summary;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
+    /** 置顶时间，为空表示没置顶 */
+    private OffsetDateTime pinnedAt;
 }

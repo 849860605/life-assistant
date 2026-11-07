@@ -65,8 +65,11 @@ public class VisionReader {
             content.add(Map.of("type", "image_url", "image_url", Map.of("url", url)));
         }
         content.add(Map.of("type", "text", "text", PROMPT));
-        Map<String, Object> body = Map.of("model", spec.model(),
-                "messages", List.of(Map.of("role", "user", "content", content)));
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("model", spec.model());
+        body.put("messages", List.of(Map.of("role", "user", "content", content)));
+        // 按这个模型在后台的思考设置带上参数（比如千问关掉思考是 enable_thinking=false）
+        body.putAll(models.thinkingParams(spec, false));
         try {
             boolean customHeader = provider.getAuthHeader() != null && !provider.getAuthHeader().isBlank();
             String raw = http.post().uri(endpoint(provider))

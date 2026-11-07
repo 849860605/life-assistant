@@ -1,44 +1,47 @@
 <script setup lang="ts">
 import { onLaunch } from "@dcloudio/uni-app";
-import { getToken } from "./api/http";
+import { getToken, rememberBack } from "./api/http";
 
-// 没登录直接去登录页；手机底部栏中间的星络按钮进对话
-onLaunch(() => {
+// 没登录直接去登录页；打开的是某个页面（比如分享来的行程链接）就记下来，登录后回去
+onLaunch((opts) => {
   if (!getToken()) {
+    if (opts?.path) rememberBack({ route: opts.path, options: opts.query as Record<string, string> });
     uni.reLaunch({ url: "/pages/login/login" });
   }
-  uni.onTabBarMidButtonTap(() => uni.navigateTo({ url: "/pages/chat/chat" }));
 });
 </script>
 
 <style>
 /*
- * 版式：移动优先，单列内容最宽 760px 居中；对话页在宽屏上左边多一栏会话列表。
- * 配色跟原型图走：晴空蓝做强调色，中性色略偏蓝；价格用暖橙，和蓝色主操作区分开。
+ * 版式：工具型界面，白底浅灰、近黑正文、灰色辅助字；蓝色只用于主要操作和选中状态。
+ * 8px 间距体系；圆角小、边框细、阴影轻；不用渐变、发光和彩色图标方块。价格用暗橙和蓝色主操作区分开。
  */
 page {
-  --bg: #f4f6fa;
+  --bg: #f5f5f7;
   --surface: #ffffff;
-  --surface-2: #eef2f8;
-  --ink: #1b2333;
-  --muted: #687386;
-  --line: #dfe4ee;
-  --accent: #2563eb;
+  --surface-2: #f2f2f5;
+  --ink: #1d1d1f;
+  --muted: #6e6e73;
+  --line: #e3e3e8;
+  --accent: #0071e3;
   --accent-ink: #ffffff;
-  --accent-soft: #e6eefd;
-  --danger: #b4442f;
-  --danger-soft: #f8e7e3;
-  --price: #e8590c;
-  --ok: #1f8a4c;
-  --ok-soft: #e3f4ea;
-  --skill-schedule: #7a4fc7;
-  --skill-schedule-soft: #f0eafb;
-  /* 双色图标底下的浅色圆角方块 */
-  --tile-bg: linear-gradient(145deg, #ffffff, #e4ecff);
-  --tile-shadow: 0 2px 6px rgba(47, 107, 242, 0.10), inset 0 0 0 1px rgba(47, 107, 242, 0.10);
-  --brand-shadow: 0 4px 12px rgba(47, 107, 242, 0.16), inset 0 0 0 1px rgba(47, 107, 242, 0.16);
+  --accent-soft: #eaf2fd;
+  --danger: #c4372b;
+  --danger-soft: #fbeceb;
+  --price: #c2410c;
+  --ok: #1d8348;
+  --ok-soft: #e7f5ec;
+  --warn: #a15c00;
+  --warn-soft: #fdf3e2;
+  --skill-schedule: #6e4bb8;
+  --skill-schedule-soft: #f1ecfa;
+  /* 图标底块：浅灰平铺，不再用渐变 */
+  --tile-bg: var(--surface-2);
+  --tile-shadow: none;
+  --brand-shadow: none;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 16px rgba(0, 0, 0, 0.05);
   --radius: 12px;
-  --font: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
   --mono: "SF Mono", Menlo, Consolas, monospace;
 
   background: var(--bg);
@@ -46,33 +49,38 @@ page {
   font-family: var(--font);
   font-size: 15px;
   line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
 }
 
 @media (prefers-color-scheme: dark) {
   page {
-    --bg: #10141c;
-    --surface: #181e2a;
-    --surface-2: #202838;
-    --ink: #e5e9f2;
-    --muted: #97a1b3;
-    --line: #2a3345;
-    --accent: #7aa7ff;
-    --accent-ink: #0d1422;
-    --accent-soft: #1c2a47;
-    --danger: #e0806b;
-    --danger-soft: #3a211b;
-    --price: #ff9a5a;
-    --ok: #6fd39a;
-    --ok-soft: #173326;
+    --bg: #000000;
+    --surface: #1c1c1e;
+    --surface-2: #2c2c2e;
+    --ink: #f5f5f7;
+    --muted: #98989d;
+    --line: #38383a;
+    --accent: #2997ff;
+    --accent-ink: #ffffff;
+    --accent-soft: #0f2a47;
+    --danger: #ff6b5e;
+    --danger-soft: #3a1d1a;
+    --price: #ff9f5a;
+    --ok: #4cd18a;
+    --ok-soft: #12301f;
+    --warn: #f5b84a;
+    --warn-soft: #3a2a10;
     --skill-schedule: #b9a0ea;
     --skill-schedule-soft: #2a2140;
-    --tile-bg: linear-gradient(145deg, #27324c, #1b2438);
-    --tile-shadow: inset 0 0 0 1px rgba(122, 167, 255, 0.18);
-    --brand-shadow: 0 4px 12px rgba(0, 0, 0, 0.25), inset 0 0 0 1px rgba(122, 167, 255, 0.28);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
   }
 }
 
-/* 宽屏（电脑）：左侧导航栏代替底部标签栏和顶部标题栏，见 components/Shell.vue */
+/* 内容不满一屏时，下面也是页面底色 */
+html, body { background: #f5f5f7; }
+@media (prefers-color-scheme: dark) { html, body { background: #000; } }
+
+/* 宽屏（电脑）：顶部导航代替底部标签栏和顶部标题栏，见 components/Shell.vue */
 @media (min-width: 1024px) {
   uni-tabbar, uni-page-head, .uni-tabbar-bottom { display: none !important; }
   html, body, uni-app, uni-page, uni-page-wrapper { --window-top: 0px !important; --window-bottom: 0px !important; }
@@ -146,8 +154,9 @@ page {
   justify-content: center;
   height: 40px;
   padding: 0 18px;
-  border-radius: 10px;
+  border-radius: 8px;
   font-size: 15px;
+  font-weight: 500;
   background: var(--accent);
   color: var(--accent-ink);
   border: none;
@@ -157,6 +166,8 @@ page {
 .btn.ghost { background: transparent; color: var(--accent); border: 1px solid var(--line); }
 .btn.danger { background: transparent; color: var(--danger); border: 1px solid var(--line); }
 .btn.small { height: 32px; padding: 0 12px; font-size: 14px; }
+.btn:focus-visible, .input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn.ghost:hover { background: var(--surface-2); }
 /* uni-button[disabled] 自带灰底，具体度和这里一样且样式表加载在后，只能用 !important 盖回来 */
 .btn[disabled] { background: var(--accent) !important; color: var(--accent-ink) !important; opacity: 0.45; cursor: default; }
 .btn.ghost[disabled], .btn.danger[disabled] { background: transparent !important; color: var(--muted) !important; }
@@ -165,12 +176,30 @@ page {
   height: 42px;
   padding: 0 12px;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--surface);
   color: var(--ink);
   font-size: 15px;
   box-sizing: border-box;
 }
+.input:focus { border-color: var(--accent); }
+
+/* 工具页：最宽 1200px 居中，标题 28px */
+.page-wrap { max-width: 1200px; margin: 0 auto; padding: 24px; box-sizing: border-box; display: flex; flex-direction: column; gap: 16px; }
+.page-title { font-size: 28px; font-weight: 700; letter-spacing: -0.01em; line-height: 1.25; }
+.page-sub { font-size: 14px; color: var(--muted); }
+@media (max-width: 1023px) { .page-wrap { padding: 16px; } .page-title { font-size: 24px; } }
+
+/* 分段切换（日程/行程、行程详情三个标签等） */
+.seg { display: inline-flex; padding: 2px; border-radius: 9px; background: var(--surface-2); gap: 2px; }
+.seg-item { padding: 6px 16px; border-radius: 7px; font-size: 14px; color: var(--muted); cursor: pointer; white-space: nowrap; }
+.seg-item.on { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08); }
+
+/* 状态提示条 */
+.notice { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 10px; font-size: 14px; background: var(--surface-2); color: var(--ink); }
+.notice.ok { background: var(--ok-soft); color: var(--ok); }
+.notice.warn { background: var(--warn-soft); color: var(--warn); }
+.notice.danger { background: var(--danger-soft); color: var(--danger); }
 
 .empty {
   text-align: center;
@@ -198,7 +227,7 @@ page {
 .md hr { border: none; border-top: 1px solid var(--line); margin: 12px 0; }
 /* 原生底部栏的底色写死在 pages.json，深色模式下跟着页面变暗 */
 @media (prefers-color-scheme: dark) {
-  .uni-tabbar { background-color: #151b28 !important; }
+  .uni-tabbar { background-color: #1c1c1e !important; }
   .uni-tabbar-border { background-color: rgba(255, 255, 255, 0.08) !important; }
 }
 </style>

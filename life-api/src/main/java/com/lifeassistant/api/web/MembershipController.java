@@ -32,8 +32,12 @@ public class MembershipController {
                                  int todayUsed, int dailyLimit, int freeDaily, int memberDaily) {
     }
 
-    /** 我的一条会员记录：source 为 PAY 付费开通 / ADMIN 星络赠送或调整，days 为负是扣减。 */
-    public record LogView(int days, String source, OffsetDateTime expiresAfter, OffsetDateTime createdAt) {
+    /**
+     * 我的一条会员记录：source 为 PAY 付费开通 / ADMIN 星络赠送或调整，days 为负是扣减；
+     * outTradeNo 是付费记录对应的订单号，expiresBefore 是这次变动前的到期时间（没开过或已过期时是开通，否则是续费）。
+     */
+    public record LogView(int days, String source, String outTradeNo, OffsetDateTime expiresBefore,
+                          OffsetDateTime expiresAfter, OffsetDateTime createdAt) {
     }
 
     /** GET /api/v1/membership */
@@ -52,6 +56,7 @@ public class MembershipController {
     @GetMapping("/logs")
     public ApiResponse<List<LogView>> logs() {
         return ApiResponse.ok(membership.logs(authFacade.current().userId(), 50).stream()
-                .map(l -> new LogView(l.days(), l.source(), l.expiresAfter(), l.createdAt())).toList());
+                .map(l -> new LogView(l.days(), l.source(), l.outTradeNo(), l.expiresBefore(), l.expiresAfter(),
+                        l.createdAt())).toList());
     }
 }

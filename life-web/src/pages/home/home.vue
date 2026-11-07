@@ -1,355 +1,184 @@
 <template>
-  <Shell active="home">
-    <view v-if="wide" class="desk">
-      <view class="d-main">
-        <view class="hero">
-          <image v-if="hero" class="hero-bg" :src="hero" mode="aspectFill" />
-          <view class="hero-body">
-            <view class="hero-brand">
-              <BrandMark :size="44" />
-              <view>
-                <view class="hero-brand-name">星络 <text class="en">Xinglo</text></view>
-                <view class="hero-brand-sub">你的生活助理</view>
-              </view>
-            </view>
-            <view class="hero-title">告诉星络你想做什么</view>
-            <view class="hero-links">
-              <view v-for="(l, i) in HERO_LINKS" :key="l.label" class="hero-link" @click="l.go()">
-                <text v-if="i" class="hero-sep">|</text>
-                <Icon :name="l.icon" :size="15" color="var(--muted)" /><text>{{ l.label }}</text>
-              </view>
-            </view>
-            <view class="ask-box">
-              <textarea
-                id="desk-ask"
-                v-model="question"
-                class="ask-input"
-                :auto-height="true"
-                :maxlength="2000"
-                :show-confirm-bar="false"
-                confirm-type="send"
-                :placeholder="`和星络聊天，规划旅行、安排日程、查询机票酒店、发现${city}美食…`"
-                @confirm="ask"
-              />
-              <view class="ask-tools">
-                <view class="ask-tool" @click="openChat()"><Icon name="plus" :size="14" color="var(--muted)" /><text>上传文件</text></view>
-                <view class="ask-right">
-                  <ModelPicker :wide="wide" />
-                  <view class="ask-send" :class="{ off: !question.trim() }" @click="ask"><Icon name="send" :size="18" color="#fff" /></view>
-                </view>
-              </view>
-            </view>
-          </view>
+  <Shell active="home" :fill="wide">
+    <view class="home-wrap" :class="{ wide }">
+      <!-- 电脑：左边对话栏（参考千问，和对话页同一个），点开接着聊 -->
+      <ConvSidebar v-if="wide" @open="(c) => openConv(c.id)" @new="newChat" />
+
+      <view class="home">
+        <view v-if="!wide" class="m-top">
+          <view class="m-city" @click="picking = true"><Icon name="pin" :size="13" color="var(--muted)" /><text>{{ city }}</text></view>
         </view>
 
-        <view class="sec-head"><text class="sec-title">试试这些，和星络聊聊</text><Icon name="sparkle" :size="14" color="var(--accent)" /></view>
-        <view class="examples">
-          <view v-for="x in examples" :key="x.title" class="example" @click="openChat(x.ask)">
-            <DuoIcon :name="x.icon" :size="24" :tile="44" />
-            <view class="ex-body">
-              <view class="ex-title">{{ x.title }}</view>
-              <view class="ex-sub">{{ x.ask }}</view>
-            </view>
-            <Icon name="right" :size="16" color="var(--muted)" />
-          </view>
+        <view class="hello">
+          <BrandMark :size="wide ? 40 : 32" />
+          <text class="hello-title">你好，我是星络</text>
         </view>
 
-        <view class="sec-head">
-          <text class="sec-title">{{ city }}推荐</text>
-          <text v-if="spots.length > 4" class="sec-more" @click="nextSpots"><Icon name="refresh" :size="12" color="var(--accent)" /> 换一换</text>
-        </view>
-        <view v-if="spotPage.length" class="recs">
-          <view v-for="sp in spotPage" :key="sp.id" class="rec" @click="openChat(`介绍一下${sp.name}，适合怎么玩`)">
-            <image v-if="sp.photo" class="rec-img" :src="sp.photo" mode="aspectFill" />
-            <view v-else class="rec-img blank"><Icon name="pin" :size="22" color="#fff" /></view>
-            <view class="rec-name">{{ sp.name }}</view>
-            <view class="rec-meta"><text v-if="sp.rating" class="star">★ {{ sp.rating }}</text><text> {{ sp.category }}</text></view>
-          </view>
-        </view>
-        <view v-else class="muted small">{{ spotsLoaded ? `没找到${city}的景点` : "加载中…" }}</view>
-      </view>
-
-      <view class="d-side">
-        <view class="card weather" @click="go('/pages/weather/weather')">
-          <Icon name="weather" :size="34" color="#F5A623" />
-          <view class="w-body">
-            <view class="w-main">{{ city }} {{ weather ? `${weather.tempMin}~${weather.tempMax}°C` : "" }} <text class="w-text">{{ weather?.text || "" }}</text></view>
-            <view class="muted small">{{ weather ? "看看这几天的天气和出行建议" : "点开看天气" }}</view>
-          </view>
+        <view v-if="next" class="next" @click="openSchedule">
+          <Icon name="bell" :size="15" color="var(--accent)" />
+          <text class="next-when">{{ next.when }}</text>
+          <text class="next-title">{{ next.title }}</text>
+          <text v-if="next.location" class="next-loc">· {{ next.location }}</text>
           <Icon name="right" :size="14" color="var(--muted)" />
         </view>
 
-        <view class="card"><TodayCard :agenda="agenda" :error="agendaError" wide @ask="openChat" /></view>
-
-        <view v-if="tripCard" class="card trip-card" @click="openTrip(tripCard.id)">
-          <view class="tc-head"><text class="tc-label">{{ agenda?.trip ? "进行中的行程" : "最近的行程" }}</text><Icon name="right" :size="14" color="var(--muted)" /></view>
-          <view class="tc-row">
-            <image v-if="tripCover" class="tc-img" :src="tripCover" mode="aspectFill" />
-            <view v-else class="tc-img blank"><Icon name="trip" :size="20" color="#fff" /></view>
-            <view class="tc-body">
-              <view class="tc-title">{{ tripCard.title }}</view>
-              <view class="muted small">{{ tripCard.sub }}</view>
+        <view class="composer" :class="{ focus: focused }">
+          <view v-if="pending.length" class="att-list">
+            <view v-for="(a, i) in pending" :key="a.key" class="att" :class="a.state">
+              <Icon :name="fileIcon(a.name)" :size="14" color="var(--muted)" />
+              <text class="att-name">{{ a.name }}</text>
+              <text class="att-state">{{ a.state === "uploading" ? "识别中…" : a.state === "error" ? a.error : a.view?.error ? "没识别出来" : "已识别" }}</text>
+              <view class="att-x" @click="pending.splice(i, 1)"><Icon name="close" :size="12" color="var(--muted)" /></view>
             </view>
           </view>
-          <view v-if="nextStop" class="tc-next" @click.stop>
-            <text class="muted small">下一站</text>
-            <text class="tc-next-name">{{ nextStop.time }} {{ nextStop.title }}</text>
-            <text v-if="canGo(nextStop)" class="tc-btn" @click="navigate(nextStop)">导航</text>
-          </view>
-        </view>
-        <view v-else-if="tripLoaded" class="card trip-card empty" @click="openChat(`帮我规划${city}3天2晚的行程`)">
-          <Icon name="trip" :size="22" color="var(--accent)" />
-          <view class="tc-body"><view class="tc-title">说出想去哪，星络帮你规划</view><view class="muted small">规划好的行程会出现在这里</view></view>
-        </view>
-
-        <view class="card">
-          <view class="qf-head"><text class="qf-title">快捷功能</text></view>
-          <view class="qf-grid">
-            <view v-for="q in quickDesk" :key="q.label" class="qf" @click="q.go()">
-              <DuoIcon :name="q.icon" :size="22" :tile="40" />
-              <text class="qf-label">{{ q.label }}</text>
-            </view>
-          </view>
-        </view>
-      </view>
-    </view>
-
-    <view v-else class="home">
-      <view class="m-top">
-        <view class="m-brand">
-          <BrandMark :size="34" />
-          <view>
-            <view class="m-brand-name">星络 <text class="en">Xinglo</text></view>
-            <view class="m-brand-sub">你的生活助理</view>
-          </view>
-        </view>
-        <view class="city-chip" @click="picking = true"><Icon name="pin" :size="13" color="var(--ink)" /><text>{{ city }}</text><Icon name="down" :size="11" color="var(--muted)" /></view>
-      </view>
-
-      <view class="greet">
-        <view class="greet-title">{{ greeting }}{{ nickname ? `，${nickname}` : "" }}</view>
-        <view class="greet-sub" @click="go('/pages/weather/weather')">
-          <Icon name="weather" :size="15" color="#F5A623" />
-          <text>{{ city }} {{ weather ? `${weather.tempMin}~${weather.tempMax}°C ${weather.text}` : "" }}</text>
-        </view>
-      </view>
-
-      <view class="m-ask">
-        <view class="m-ask-row">
-          <Icon name="sparkle" :size="18" color="var(--accent)" />
           <textarea
             id="home-ask"
             v-model="question"
-            class="m-ask-input"
-            :auto-height="true"
+            class="c-input"
             :maxlength="2000"
+            :focus="focused"
             :show-confirm-bar="false"
             confirm-type="send"
-            placeholder="告诉我你想做什么…"
+            :placeholder="`向星络提问：规划旅行、安排日程、比价机票酒店、找${city}的美食…`"
+            @focus="focused = true"
+            @blur="focused = false"
             @confirm="ask"
           />
+          <view class="c-tools">
+            <view class="c-attach" title="添加附件" aria-label="添加附件" @click="pickFiles"><Icon name="plus" :size="18" color="var(--ink)" /></view>
+            <view v-for="e in ENTRIES" :key="e.label" class="c-entry" @click="e.go()">
+              <Icon :name="e.icon" :size="15" color="var(--ink)" /><text>{{ e.label }}</text>
+            </view>
+            <view class="c-right">
+              <ModelPicker :wide="wide" :small="!wide" />
+              <VoiceButton @text="addVoice" />
+              <button class="c-send" :disabled="!canSend" aria-label="发送" @click="ask"><Icon name="send" :size="17" color="#fff" /></button>
+            </view>
+          </view>
         </view>
-        <scroll-view scroll-x class="m-chips">
-          <text v-for="c in chips" :key="c" class="m-chip" @click="openChat(c)">{{ c }}</text>
-        </scroll-view>
-        <view class="m-ask-tools">
-          <view class="m-tool" @click="openChat()"><Icon name="plus" :size="18" color="var(--muted)" /></view>
-          <view class="ask-right">
-            <ModelPicker small />
-            <view class="m-send" :class="{ off: !question.trim() }" @click="ask"><Icon name="send" :size="18" color="#fff" /></view>
+
+        <view v-if="plans.length" class="plans">
+          <view class="sec-title">未完成的计划</view>
+          <view class="plan-list">
+            <view v-for="p in plans" :key="p.id" class="plan" @click="openTrip(p.id)">
+              <view class="plan-body">
+                <view class="plan-title">{{ p.title }}</view>
+                <view class="plan-meta">{{ p.meta }}</view>
+              </view>
+              <view class="plan-acts" @click.stop>
+                <text v-if="p.next && canGo(p.next)" class="plan-act" @click="navigate(p.next)">导航去{{ p.next.title }}</text>
+                <text class="plan-act" @click="adjust(p.title)">调整</text>
+                <text class="plan-act strong" @click="openTrip(p.id)">查看</text>
+              </view>
+            </view>
           </view>
         </view>
       </view>
-
-      <view class="m-entries">
-        <view v-for="q in quickMobile" :key="q.label" class="m-entry" @click="q.go()">
-          <DuoIcon :name="q.icon" :size="24" :tile="44" />
-          <text class="m-entry-label">{{ q.label }}</text>
-        </view>
-      </view>
-
-      <!-- 新用户还没有日程和行程：先给几句能直接点的话，告诉他星络能干嘛 -->
-      <view v-if="fresh" class="m-card m-start">
-        <view class="m-start-title">第一次用？点一句试试</view>
-        <view v-for="x in examples" :key="x.title" class="m-start-row" @click="openChat(x.ask)">
-          <DuoIcon :name="x.icon" :size="20" :tile="36" />
-          <view class="ex-body">
-            <view class="m-start-name">{{ x.title }}</view>
-            <view class="ex-sub">{{ x.ask }}</view>
-          </view>
-          <Icon name="right" :size="14" color="var(--muted)" />
-        </view>
-      </view>
-      <view v-else class="m-card"><TodayCard :agenda="agenda" :error="agendaError" @ask="openChat" /></view>
-
-      <view v-if="tripCard" class="m-card m-trip" @click="openTrip(tripCard.id)">
-        <image v-if="tripCover" class="tc-img" :src="tripCover" mode="aspectFill" />
-        <view v-else class="tc-img blank"><Icon name="trip" :size="20" color="#fff" /></view>
-        <view class="tc-body">
-          <view class="tc-label">{{ agenda?.trip ? "进行中的行程" : "最近的行程" }}</view>
-          <view class="tc-title">{{ tripCard.title }}</view>
-          <view class="muted small">{{ nextStop ? `下一站 ${nextStop.time} ${nextStop.title}` : tripCard.sub }}</view>
-        </view>
-        <text v-if="nextStop && canGo(nextStop)" class="tc-btn" @click.stop="navigate(nextStop)">导航</text>
-        <Icon v-else name="right" :size="16" color="var(--muted)" />
-      </view>
-
-      <view class="m-sec"><text class="sec-title">{{ city }}推荐</text><text class="sec-more" @click="openChat(`${city}有哪些值得去的地方？`)">更多</text></view>
-      <scroll-view v-if="spots.length" scroll-x class="m-recs">
-        <view v-for="sp in spots" :key="sp.id" class="m-rec" @click="openChat(`介绍一下${sp.name}，适合怎么玩`)">
-          <image v-if="sp.photo" class="m-rec-img" :src="sp.photo" mode="aspectFill" />
-          <view v-else class="m-rec-img blank" />
-          <view class="m-rec-name">{{ sp.name }}</view>
-          <view v-if="sp.rating" class="m-rec-meta">★ {{ sp.rating }}</view>
-        </view>
-      </scroll-view>
-      <view v-else class="muted small m-pad">{{ spotsLoaded ? `没找到${city}的景点` : "加载中…" }}</view>
-      <CityPicker v-if="picking" :current="city" @close="picking = false" @pick="changeCity" />
     </view>
+    <CityPicker v-if="picking" :current="city" @close="picking = false" @pick="changeCity" />
   </Shell>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { onShow } from "@dcloudio/uni-app";
 import { api } from "../../api";
 import { getToken } from "../../api/http";
-import type { Place, TodayAgenda, Trip } from "../../api/types";
+import type { AgendaEntry, ScheduleEvent, TodayAgenda, Trip, UploadView } from "../../api/types";
 import BrandMark from "../../components/BrandMark.vue";
 import CityPicker from "../../components/CityPicker.vue";
-import DuoIcon from "../../components/DuoIcon.vue";
-import ModelPicker from "../../components/ModelPicker.vue";
 import Icon from "../../components/Icon.vue";
+import ModelPicker from "../../components/ModelPicker.vue";
+import ConvSidebar from "../../components/ConvSidebar.vue";
+import VoiceButton from "../../components/VoiceButton.vue";
 import Shell from "../../components/Shell.vue";
-import TodayCard from "../../components/TodayCard.vue";
-import { cityCover, citySpots } from "../../utils/cover";
-import { shortDate, ymd } from "../../utils/format";
-import { cityOf, currentCity, setCurrentCity } from "../../utils/place";
+import { fileIcon, UPLOAD_EXTS } from "../../utils/attach";
+import { dayLabel, hm, shortDate, ymd } from "../../utils/format";
+import { loadDraft, saveDraft, setHandoff } from "../../utils/handoff";
+import { currentCity, setCurrentCity } from "../../utils/place";
 import { useWide } from "../../utils/screen";
 import { canGo, navigate } from "../../utils/today";
 
 /**
- * 首页：以和星络对话为中心。电脑上中间是提问框、示例和城市推荐，右栏是天气、今日安排、行程、快捷功能；
- * 手机上是问候和天气、提问框、功能入口、今日安排、行程卡、城市推荐。今日安排的每项能看详情、直接导航或打车。
+ * 首页：以和星络对话为中心（版式参考千问）。电脑上左边是最近对话；中间是"你好，我是星络"、
+ * 最近一条日程提醒（没有就不显示）、输入框（可带附件，工具行里是四个轻入口）、还没完成的旅行计划（没有就不显示）。
+ * 输入框的字存成草稿，刷新或登录回来不丢。
  */
+interface PendingFile {
+  key: number;
+  name: string;
+  state: "uploading" | "ok" | "error";
+  view?: UploadView;
+  error?: string;
+}
+
+const MAX_FILES = 5;
+const DRAFT_KEY = "home";
 const wide = useWide();
 const city = currentCity();
-const question = ref("");
+const question = ref(loadDraft(DRAFT_KEY));
+const focused = ref(false);
 const picking = ref(false);
 const nickname = ref("");
-const weather = ref<{ text: string; tempMin: number; tempMax: number } | null>(null);
+const pending = ref<PendingFile[]>([]);
+const events = ref<ScheduleEvent[]>([]);
+const trips = ref<Trip[]>([]);
 const agenda = ref<TodayAgenda | null>(null);
-const agendaError = ref("");
-const spots = ref<Place[]>([]);
-const spotsLoaded = ref(false);
-const spotStart = ref(0);
-const trip = ref<Trip | null>(null);
-const tripLoaded = ref(false);
-const tripCover = ref("");
+
 const today = ymd(new Date());
+let seq = 0;
 
-const hero = computed(() => spots.value.find((s) => s.photo)?.photo || "");
-const spotPage = computed(() => {
-  const list = spots.value;
-  if (list.length <= 4) return list;
-  return [0, 1, 2, 3].map((i) => list[(spotStart.value + i) % list.length]);
+watch(question, (v) => saveDraft(DRAFT_KEY, v));
+
+
+const canSend = computed(() => !pending.value.some((a) => a.state === "uploading")
+  && (!!question.value.trim() || pending.value.some((a) => a.state === "ok")));
+
+/** 最近一条还没到时间的日程（全天的当天也算） */
+const next = computed(() => {
+  const now = Date.now();
+  const e = events.value
+    .filter((x) => (x.allDay ? ymd(new Date(x.startAt)) >= today : Date.parse(x.startAt) > now))
+    .sort((a, b) => a.startAt.localeCompare(b.startAt))[0];
+  if (!e) return null;
+  const d = new Date(e.startAt);
+  return { title: e.title, location: e.location, when: `${dayLabel(d)} ${e.allDay ? "全天" : hm(d)}` };
 });
 
-const greeting = computed(() => {
-  const h = new Date().getHours();
-  if (h < 5) return "夜深了";
-  if (h < 11) return "早上好";
-  if (h < 13) return "中午好";
-  if (h < 18) return "下午好";
-  return "晚上好";
-});
+/** 还没结束的行程，最多三个；正在旅行的那个带上下一站 */
+const plans = computed(() =>
+  trips.value
+    .filter((t) => t.status !== "FINISHED" && (!t.endDate || t.endDate >= today))
+    .slice(0, 3)
+    .map((t) => {
+      const live = agenda.value?.trip?.id === t.id ? agenda.value.trip : null;
+      const nextStop: AgendaEntry | undefined = live ? agenda.value!.entries.find((e) => e.kind === "TRIP" && !e.past) : undefined;
+      const meta = live
+        ? `进行中 · 第 ${live.dayNo}/${live.totalDays} 天${nextStop ? ` · 下一站 ${nextStop.time} ${nextStop.title}` : ""}`
+        : `${dateRange(t)} · ${statusText(t)}`;
+      return { id: t.id, title: t.title, meta, next: nextStop };
+    }),
+);
 
-/** 行程卡：旅行中显示进行中的那个，否则最近的一个 */
-const tripCard = computed(() => {
-  const t = agenda.value?.trip;
-  if (t) return { id: t.id, title: t.title, sub: `第 ${t.dayNo}/${t.totalDays} 天` };
-  if (trip.value) return { id: trip.value.id, title: trip.value.title, sub: `${dateRange(trip.value)} · ${statusText(trip.value)}` };
-  return null;
-});
-/** 新用户：没有行程，今天也没有任何安排（手机首页把今日安排换成示例） */
-const fresh = computed(() => tripLoaded.value && !trip.value && !!agenda.value && !agenda.value.trip && !agenda.value.entries.length);
-/** 旅行中的下一站：今天还没开始的第一项行程安排 */
-const nextStop = computed(() => (agenda.value?.trip ? agenda.value.entries.find((e) => e.kind === "TRIP" && !e.past) : undefined));
-
-const HERO_LINKS = [
-  { label: "旅行规划", icon: "plane", go: () => openChat(`帮我规划${city}3天2晚的行程`) },
-  { label: "日程安排", icon: "calendar", go: () => uni.reLaunch({ url: "/pages/schedule/schedule" }) },
-  { label: "机票酒店", icon: "bed", go: () => go("/pages/search/flight") },
-  { label: "周边美食", icon: "food", go: () => go("/pages/search/food") },
-];
-
-const examples = computed(() => [
-  { title: "规划一次旅行", icon: "plane", ask: `帮我规划一个${city}3天2晚的行程` },
-  { title: "安排我的日程", icon: "calendar", ask: "明天下午 3 点提醒我去取快递" },
-  { title: "查询机票酒店", icon: "bed", ask: `帮我找${spots.value[0]?.name || city}附近的酒店比比价` },
-  { title: "附近有啥好吃的", icon: "food", ask: `${city}有什么必吃的本地菜？` },
-]);
-const chips = computed(() => [`周末${city}怎么玩`, `${city}必吃美食`, "明早 8 点提醒我", "帮我比比机票"]);
-
-const quickDesk = [
-  { label: "旅行规划", icon: "plane", go: () => openChat(`帮我规划${city}的旅行`) },
-  { label: "我的日程", icon: "calendar", go: () => uni.reLaunch({ url: "/pages/schedule/schedule" }) },
-  { label: "机票比价", icon: "flyCloud", go: () => go("/pages/search/flight") },
-  { label: "酒店比价", icon: "bed", go: () => go("/pages/search/hotel") },
-  { label: "附近美食", icon: "food", go: () => go("/pages/search/food") },
-  { label: "景点门票", icon: "ticket", go: () => go("/pages/search/ticket") },
-  { label: "地图出行", icon: "map", go: () => go(tripCard.value ? `/pages/plan/map?id=${tripCard.value.id}&day=1` : "/pages/plan/map") },
-  { label: "天气", icon: "weather", go: () => go("/pages/weather/weather") },
-];
-const quickMobile = [
-  { label: "旅行规划", icon: "plane", go: () => openChat(`帮我规划${city}的旅行`) },
-  { label: "附近美食", icon: "food", go: () => go("/pages/search/food") },
-  { label: "地图出行", icon: "map", go: () => go(tripCard.value ? `/pages/plan/map?id=${tripCard.value.id}&day=1` : "/pages/plan/map") },
-  { label: "景点门票", icon: "ticket", go: () => go("/pages/search/ticket") },
-  { label: "机票酒店", icon: "suitcase", go: () => go("/pages/search/flight") },
-  { label: "去哪儿玩", icon: "mountain", go: () => go("/pages/discover/discover") },
+const ENTRIES = [
+  { label: "规划旅行", icon: "plane", go: () => prefill(`帮我规划去${city}的旅行，3 天 2 晚`) },
+  { label: "机票比价", icon: "depart", go: () => uni.navigateTo({ url: "/pages/search/flight" }) },
+  { label: "酒店比价", icon: "bed", go: () => uni.navigateTo({ url: "/pages/search/hotel" }) },
+  { label: "添加提醒", icon: "bell", go: () => uni.reLaunch({ url: "/pages/schedule/schedule?new=1" }) },
 ];
 
 onMounted(() => {
   if (!getToken()) return;
   api.me().then((u) => (nickname.value = u.nickname || u.username)).catch(() => {});
-  // 天气偶尔超时，失败了隔两秒再试一次
-  api.weatherToday(city).catch(() => new Promise((r) => setTimeout(r, 2000)).then(() => api.weatherToday(city)))
-    .then((w) => (weather.value = w as typeof weather.value)).catch(() => {});
-  citySpots(city, 8).then((list) => (spots.value = list)).finally(() => (spotsLoaded.value = true));
-  loadTrip();
 });
 
-// 今日安排每次回到首页都刷新（可能刚在对话里加了日程）
+// 每次回到首页都刷新（可能刚在对话里加了日程、改了行程）；取不到就不显示对应区块
 onShow(() => {
-  if (getToken()) loadAgenda();
+  if (!getToken()) return;
+  api.events(today, ymd(new Date(Date.now() + 30 * 86400000))).then((list) => (events.value = list)).catch(() => {});
+  api.trips().then((list) => (trips.value = list)).catch(() => {});
+  api.today(city).then((a) => (agenda.value = a)).catch(() => {});
 });
-
-async function loadAgenda() {
-  try {
-    agenda.value = await api.today(city);
-    agendaError.value = "";
-  } catch (e) {
-    if (!agenda.value) agendaError.value = "今日安排没加载出来，下拉或稍后再试";
-  }
-}
-
-/** 最近的一个行程（不在旅行中时显示） */
-async function loadTrip() {
-  try {
-    const list = await api.trips();
-    trip.value = list[0] || null;
-    if (trip.value) cityCover(cityOf(trip.value.destination || trip.value.title)).then((url) => (tripCover.value = url));
-  } catch {
-    // 首页取不到行程只显示空状态
-  } finally {
-    tripLoaded.value = true;
-  }
-}
-
-function nextSpots() {
-  spotStart.value = (spotStart.value + 4) % spots.value.length;
-}
 
 function dateRange(t: Trip): string {
   if (!t.startDate) return "日期待定";
@@ -357,139 +186,154 @@ function dateRange(t: Trip): string {
 }
 
 function statusText(t: Trip): string {
-  if (t.status === "DRAFT") return "草稿";
-  if (t.status === "FINISHED" || (t.endDate && t.endDate < today)) return "已完成";
+  if (t.status === "DRAFT") return "未保存的方案";
   if (!t.startDate) return "日期待定";
   if (t.startDate <= today) return "进行中";
   const n = Math.round((Date.parse(t.startDate) - Date.parse(today)) / 86400000);
   return n === 1 ? "明天出发" : `${n} 天后出发`;
 }
 
-function go(url: string) {
-  uni.navigateTo({ url });
+/** 选文件并逐个上传识别，最多 5 个；失败的留着显示原因。 */
+function pickFiles() {
+  const room = MAX_FILES - pending.value.length;
+  if (room <= 0) {
+    uni.showToast({ title: `一次最多带 ${MAX_FILES} 个文件`, icon: "none" });
+    return;
+  }
+  uni.chooseFile({
+    count: room,
+    extension: UPLOAD_EXTS,
+    success: (res) => {
+      const files = (Array.isArray(res.tempFiles) ? res.tempFiles : [res.tempFiles]) as any[];
+      for (const f of files.slice(0, room)) {
+        const item = reactive<PendingFile>({ key: ++seq, name: f.name || "文件", state: "uploading" });
+        pending.value.push(item);
+        api.uploadFile({ path: f.path, name: f.name, file: f instanceof File ? f : undefined })
+          .then((view) => {
+            item.view = view;
+            item.state = "ok";
+          })
+          .catch((e) => {
+            item.state = "error";
+            item.error = e instanceof Error ? e.message : String(e);
+          });
+      }
+    },
+  });
 }
 
-/** 去对话页，带上问题就直接发出去。 */
-function openChat(q?: string) {
-  go("/pages/chat/chat" + (q ? `?q=${encodeURIComponent(q)}` : ""));
-}
-
+/** 把问题和附件交给对话页发出去；草稿等对话页真正发出后再清。 */
 function ask() {
-  const q = question.value.trim();
-  if (!q) return;
+  if (!canSend.value) return;
+  const ok = pending.value.filter((a) => a.state === "ok" && a.view);
+  const text = question.value.trim() || (ok.length > 1 ? "帮我看看这几个文件" : "帮我看看这个文件");
+  setHandoff({ text, files: ok.map((a) => ({ id: a.view!.id, name: a.view!.name })) });
+  pending.value = [];
   question.value = "";
-  openChat(q);
+  uni.navigateTo({ url: "/pages/chat/chat?handoff=1" });
+}
+
+/** 语音转好的文字接在输入框后面，用户看过再发 */
+function addVoice(text: string) {
+  question.value = question.value.trim() ? `${question.value.trim()} ${text}` : text;
+}
+
+/** 把一句话放进输入框，让用户改完再发 */
+function prefill(text: string) {
+  question.value = text;
+  focused.value = false;
+  setTimeout(() => (focused.value = true), 50);
+}
+
+function adjust(title: string) {
+  prefill(`调整一下「${title}」：`);
 }
 
 function openTrip(id: number) {
-  go(`/pages/trips/detail?id=${id}`);
+  uni.navigateTo({ url: `/pages/trips/detail?id=${id}` });
+}
+
+function newChat() {
+  uni.removeStorageSync("chat:last");
+  uni.navigateTo({ url: "/pages/chat/chat?new=1" });
+}
+
+function openConv(id: string) {
+  uni.navigateTo({ url: `/pages/chat/chat?id=${id}` });
+}
+
+
+function openSchedule() {
+  uni.reLaunch({ url: "/pages/schedule/schedule" });
 }
 
 function changeCity(c: string) {
   picking.value = false;
   setCurrentCity(c);
+  uni.reLaunch({ url: "/pages/home/home" });
 }
 </script>
 
 <style scoped>
-/* ===== 电脑 ===== */
-.desk { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 18px; padding: 18px 22px 28px; }
-.d-main { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
-.d-side { display: flex; flex-direction: column; gap: 14px; }
+.home-wrap { min-height: 100%; }
+.home-wrap.wide { display: flex; flex: 1; min-height: 0; height: 100%; }
 
-.hero { position: relative; overflow: hidden; border-radius: 22px; background: linear-gradient(180deg, var(--accent-soft), var(--surface) 75%); border: 1px solid var(--line); }
-.hero-bg { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: 45%; opacity: 0.18; -webkit-mask-image: linear-gradient(to top, #000 20%, transparent); mask-image: linear-gradient(to top, #000 20%, transparent); }
-.hero-body { position: relative; display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 34px 40px 30px; }
-.hero-brand { display: flex; align-items: center; gap: 12px; }
-.hero-brand-name { font-size: 20px; font-weight: 800; }
-.hero-brand-name .en, .m-brand-name .en { color: var(--accent); }
-.hero-brand-sub { font-size: 12px; color: var(--muted); }
-.hero-title { font-size: 34px; font-weight: 800; letter-spacing: 1px; text-align: center; }
-.hero-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 0; }
-.hero-link { display: flex; align-items: center; gap: 5px; font-size: 14px; color: var(--muted); cursor: pointer; }
-.hero-link:hover { color: var(--accent); }
-.hero-sep { color: var(--line); margin: 0 14px; }
-.ask-box { width: 100%; max-width: 860px; background: var(--surface); border: 1.5px solid var(--accent); border-radius: 18px; padding: 14px 16px 10px; box-shadow: 0 10px 30px rgba(47, 107, 242, 0.12); display: flex; flex-direction: column; gap: 8px; }
-.ask-input { width: auto; font-size: 16px; line-height: 24px; min-height: 48px; max-height: 120px; overflow-y: auto; color: var(--ink); }
-.ask-tools { display: flex; align-items: center; justify-content: space-between; }
-.ask-right { display: flex; align-items: center; gap: 8px; }
-.ask-tool { display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--muted); padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px; cursor: pointer; }
-.ask-send, .m-send { width: 42px; height: 42px; border-radius: 50%; background: var(--accent); display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
-.ask-send.off, .m-send.off { opacity: 0.45; }
 
-.sec-head, .m-sec { display: flex; align-items: center; gap: 6px; }
-.sec-title { font-size: 16px; font-weight: 700; }
-.sec-more { margin-left: auto; font-size: 13px; color: var(--accent); cursor: pointer; display: flex; align-items: center; gap: 4px; }
-.examples { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.example { display: flex; align-items: center; gap: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; cursor: pointer; }
-.example:hover { border-color: var(--accent); }
-.ex-body { flex: 1; min-width: 0; }
-.ex-title { font-size: 15px; font-weight: 700; }
-.ex-sub { font-size: 12px; color: var(--muted); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.recs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
-.rec { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; cursor: pointer; padding-bottom: 10px; }
-.rec-img { width: 100%; height: 110px; display: block; }
-.rec-img.blank, .m-rec-img.blank, .tc-img.blank { background: var(--accent); opacity: 0.7; display: flex; align-items: center; justify-content: center; }
-.rec-name { font-size: 14px; font-weight: 600; padding: 8px 10px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rec-meta { font-size: 12px; color: var(--muted); padding: 2px 10px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.star { color: var(--price); font-weight: 700; }
+/* 中间：问候、输入框、计划 */
+.home { flex: 1; min-width: 0; max-width: 880px; margin: 0 auto; padding: 0 24px 48px; box-sizing: border-box; display: flex; flex-direction: column; gap: 20px; }
+.home-wrap.wide .home { justify-content: center; overflow-y: auto; padding-top: 32px; }
+.hello { display: flex; align-items: center; justify-content: center; gap: 14px; }
+.hello-title { font-size: 30px; font-weight: 700; letter-spacing: -0.01em; line-height: 1.25; text-align: center; }
 
-.card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px; }
-.weather { display: flex; align-items: center; gap: 12px; cursor: pointer; }
-.w-body { flex: 1; min-width: 0; }
-.w-main { font-size: 18px; font-weight: 800; }
-.w-text { font-size: 13px; font-weight: 400; color: var(--muted); }
-.trip-card { display: flex; flex-direction: column; gap: 10px; cursor: pointer; }
-.trip-card.empty { flex-direction: row; align-items: center; }
-.tc-head { display: flex; justify-content: space-between; align-items: center; }
-.tc-label { font-size: 12px; color: var(--muted); }
-.tc-row { display: flex; gap: 10px; align-items: center; }
-.tc-img { width: 64px; height: 48px; border-radius: 10px; flex-shrink: 0; }
-.tc-body { flex: 1; min-width: 0; }
-.tc-title { font-size: 14px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tc-next { display: flex; align-items: center; gap: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
-.tc-next-name { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tc-btn { font-size: 12px; padding: 4px 10px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-weight: 600; white-space: nowrap; }
-.qf-head { margin-bottom: 10px; }
-.qf-title { font-size: 15px; font-weight: 700; }
-.qf-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px 6px; }
-.qf { display: flex; flex-direction: column; align-items: center; gap: 6px; cursor: pointer; }
-.qf-label { font-size: 12px; }
-.muted { color: var(--muted); }
-.small { font-size: 12px; }
+.next { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); font-size: 14px; cursor: pointer; align-self: center; max-width: 100%; box-sizing: border-box; }
+.next-when { color: var(--accent); font-weight: 600; white-space: nowrap; }
+.next-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.next-loc { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 
-/* ===== 手机 ===== */
-.home { display: flex; flex-direction: column; gap: 14px; padding: 12px 14px 24px; background: linear-gradient(180deg, var(--accent-soft), var(--bg) 320px); min-height: 100vh; box-sizing: border-box; }
-.m-top { display: flex; align-items: center; justify-content: space-between; }
-.m-brand { display: flex; align-items: center; gap: 10px; }
-.m-brand-name { font-size: 17px; font-weight: 800; }
-.m-brand-sub { font-size: 11px; color: var(--muted); }
-.city-chip { display: flex; align-items: center; gap: 4px; padding: 6px 10px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); font-size: 13px; }
-.greet { display: flex; flex-direction: column; gap: 4px; padding: 4px 2px 0; }
-.greet-title { font-size: 24px; font-weight: 800; }
-.greet-sub { display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--muted); }
-.m-ask { background: var(--surface); border: 1.5px solid var(--accent); border-radius: 18px; padding: 12px 12px 10px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 8px 24px rgba(47, 107, 242, 0.12); }
-.m-ask-row { display: flex; align-items: flex-start; gap: 8px; }
-.m-ask-input { flex: 1; width: auto; font-size: 15px; line-height: 22px; min-height: 22px; max-height: 88px; overflow-y: auto; color: var(--ink); }
-.m-chips { white-space: nowrap; }
-.m-chip { display: inline-block; font-size: 12px; padding: 6px 12px; margin-right: 8px; border-radius: 999px; background: var(--surface-2); color: var(--ink); }
-.m-ask-tools { display: flex; align-items: center; justify-content: space-between; }
-.m-tool { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; }
-.m-entries { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; background: var(--surface); border-radius: 16px; padding: 12px 4px; border: 1px solid var(--line); }
-.m-entry { display: flex; flex-direction: column; align-items: center; gap: 6px; }
-.m-entry-label { font-size: 11px; white-space: nowrap; }
-.m-card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 12px 14px; }
-.m-trip { display: flex; align-items: center; gap: 10px; }
-.m-start { display: flex; flex-direction: column; }
-.m-start-title { font-size: 15px; font-weight: 700; padding-bottom: 4px; }
-.m-start-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); }
-.m-start-title + .m-start-row { border-top: none; }
-.m-start-name { font-size: 14px; font-weight: 600; }
-.m-sec { padding: 0 2px; }
-.m-recs { white-space: nowrap; }
-.m-rec { display: inline-block; width: 140px; margin-right: 10px; background: var(--surface); border-radius: 12px; overflow: hidden; border: 1px solid var(--line); vertical-align: top; padding-bottom: 8px; }
-.m-rec-img { width: 140px; height: 90px; display: block; }
-.m-rec-name { font-size: 13px; font-weight: 600; padding: 6px 8px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.m-rec-meta { font-size: 11px; color: var(--price); padding: 0 8px; }
-.m-pad { padding: 0 4px; }
+.composer { background: var(--surface); border: 1px solid var(--line); border-radius: 24px; padding: 16px 16px 12px 20px; display: flex; flex-direction: column; gap: 10px; box-shadow: var(--shadow); box-sizing: border-box; transition: border-color 0.15s; }
+.composer.focus { border-color: var(--accent); }
+.c-input { width: 100%; min-height: 72px; height: 72px; font-size: 16px; line-height: 24px; color: var(--ink); }
+.c-tools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.c-attach { width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.c-entry { display: flex; align-items: center; gap: 5px; height: 32px; padding: 0 10px; border-radius: 8px; font-size: 14px; cursor: pointer; white-space: nowrap; }
+.c-attach:hover, .c-entry:hover { background: var(--surface-2); }
+.c-right { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+.c-send { width: 36px; height: 36px; margin: 0; padding: 0; border-radius: 50%; background: var(--accent); border: none; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
+.c-send::after { border: none; }
+.c-send[disabled] { background: var(--muted) !important; opacity: 0.4; cursor: default; }
+.att-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.att { display: flex; align-items: center; gap: 6px; max-width: 100%; padding: 4px 8px; border-radius: 8px; background: var(--surface-2); font-size: 12px; }
+.att.error { background: var(--danger-soft); color: var(--danger); }
+.att-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px; }
+.att-state { color: var(--muted); white-space: nowrap; }
+.att-x { cursor: pointer; display: flex; }
+
+.plans { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.sec-title { font-size: 13px; color: var(--muted); font-weight: 600; }
+.plan-list { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.plan { display: flex; align-items: center; gap: 16px; padding: 12px 18px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.plan:last-child { border-bottom: none; }
+.plan:hover { background: var(--surface-2); }
+.plan-body { flex: 1; min-width: 0; }
+.plan-title { font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plan-meta { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plan-acts { display: flex; gap: 16px; flex-shrink: 0; }
+.plan-act { font-size: 14px; color: var(--accent); cursor: pointer; white-space: nowrap; }
+.plan-act.strong { font-weight: 600; }
+
+/* 手机 */
+.m-top { display: flex; align-items: center; justify-content: flex-end; }
+.m-brand { display: flex; align-items: center; gap: 8px; }
+.m-brand-name { font-size: 17px; font-weight: 700; }
+.m-city { display: flex; align-items: center; gap: 4px; font-size: 14px; color: var(--muted); padding: 4px 0; }
+@media (max-width: 1023px) {
+  .home { padding: 16px 16px 32px; gap: 16px; }
+  .hello { justify-content: flex-start; padding-top: 16px; }
+  .hello-title { font-size: 22px; text-align: left; }
+  .next { align-self: stretch; border-radius: 10px; }
+  .composer { border-radius: 18px; padding: 12px 12px 10px 14px; }
+  .c-entry { padding: 0 8px; font-size: 13px; }
+  .plan { flex-direction: column; align-items: stretch; gap: 8px; padding: 12px 14px; }
+  .plan-acts { justify-content: flex-end; }
+}
 </style>

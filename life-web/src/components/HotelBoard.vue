@@ -77,7 +77,10 @@
             <text v-if="pickTitle(h)" class="pick-badge">{{ pickTitle(h) }}</text>
           </view>
           <view class="body">
-            <view class="name">{{ h.name }}</view>
+            <view class="name-row">
+              <view class="name">{{ h.name }}</view>
+              <FavButton :item="{ kind: 'HOTEL', refKey: h.id || h.name, title: h.name, subtitle: h.address, city: form.city, url: h.url, photo: h.photo }" />
+            </view>
             <view class="meta">
               <text v-if="h.rating" class="rating">★ {{ h.rating }}</text><text v-else class="muted">暂无评分</text>
               <text v-if="h.star" class="sep">·</text><text v-if="h.star">{{ h.star }}</text>
@@ -218,6 +221,7 @@
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref } from "vue";
 import Icon from "./Icon.vue";
+import FavButton from "./FavButton.vue";
 import RouteMap from "./RouteMap.vue";
 import { api } from "../api";
 import { showError } from "../api/http";
@@ -688,4 +692,5 @@ function tone(n: number) {
   .img { width: 92px; height: 80px; }
   .price-col { grid-column: 2; flex-direction: row; align-items: baseline; justify-content: flex-start; gap: 6px; }
 }
+.name-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 </style>

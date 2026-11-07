@@ -60,7 +60,7 @@ public class SuggestionService {
                 + (cardText.isEmpty() ? "" : "\n\n回答里展示的卡片：\n" + cardText);
         try {
             ModelSpec model = chatModels.resolve(chatModels.models().getRouter());
-            ResponseEntity<ChatResponse, Suggestions> response = chatModels.client(model).prompt()
+            ResponseEntity<ChatResponse, Suggestions> response = chatModels.quickClient(model).prompt()
                     .system(PROMPT).user(user)
                     .options(ChatModelRegistry.options(model, 0.3))
                     .call().responseEntity(Suggestions.class);

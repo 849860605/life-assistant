@@ -34,7 +34,10 @@
         <image v-if="f.photo" class="img" :src="f.photo" mode="aspectFill" />
         <view v-else class="img blank"><Icon name="food" :size="28" color="#fff" /></view>
         <view class="info">
-          <view class="name">{{ f.name }}</view>
+          <view class="name-row">
+            <view class="name">{{ f.name }}</view>
+            <FavButton :item="{ kind: 'FOOD', refKey: f.id || f.name, title: f.name, subtitle: f.cost ? `人均 ¥${f.cost}` : f.area, city, url: amapUrl(f, city), photo: f.photo }" />
+          </view>
           <view class="meta">
             <text v-if="f.rating" class="rating">★ {{ f.rating }}</text>
             <text v-if="f.rating" class="muted"> 高德评分</text>
@@ -69,6 +72,7 @@ import Shell from "../../components/Shell.vue";
 import { computed, reactive, ref } from "vue";
 import { onLoad } from "@dcloudio/uni-app";
 import Icon from "../../components/Icon.vue";
+import FavButton from "../../components/FavButton.vue";
 import RestaurantCard from "../../components/cards/RestaurantCard.vue";
 import { api } from "../../api";
 import { showError } from "../../api/http";
@@ -303,4 +307,5 @@ function ask() {
 .amap { font-size: 12px; color: var(--accent); cursor: pointer; }
 .filter.mine { gap: 4px; color: var(--accent); border: 1px solid var(--accent); padding: 3px 10px; border-radius: 999px; font-weight: 600; }
 .filter.mine.on { background: var(--accent); color: #fff; }
+.name-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 </style>

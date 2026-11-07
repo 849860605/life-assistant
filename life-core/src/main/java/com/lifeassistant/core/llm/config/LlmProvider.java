@@ -22,6 +22,8 @@ public class LlmProvider {
     private String authHeader;
     /** 关掉思考的额外请求参数，JSON 文本 */
     private String noThinking;
+    /** 思考参数格式：QWEN / TYPE / OPENAI / CUSTOM / NONE */
+    private String thinkingStyle;
     private Boolean enabled;
     private Integer sort;
     private OffsetDateTime createdAt;

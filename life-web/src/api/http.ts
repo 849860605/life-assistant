@@ -19,8 +19,20 @@ export function toLogin() {
   // 下载票据也一起清掉（utils/media.ts 里的 key）
   uni.removeStorageSync("life_media_ticket");
   const pages = getCurrentPages();
-  if (pages.length && pages[pages.length - 1].route === "pages/login/login") return;
+  const page = pages[pages.length - 1] as any;
+  if (page?.route === "pages/login/login") return;
+  rememberBack(page);
   uni.reLaunch({ url: "/pages/login/login" });
+}
+
+/** 登录后要回去的页面存在这里（同一个账号再登录才回去，换账号回首页） */
+export const BACK_KEY = "login:back";
+
+/** 记下当前页面和参数，登录后回到这里；输入框草稿各页面自己存着，回来就能恢复 */
+export function rememberBack(page?: { route?: string; options?: Record<string, string> }) {
+  if (!page?.route || page.route === "pages/login/login") return;
+  const query = page.options ? Object.entries(page.options).map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join("&") : "";
+  uni.setStorageSync(BACK_KEY, "/" + page.route + (query ? "?" + query : ""));
 }
 
 /** 后端返回的业务错误，message 可以直接展示给用户。 */

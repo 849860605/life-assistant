@@ -70,6 +70,8 @@ public class LifeProperties {
         private String authHeader;
         /** 关掉思考要额外带的请求参数（openai 类型才用），打分、分类这类简单任务用，例如 DeepSeek 是 thinking.type=disabled */
         private Map<String, Object> noThinking;
+        /** 思考参数格式：QWEN / TYPE / OPENAI / CUSTOM / NONE，空时有 noThinking 按 CUSTOM，否则按 NONE（见 ChatModelRegistry.thinkingParams） */
+        private String thinkingStyle;
     }
 
     /** 高德 Web 服务配置；地图能力走高德 MCP，这里的 Key 用于天气兜底。 */
