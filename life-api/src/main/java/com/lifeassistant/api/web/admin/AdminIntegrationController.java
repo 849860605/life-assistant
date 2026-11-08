@@ -8,6 +8,7 @@ import com.lifeassistant.core.audit.ToolCallLogMapper;
 import com.lifeassistant.core.integration.IntegrationCatalog;
 import com.lifeassistant.core.integration.IntegrationSettings;
 import com.lifeassistant.core.user.AdminUser;
+import com.lifeassistant.skill.travel.trip.QuickPriceSettings;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -37,6 +38,7 @@ public class AdminIntegrationController {
     private final IntegrationTester tester;
     private final ToolCallLogMapper callLogMapper;
     private final AdminContext adminContext;
+    private final QuickPriceSettings quickPrice;
 
     /**
      * 一个字段：value 是非敏感字段的值，敏感字段只给 masked（如 ••••a1b2）；source 是生效值从哪来
@@ -62,6 +64,30 @@ public class AdminIntegrationController {
 
     /** 启用停用的请求体。 */
     public record StatusRequest(boolean enabled) {
+    }
+
+    /** 改快速查价平台的请求体：不改的留空。 */
+    public record QuickPriceRequest(String flight, String hotel) {
+    }
+
+    /** GET /admin/api/v1/integrations/quick-price：规划行程时快速查价用哪家平台（机票、酒店参考价）和可选的平台。 */
+    @GetMapping("/quick-price")
+    public ApiResponse<QuickPriceSettings.View> quickPrice() {
+        adminContext.current();
+        return ApiResponse.ok(quickPrice.view());
+    }
+
+    /** PUT /admin/api/v1/integrations/quick-price：改快速查价平台，马上生效。 */
+    @PutMapping("/quick-price")
+    public ApiResponse<QuickPriceSettings.View> updateQuickPrice(@RequestBody QuickPriceRequest request) {
+        AdminUser me = adminContext.requireSuper();
+        QuickPriceSettings.View view = quickPrice.update(blank(request.flight()), blank(request.hotel()));
+        adminContext.log(me.getId(), "SET_QUICK_PRICE", "机票 " + view.flight() + "，酒店参考价 " + view.hotel());
+        return ApiResponse.ok(view);
+    }
+
+    private static String blank(String s) {
+        return s == null || s.isBlank() ? null : s.trim();
     }
 
     /** GET /admin/api/v1/integrations：全部平台，按分类排好。 */

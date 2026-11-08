@@ -33,16 +33,14 @@ import java.util.regex.Matcher;
 @RequiredArgsConstructor
 public class TripPriceCheck {
 
-    /** 酒店后台补价不查的平台 */
-    static final Set<String> HOTEL_SKIP = Set.of("途牛");
-    /** 机票后台补价不查的平台：飞猪已经查过 */
-    static final Set<String> FLIGHT_SKIP = Set.of("飞猪", "途牛");
 
     private final HotelQuoteBook quoteBook;
     private final FlightBook flightBook;
     private final HotelPriceTools hotelPriceTools;
     private final FlightTools flightTools;
     private final TripEditor tripEditor;
+    /** 快速查价用的平台：后台补价时跳过已经查过的那家 */
+    private final QuickPriceSettings quickPrice;
 
     /**
      * 要补比价的一项：key 是页面上用来对上的键（酒店"名称|入住日期"，航班"航班号|日期"）；
@@ -158,13 +156,13 @@ public class TripPriceCheck {
                     try {
                         if (t.hotel()) {
                             List<HotelPriceSource.Quote> q = hotelPriceTools.refine(t.name(), t.city(),
-                                    LocalDate.parse(t.checkIn()), LocalDate.parse(t.checkOut()), HOTEL_SKIP);
+                                    LocalDate.parse(t.checkIn()), LocalDate.parse(t.checkOut()), quickPrice.hotelSkip());
                             synchronized (hotels) {
                                 hotels.put(t.key(), q);
                             }
                         } else {
                             Map<String, FlightTools.PlatformPrice> p = flightTools.refine(t.origin(), t.destination(),
-                                    LocalDate.parse(t.checkIn()), t.name(), FLIGHT_SKIP);
+                                    LocalDate.parse(t.checkIn()), t.name(), quickPrice.flightSkip());
                             synchronized (flights) {
                                 flights.put(t.key(), p);
                             }

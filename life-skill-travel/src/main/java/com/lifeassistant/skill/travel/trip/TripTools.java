@@ -46,6 +46,7 @@ public class TripTools {
     private final CardHub cards;
     private final ObjectMapper objectMapper;
     private final TripPriceCheck priceCheck;
+    private final com.lifeassistant.core.conversation.TurnFlags turnFlags;
 
     /** 模型填的一项安排。 */
     public record PlanItem(
@@ -94,13 +95,17 @@ public class TripTools {
 
     /** 给出三套不同风格的方案概要，用户选一套后再展开成完整行程。 */
     @Tool(description = """
-            需求确认后、完整规划前调用：给出三套风格不同的方案概要（通常是省钱、舒适、深度体验，预算从低到高），
-            以方案卡展示给用户比较。只写概要，不查机票酒店，不调用 saveTripPlan。调用后这一轮就结束，等用户选。""")
+            只在用户明确要"几个方案选选"、或者还没想好怎么玩（只说了想出去玩、去哪好）时调用：给出三套风格不同的方案概要
+            （通常是省钱、舒适、深度体验，预算从低到高），以方案卡展示给用户比较。只写概要，不查机票酒店，不调用 saveTripPlan，
+            调用后这一轮就结束，等用户选。用户已经说了目的地和天数、或者说"直接出行程"时不要调用，直接展开成完整行程。""")
     public Map<String, Object> proposeTripPlans(
             @ToolParam(description = "目的地") String destination,
             @ToolParam(description = "开始日期 yyyy-MM-dd", required = false) String startDate,
             @ToolParam(description = "结束日期 yyyy-MM-dd", required = false) String endDate,
             @ToolParam(description = "三套方案，预算从低到高") List<PlanOption> options) {
+        if (turnFlags.userSaid("直接", "不用方案", "不要方案")) {
+            return Map.of("skipped", "用户要直接出行程，不出三套方案：按需求直接查价并调用 saveTripPlan 展开成完整行程。");
+        }
         if (options == null || options.isEmpty()) {
             return Map.of("error", "options 为空，要给出三套方案");
         }
@@ -154,6 +159,9 @@ public class TripTools {
             @ToolParam(description = "已经去过、不想再去的地方", required = false) List<String> visited,
             @ToolParam(description = "节奏：轻松 / 适中 / 紧凑", required = false) String pace,
             @ToolParam(description = "大交通：尽量直飞 / 中转也行 / 只要直飞，用户说过才填", required = false) String transfer) {
+        if (turnFlags.userSaid("直接", "跳过", "不用确认")) {
+            return Map.of("skipped", "用户要直接出行程，不弹需求卡：缺的信息按常识和记忆补，直接查价并调用 saveTripPlan 展开成完整行程。");
+        }
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("destination", destination);
         data.put("origin", origin);

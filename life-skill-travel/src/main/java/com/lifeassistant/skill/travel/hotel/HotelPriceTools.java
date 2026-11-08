@@ -6,6 +6,7 @@ import com.lifeassistant.core.audit.CallRecorder;
 import com.lifeassistant.core.card.CardHub;
 import com.lifeassistant.core.mcp.McpServerRegistry;
 import com.lifeassistant.core.place.AmapPlaceService;
+import com.lifeassistant.skill.travel.trip.QuickPriceSettings;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
@@ -47,10 +48,17 @@ public class HotelPriceTools {
     private final HotelQuoteBook quoteBook;
     private final HotelRanker ranker;
     private final AmapPlaceService places;
+    /** 这一轮的状态：规划时不做多平台比价 */
+    private final com.lifeassistant.core.conversation.TurnFlags turnFlags;
+    /** 快速选酒店的参考价用哪家（后台设置） */
+    private final QuickPriceSettings quickPrice;
 
     public HotelPriceTools(List<HotelPriceSource> sources, McpServerRegistry mcpServers, ObjectMapper objectMapper,
                            CallRecorder recorder, CardHub cards, HotelQuoteBook quoteBook, HotelRanker ranker,
-                           AmapPlaceService places) {
+                           AmapPlaceService places, QuickPriceSettings quickPrice,
+                           com.lifeassistant.core.conversation.TurnFlags turnFlags) {
+        this.quickPrice = quickPrice;
+        this.turnFlags = turnFlags;
         this.sources = sources;
         this.mcpServers = mcpServers;
         this.objectMapper = objectMapper;
@@ -81,7 +89,10 @@ public class HotelPriceTools {
             @ToolParam(description = "最低星级，如 4；没有要求就不填", required = false) Double minStar,
             @ToolParam(description = "候选酒店数量，默认 4，最多 5", required = false) Integer count,
             @ToolParam(description = "用户对住宿提过的要求，用顿号分开，例如：安静、房间有窗、早餐好、适合带娃；没提过就不填",
-                    required = false) String needs) {
+                    required = false) String needs) {        if (turnFlags.planningOnly()) {
+            return Map.of("skipped", "规划完整行程时不做多平台比价：用 quickHotels 的结果挑一家写进行程，其他平台的价格保存后后台补。");
+        }
+
         CardHub.Tracker progress = cards.track("查询酒店并比价");
         Map<String, Object> response = findAndCompare(place, placeType, city, checkIn, checkOut, maxPrice, minStar, count,
                 needs, progress);
@@ -149,6 +160,7 @@ public class HotelPriceTools {
 
     /**
      * 规划行程时的快速选酒店：RollingGo 找候选（自带实时价），并行查高德评分，按评分、要求匹配和价格挑前三家；
+     * 后台把参考价设成别的平台时，再用那一家给这三家并行报价（报不出来的保留 RollingGo 的价）。
      * 不查美团口碑、不跨平台比价、不发卡片。选中的写进行程后，后台再补其他平台的价格。
      */
     @Tool(description = """
@@ -165,6 +177,7 @@ public class HotelPriceTools {
             @ToolParam(description = "每晚预算上限（元），没有就不填", required = false) Double maxPrice,
             @ToolParam(description = "用户对住宿提过的要求，用顿号分开，例如：安静、早餐好；没提过就不填", required = false)
             String needs) {
+        turnFlags.mark(com.lifeassistant.core.conversation.TurnFlags.PLANNING);
         LocalDate in = date(checkIn);
         LocalDate out = date(checkOut);
         Optional<ToolCallback> search = mcpServers.tool("rollinggo", "searchHotels");
@@ -197,31 +210,66 @@ public class HotelPriceTools {
             return Map.of("error", "这个片区没搜到符合条件的酒店，换个片区或放宽预算再试");
         }
         List<QuickHotel> top = rankQuick(withRatings(found, city), needs, maxPrice).stream().limit(QUICK_HOTELS).toList();
-        CallRecorder.Scope scope = CallRecorder.current();
-        quoteBook.record(scope == null ? null : scope.conversationId(), new HotelQuoteBook.Comparison(city,
-                String.valueOf(in), String.valueOf(out), CardHub.now(), top.stream().map(h -> new HotelQuoteBook.Entry(
-                        h.name(), List.of(HotelPriceSource.Quote.ok("RollingGo", h.price(), "实时可订价", h.url(),
-                        h.name(), List.of(), null)))).toList()));
-        Map<String, Object> response = new LinkedHashMap<>();
-        response.put("hotels", top.stream().map(h -> {
+        // 参考价：默认 RollingGo 自带的；后台设成别的平台时用那一家报价
+        String refPlatform = quickPrice.hotelPlatform();
+        HotelPriceSource ref = QuickPriceSettings.ROLLINGGO.equals(refPlatform) ? null
+                : sources.stream().filter(s -> s.platform().equals(refPlatform) && s.available()).findFirst().orElse(null);
+        Map<String, HotelPriceSource.Quote> refQuotes = ref == null ? Map.of() : quoteEach(ref, top, city, in, out);
+        List<HotelQuoteBook.Entry> entries = new ArrayList<>();
+        List<Map<String, Object>> hotels = new ArrayList<>();
+        for (QuickHotel h : top) {
+            HotelPriceSource.Quote q = refQuotes.get(h.name());
+            boolean useRef = q != null && q.price() != null;
+            HotelPriceSource.Quote quote = useRef ? q
+                    : HotelPriceSource.Quote.ok("RollingGo", h.price(), "实时可订价", h.url(), h.name(), List.of(), null);
+            entries.add(new HotelQuoteBook.Entry(h.name(), List.of(quote)));
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("name", h.name());
-            m.put("pricePerNight", h.price() == null ? "暂无价格" : h.price());
+            m.put("pricePerNight", quote.price() == null ? "暂无价格" : quote.price());
+            m.put("priceFrom", quote.platform());
             m.put("amapRating", h.rating() == null ? "暂无" : h.rating());
             m.put("star", h.star());
             m.put("distanceMeters", h.distance());
             if (!h.tags().isEmpty()) {
                 m.put("tags", h.tags().stream().limit(4).toList());
             }
-            return m;
-        }).toList());
-        response.put("note", "价格只来自 RollingGo；写进行程后后台会补其他平台的价格，用户可以在行程里换");
+            hotels.add(m);
+        }
+        CallRecorder.Scope scope = CallRecorder.current();
+        quoteBook.record(scope == null ? null : scope.conversationId(), new HotelQuoteBook.Comparison(city,
+                String.valueOf(in), String.valueOf(out), CardHub.now(), entries));
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("hotels", hotels);
+        response.put("note", "价格只来自一家平台（见 priceFrom），是参考价；写进行程后后台会补其他平台的价格，用户可以在行程里换");
         return response;
     }
 
     /** 快速选酒店的一家候选：rating 是高德评分（查不到为空）。 */
     record QuickHotel(String name, Integer price, String url, String star, Integer distance, List<String> tags,
                       Double rating) {
+    }
+
+    /** 用一家平台给几家酒店并行报价，最多等几秒；报不出来的不在结果里。 */
+    private Map<String, HotelPriceSource.Quote> quoteEach(HotelPriceSource source, List<QuickHotel> hotels, String city,
+                                                          LocalDate in, LocalDate out) {
+        Map<String, HotelPriceSource.Quote> result = new java.util.concurrent.ConcurrentHashMap<>();
+        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            List<Future<?>> futures = hotels.stream().map(h -> executor.submit(() -> {
+                HotelPriceSource.Quote q = source.quote(h.name(), city, in, out);
+                if (q != null && q.price() != null) {
+                    result.put(h.name(), q);
+                }
+            })).collect(java.util.stream.Collectors.toList());
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(QUICK_RATING_SECONDS + 3);
+            for (Future<?> f : futures) {
+                try {
+                    f.get(Math.max(0, deadline - System.nanoTime()), TimeUnit.NANOSECONDS);
+                } catch (Exception e) {
+                    f.cancel(true);
+                }
+            }
+        }
+        return result;
     }
 
     /** 并行查高德评分，最多等几秒，查不到的评分留空。 */

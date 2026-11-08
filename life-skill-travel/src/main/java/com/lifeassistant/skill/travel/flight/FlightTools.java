@@ -31,8 +31,16 @@ public class FlightTools {
     private final com.lifeassistant.core.cache.QueryCache queryCache;
     private final FlightBook flightBook;
 
+    /** 这一轮的状态：规划时不做多平台比价 */
+    private final com.lifeassistant.core.conversation.TurnFlags turnFlags;
+    /** 快速查价用哪家（后台设置） */
+    private final com.lifeassistant.skill.travel.trip.QuickPriceSettings quickPrice;
+
     public FlightTools(List<FlightPriceSource> sources, CardHub cards, com.lifeassistant.core.cache.QueryCache queryCache,
-                       FlightBook flightBook) {
+                       FlightBook flightBook, com.lifeassistant.skill.travel.trip.QuickPriceSettings quickPrice,
+                       com.lifeassistant.core.conversation.TurnFlags turnFlags) {
+        this.quickPrice = quickPrice;
+        this.turnFlags = turnFlags;
         this.sources = sources;
         this.cards = cards;
         this.queryCache = queryCache;
@@ -68,6 +76,9 @@ public class FlightTools {
             @ToolParam(description = "出发城市，例如：深圳") String origin,
             @ToolParam(description = "到达城市，例如：北京") String destination,
             @ToolParam(description = "出发日期 yyyy-MM-dd") String date) {
+        if (turnFlags.planningOnly()) {
+            return Map.of("skipped", "规划完整行程时不做多平台比价：用 quickFlights 的结果挑一班写进行程，其他平台的价格保存后后台补。");
+        }
         CardHub.Tracker progress = cards.track("机票比价 " + origin + " → " + destination);
         Map<String, Object> out = compare(origin, destination, date, MAX_FLIGHTS, null, progress);
         progress.finish(out.containsKey("error") ? "没查成：" + out.get("error")
@@ -92,7 +103,7 @@ public class FlightTools {
      * 规划行程时用的快速查价：只查飞猪（一两秒），不发卡片；挑中的那班写进行程后，后台再去携程、美团补比价。
      */
     @Tool(description = """
-            规划完整行程时查大交通用这个：只查飞猪，一两秒出结果，不出比价卡片。按偏好返回几班（航班号、起降时间、机场、价格），
+            规划完整行程时查大交通用这个：只查一家平台（后台设置，默认飞猪），一两秒出结果，不出比价卡片。按偏好返回几班（航班号、起降时间、机场、价格），
             从里面挑一班写进行程（TRANSPORT 项的 name 里带航班号，如"南航 CZ3401 双流T2 → 萧山T3"），价格和链接后端会自动带上，
             其他平台的价格行程生成后后台补。往返就去程、回程各调一次，可以和酒店、天气一起并行调用。
             用户单独问机票价格、或者说要全部比好价时用 compareFlights。""")
@@ -110,10 +121,13 @@ public class FlightTools {
         if (day.isBefore(LocalDate.now())) {
             return Map.of("error", day + " 已经过去了");
         }
-        FlightPriceSource fliggy = sources.stream().filter(s -> "飞猪".equals(s.platform()) && s.available()).findFirst()
-                .orElse(null);
+        turnFlags.mark(com.lifeassistant.core.conversation.TurnFlags.PLANNING);
+        // 只查后台设置的那一家；它没配置时换一家能用的
+        String want = quickPrice.flightPlatform();
+        FlightPriceSource fliggy = sources.stream().filter(s -> want.equals(s.platform()) && s.available()).findFirst()
+                .or(() -> sources.stream().filter(FlightPriceSource::available).findFirst()).orElse(null);
         if (fliggy == null) {
-            return Map.of("error", "飞猪没有配置，改用 compareFlights 查");
+            return Map.of("error", "机票平台都没有配置，改用 compareFlights 查");
         }
         FlightPriceSource.Result result;
         try {
@@ -123,7 +137,7 @@ public class FlightTools {
         }
         List<Flight> flights = pick(merge(List.of(result), PAGE_FLIGHTS), preference);
         if (flights.isEmpty()) {
-            return Map.of("error", "飞猪没查到这天的航班" + (result.note() == null ? "" : "（" + result.note() + "）")
+            return Map.of("error", fliggy.platform() + "没查到这天的航班" + (result.note() == null ? "" : "（" + result.note() + "）")
                     + "，改用 compareFlights 查各平台");
         }
         record(origin, destination, day.toString(), flights);
@@ -141,7 +155,7 @@ public class FlightTools {
             }
             return m;
         }).toList());
-        out.put("note", "价格只来自飞猪；写进行程后后台会补携程、美团的价格");
+        out.put("note", "价格只来自" + fliggy.platform() + "，是参考价；写进行程后后台会补其他平台的价格");
         return out;
     }
 

@@ -21,6 +21,7 @@ import java.util.Map;
 public class RouteTools {
 
     private final AmapPlaceService places;
+    private final com.lifeassistant.core.conversation.TurnFlags turnFlags;
 
     @Tool(description = """
             查两地之间怎么走，同时返回地铁公交方案（坐哪几条线、分钟、每人票价、步行公里）和打车方案（分钟、公里、打车费估算），
@@ -29,6 +30,9 @@ public class RouteTools {
             @ToolParam(description = "起点，地点名称，例如：西安钟楼") String origin,
             @ToolParam(description = "终点，地点名称，例如：秦始皇兵马俑博物馆") String destination,
             @ToolParam(description = "所在城市，例如：西安") String city) {
+        if (turnFlags.planningOnly()) {
+            return Map.of("skipped", "规划完整行程时不用逐段查路线：行程保存后系统会自动补每段的路程和交通方式。直接把行程写出来。");
+        }
         if (!places.available()) {
             return Map.of("error", "还没有配置高德 Key，查不了路线");
         }

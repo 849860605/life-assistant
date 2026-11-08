@@ -152,6 +152,14 @@ export interface LlmModel {
 
 export type LlmModelForm = Omit<LlmModel, "id">;
 
+/** 规划行程时快速查价用哪家：机票、酒店参考价，以及可选的平台（available 是已配置好） */
+export interface QuickPrice {
+  flight: string;
+  hotel: string;
+  flightOptions: { platform: string; available: boolean }[];
+  hotelOptions: { platform: string; available: boolean }[];
+}
+
 /** 测试连接的结果 */
 export interface LlmTestResult {
   ok: boolean;
@@ -330,6 +338,8 @@ export const api = {
   opActions: () => request<string[]>("GET", "/op-logs/actions"),
 
   integrations: () => request<Integration[]>("GET", "/integrations"),
+  quickPrice: () => request<QuickPrice>("GET", "/integrations/quick-price"),
+  setQuickPrice: (body: { flight?: string; hotel?: string }) => request<QuickPrice>("PUT", "/integrations/quick-price", body),
   updateIntegration: (code: string, values: Record<string, string>, clear: string[]) =>
     request<Integration>("PUT", `/integrations/${code}`, { values, clear }),
   setIntegrationEnabled: (code: string, enabled: boolean) =>

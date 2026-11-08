@@ -8,6 +8,28 @@
       <el-button :icon="Refresh" :loading="loading" @click="load">刷新</el-button>
     </div>
 
+    <!-- 规划行程时快速查价用哪家：对话里只查这一家，其他平台保存后后台补 -->
+    <section v-if="quick" class="card quick">
+      <div class="quick-head">
+        <h2 class="group-title">快速查价</h2>
+        <span class="muted small">让星络规划行程时，机票和酒店只查一家拿参考价，几秒出方案；其他平台的价格在行程保存后由后台补上，用户在行程里也能点"比价"</span>
+      </div>
+      <div class="quick-row">
+        <label class="quick-label" for="quick-flight">机票</label>
+        <el-select id="quick-flight" :model-value="quick.flight" :disabled="!isSuper() || quickBusy" style="width: 200px" @change="(v: string) => saveQuick({ flight: v })">
+          <el-option v-for="o in quick.flightOptions" :key="o.platform" :value="o.platform" :label="o.platform + (o.available ? '' : '（未配置）')" :disabled="!o.available" />
+        </el-select>
+        <span class="muted small">按航线只查这一家，挑一班写进行程</span>
+      </div>
+      <div class="quick-row">
+        <label class="quick-label" for="quick-hotel">酒店参考价</label>
+        <el-select id="quick-hotel" :model-value="quick.hotel" :disabled="!isSuper() || quickBusy" style="width: 200px" @change="(v: string) => saveQuick({ hotel: v })">
+          <el-option v-for="o in quick.hotelOptions" :key="o.platform" :value="o.platform" :label="o.platform + (o.available ? '' : '（未配置）')" :disabled="!o.available" />
+        </el-select>
+        <span class="muted small">候选酒店由 RollingGo 按片区搜；选别的平台时，再用它给前三家报价</span>
+      </div>
+    </section>
+
     <div v-loading="loading && !list.length" class="groups">
       <section v-for="g in groups" :key="g.category" class="group">
         <h2 class="group-title">{{ g.category }}</h2>
@@ -106,7 +128,7 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { Refresh } from "@element-plus/icons-vue";
-import { api, type Integration, type IntegrationField, type IntegrationTest } from "../api";
+import { api, type Integration, type IntegrationField, type IntegrationTest, type QuickPrice } from "../api";
 import { isSuper } from "../session";
 import { narrow } from "../utils";
 
@@ -115,6 +137,21 @@ import { narrow } from "../utils";
  * 超级管理员能改 Key 和地址、启用停用、测试。Key 只显示后 4 位，编辑时留空表示不改。
  */
 const list = ref<Integration[]>([]);
+/** 快速查价设置 */
+const quick = ref<QuickPrice | null>(null);
+const quickBusy = ref(false);
+
+async function saveQuick(body: { flight?: string; hotel?: string }) {
+  quickBusy.value = true;
+  try {
+    quick.value = await api.setQuickPrice(body);
+    ElMessage.success("已保存，下一次规划就按这个查");
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : String(e));
+  } finally {
+    quickBusy.value = false;
+  }
+}
 const loading = ref(false);
 const busy = ref("");
 const testing = ref("");
@@ -137,6 +174,7 @@ const groups = computed(() => {
 });
 
 async function load() {
+  api.quickPrice().then((q) => (quick.value = q)).catch(() => {});
   loading.value = true;
   try {
     list.value = await api.integrations();
@@ -358,4 +396,9 @@ onMounted(load);
   padding: 8px 10px;
   border-radius: 8px;
 }
+.quick { padding: 16px 20px; margin-bottom: 20px; display: flex; flex-direction: column; gap: 12px; }
+.quick-head { display: flex; flex-direction: column; gap: 4px; }
+.quick-head .group-title { margin: 0; }
+.quick-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.quick-label { width: 80px; font-size: 14px; }
 </style>

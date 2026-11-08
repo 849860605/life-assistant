@@ -16,6 +16,7 @@ import com.lifeassistant.core.orchestrator.ChatOrchestrator;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
+import com.lifeassistant.core.conversation.TurnFlags;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
@@ -42,6 +43,7 @@ import java.util.Map;
 public class ConversationController {
 
     private final AuthFacade authFacade;
+    private final TurnFlags turnFlags;
     private final ConversationService conversationService;
     private final ChatOrchestrator chatOrchestrator;
     private final UploadService uploadService;
@@ -109,6 +111,8 @@ public class ConversationController {
         // 每天的对话次数：免费用户和会员上限不同，超了直接报错，不进模型
         chatQuota.consume(ctx.userId());
         String input = uploadService.compose(ctx, request.content(), request.files());
+        // 新的一轮：清掉上一轮工具打的标记（比如"正在规划"）
+        turnFlags.start(id, request.content());
         boolean chip = Boolean.TRUE.equals(request.chip());
         if (chip) {
             // 记下点了哪个快捷回复，以后看哪些有用

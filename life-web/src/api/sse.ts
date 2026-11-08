@@ -13,7 +13,8 @@ export async function streamMessage(conversationId: string, content: string,
     headers: {
       Authorization: `Bearer ${getToken()}`,
       "Content-Type": "application/json",
-      Accept: "text/event-stream",
+      // 出错时（比如今天的次数用完）后端返回 JSON，要一起声明能收，不然只能得到 500
+      Accept: "text/event-stream, application/json",
     },
     body: JSON.stringify({ content, files: extra.files || [], chip: !!extra.chip }),
     signal,

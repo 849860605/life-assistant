@@ -24,6 +24,7 @@ public class WebSearchTools {
     private static final int MAX_SUMMARY = 500;
 
     private final WebSearchProvider searchProvider;
+    private final com.lifeassistant.core.conversation.TurnFlags turnFlags;
 
     /** 两次搜索：限定小红书 6 条 + 全网 6 条，按链接去重；没配置或出错时返回说明文字，不让对话失败。 */
     @Tool(description = """
@@ -33,6 +34,9 @@ public class WebSearchTools {
     public Map<String, Object> searchGuides(
             @ToolParam(description = "搜索词，例如：西安两日游攻略、泰山夜爬 避坑") String query,
             @ToolParam(description = "是否只要最近一年的内容；季节性、时效性强的问题填 true", required = false) Boolean recentOnly) {
+        if (turnFlags.planningOnly()) {
+            return Map.of("skipped", "规划完整行程时先不搜攻略，按常识把行程写出来；用户问到玩法、避坑时再搜。");
+        }
         if (!searchProvider.available()) {
             return Map.of("error", "联网搜索没有配置，告诉用户在 .env 里填 BOCHA_API_KEY");
         }

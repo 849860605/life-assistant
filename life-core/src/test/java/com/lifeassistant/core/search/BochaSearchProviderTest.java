@@ -64,7 +64,7 @@ class BochaSearchProviderTest {
 
     @Test
     void toolReturnsHintWhenNotConfigured() {
-        WebSearchTools tools = new WebSearchTools(provider("", "http://127.0.0.1:1"));
+        WebSearchTools tools = new WebSearchTools(provider("", "http://127.0.0.1:1"), new com.lifeassistant.core.conversation.TurnFlags());
         assertThat(tools.searchGuides("西安两日游", null)).containsKey("error");
     }
 
@@ -81,7 +81,7 @@ class BochaSearchProviderTest {
             }
         };
 
-        Map<String, Object> result = new WebSearchTools(fake).searchGuides("西安", false);
+        Map<String, Object> result = new WebSearchTools(fake, new com.lifeassistant.core.conversation.TurnFlags()).searchGuides("西安", false);
 
         assertThat((List<?>) result.get("xiaohongshu")).hasSize(1);
         assertThat((List<?>) result.get("others")).hasSize(1);
