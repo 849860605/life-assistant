@@ -6,6 +6,11 @@ const STALE_MS = 3 * 60 * 1000;
 /** 航班号：两位航司代码加三四位数字，如 MU5402（不用后行断言，老版本 iOS 不支持） */
 const FLIGHT_NO = /(?:^|[^A-Z0-9])([A-Z0-9]{2}\d{3,4})(?!\d)/;
 
+/** 一段文字里的航班号（首页从今天的安排里找航班用），没有返回空 */
+export function flightNoIn(text: string | null | undefined): string | null {
+  return text?.match(FLIGHT_NO)?.[1] || null;
+}
+
 /** 交通项名称里的航班号，不是航班返回空 */
 export function flightNoOf(item: ItineraryItem): string | null {
   if (item.type !== "TRANSPORT") return null;

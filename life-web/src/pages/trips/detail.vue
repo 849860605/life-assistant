@@ -91,6 +91,7 @@
                   </view>
                   <view v-if="isCurrent" class="tl-more" @click="more(item)"><Icon name="more" :size="16" color="var(--muted)" /></view>
                 </view>
+                <FlightStatusCard v-if="day && flightNoOf(item)" :flight-no="flightNoOf(item)!" :date="day.date" />
                 <view v-if="isCurrent && (BOOKABLE.includes(item.type) || doneable(item.type))" class="tl-acts">
                   <template v-if="EDITABLE.includes(item.type)">
                     <view class="a keep" :class="{ on: item.locked }" @click="toggleKeep(item)"><Icon name="heart" :size="13" :fill="!!item.locked" color="var(--ok)" />{{ item.locked ? "已保留" : "喜欢，保留" }}</view>
@@ -290,6 +291,7 @@
                 <text v-if="doneable(item.type)" class="done-btn" :class="{ on: isDone(item.id) }" @click.stop="toggleDone(item)">{{ isDone(item.id) ? "✓ " : "" }}{{ doneText(item.type, isDone(item.id)) }}</text>
                 <view class="stop-time">{{ item.start }}<text v-if="item.end"> - {{ item.end }}</text><text v-if="item.rating" class="star"> · ★{{ item.rating }}</text><text v-if="item.cost" class="cost"> · ¥{{ item.cost }}/人</text><text v-if="day && flightChecking(itinerary, item, day.date)" class="checking"> · 其他平台比价中…</text></view>
                 <view v-if="item.note" class="stop-note">{{ item.note }}</view>
+                <FlightStatusCard v-if="day && flightNoOf(item)" :flight-no="flightNoOf(item)!" :date="day.date" compact />
                 <view v-if="EDITABLE.includes(item.type)" class="amap-links">
                   <text class="amap" @click.stop="openUrl(amapUrl(item, city))"><Icon name="pin" :size="12" color="var(--accent)" /> 高德地图</text>
                   <text class="amap" @click.stop="openUrl(amapNavUrl(item, city))"><Icon name="nav" :size="12" color="var(--accent)" /> 导航</text>
@@ -394,6 +396,7 @@ import { API_BASE, showError } from "../../api/http";
 import { ensureMediaTicket } from "../../utils/media";
 import type { ChangeReason, ItineraryDay, ItineraryItem, ItineraryLeg, Place, ScheduleEvent, Stay, TripDetail, TripVersion } from "../../api/types";
 import Icon from "../../components/Icon.vue";
+import FlightStatusCard from "../../components/FlightStatusCard.vue";
 import MarkdownView from "../../components/MarkdownView.vue";
 import ReplaceModal from "../../components/ReplaceModal.vue";
 import StayCard from "../../components/StayCard.vue";

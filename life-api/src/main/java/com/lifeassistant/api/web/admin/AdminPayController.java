@@ -41,6 +41,7 @@ public class AdminPayController {
     private final AlipayPayService payService;
     private final MembershipService membership;
     private final ChatQuota chatQuota;
+    private final com.lifeassistant.core.member.FeatureTrial featureTrial;
     private final UserMapper userMapper;
     private final AdminContext adminContext;
 
@@ -49,7 +50,11 @@ public class AdminPayController {
     }
 
     /** 会员设置：月度价格、一次多少天、支付宝收款配置好了没有，免费用户和会员每天能对话多少次。 */
-    public record MemberSetting(String price, int days, boolean payReady, int freeDaily, int memberDaily) {
+    public record MemberSetting(String price, int days, boolean payReady, int freeDaily, int memberDaily, int flightTrial) {
+    }
+
+    /** 改免费试查次数的请求体。 */
+    public record TrialRequest(int flightTrial) {
     }
 
     /** 改每天对话次数的请求体。 */
@@ -166,6 +171,15 @@ public class AdminPayController {
         return ApiResponse.ok(setting());
     }
 
+    /** PUT /admin/api/v1/pay/member/trial：改免费用户能试查几次航班实时动态（0 表示不给试用）。 */
+    @PutMapping("/member/trial")
+    public ApiResponse<MemberSetting> setTrial(@RequestBody TrialRequest request) {
+        AdminUser me = adminContext.requireSuper();
+        int n = featureTrial.setLimit(com.lifeassistant.core.member.FeatureTrial.FLIGHT_STATUS, request.flightTrial());
+        adminContext.log(me.getId(), "SET_FEATURE_TRIAL", "航班实时动态免费试查 " + n + " 次");
+        return ApiResponse.ok(setting());
+    }
+
     /** GET /admin/api/v1/pay/members/{userId}：某个用户的会员状态、今天的对话次数和会员记录。 */
     @GetMapping("/members/{userId}")
     public ApiResponse<MemberStatus> memberStatus(@PathVariable long userId) {
@@ -210,6 +224,6 @@ public class AdminPayController {
     private MemberSetting setting() {
         MembershipService.Quota q = membership.quota();
         return new MemberSetting(membership.monthPrice().toPlainString(), MembershipService.MONTH_DAYS, payService.ready(),
-                q.freeDaily(), q.memberDaily());
+                q.freeDaily(), q.memberDaily(), featureTrial.limit(com.lifeassistant.core.member.FeatureTrial.FLIGHT_STATUS));
     }
 }

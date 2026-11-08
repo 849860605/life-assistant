@@ -134,6 +134,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from "vue";
+import { flightTrial, loadFlightTrial } from "../../utils/flightTrial";
 import { onLoad, onShow } from "@dcloudio/uni-app";
 import Icon from "../../components/Icon.vue";
 import Shell from "../../components/Shell.vue";
@@ -165,6 +166,7 @@ let returnedNo = "";
 
 const benefits = computed(() => [
   { icon: "chat", title: `每天和星络对话 ${info.value?.memberDaily ?? 200} 次`, desc: `免费用户每天 ${info.value?.freeDaily ?? 20} 次` },
+  { icon: "plane", title: "航班实时动态不限次", desc: `值机柜台、登机口、延误、行李转盘，起飞前随时看${flightTrial.loaded && flightTrial.total ? `；免费用户可试查 ${flightTrial.total} 次` : ""}` },
   { icon: "bed", title: "酒店机票比价", desc: "在已接入的平台之间比较报价，下单在平台完成" },
   { icon: "calendar", title: "出行当天的安排和提醒", desc: "每天的安排、几点出发，一键导航和打车入口" },
   { icon: "sparkle", title: "新功能抢先体验", desc: "新能力先给会员用" },
@@ -179,6 +181,7 @@ onLoad((q) => {
 });
 
 onShow(async () => {
+  loadFlightTrial();
   await load();
   if (returnedNo) {
     const no = returnedNo;

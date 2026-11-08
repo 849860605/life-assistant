@@ -179,6 +179,9 @@ life:
       url: https://mcp.rollinggo.cn
       endpoint: /mcp
       api-key: ${ROLLINGGO_API_KEY:}
+  # 飞常准航空数据（航班实时动态：值机柜台、登机口、延误、行李转盘），按次计费；没填 Key 时这个功能不可用
+  variflight:
+    api-key: ${VARIFLIGHT_API_KEY:}
   # 联网搜攻略（博查），没填 Key 时搜索工具会告诉模型"没配置"
   search:
     bocha-api-key: ${BOCHA_API_KEY:}

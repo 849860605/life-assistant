@@ -41,13 +41,16 @@ public class TravelSkill implements LifeSkill {
     private final FoodTools foodTools;
     private final RouteTools routeTools;
     private final com.lifeassistant.skill.travel.train.TrainTools trainTools;
+    private final com.lifeassistant.skill.travel.flight.FlightStatusTools flightStatusTools;
     private final McpServerRegistry mcpServers;
 
     public TravelSkill(WeatherTools weatherTools, HikingTools hikingTools, TripTools tripTools,
                        TripEditTools tripEditTools, ScheduleTools scheduleTools, HotelLinkTools hotelLinkTools, WebSearchTools webSearchTools,
                        HotelPriceTools hotelPriceTools, FlightTools flightTools, FoodTools foodTools, RouteTools routeTools,
-                       com.lifeassistant.skill.travel.train.TrainTools trainTools, McpServerRegistry mcpServers) {
+                       com.lifeassistant.skill.travel.train.TrainTools trainTools,
+                       com.lifeassistant.skill.travel.flight.FlightStatusTools flightStatusTools, McpServerRegistry mcpServers) {
         this.trainTools = trainTools;
+        this.flightStatusTools = flightStatusTools;
         this.weatherTools = weatherTools;
         this.hikingTools = hikingTools;
         this.tripTools = tripTools;
@@ -97,7 +100,7 @@ public class TravelSkill implements LifeSkill {
 
     static {
         SCENES.put("plan", "规划行程：去哪玩几天怎么安排，生成或重新生成整份行程，确认保存、建出行提醒");
-        SCENES.put("query", "单独查询：机票、酒店、火车票价格和比价，怎么去某地，攻略玩法，景点附近吃的，出行天气");
+        SCENES.put("query", "单独查询：机票、酒店、火车票价格和比价，航班实时动态（登机口、延误），怎么去某地，攻略玩法，景点附近吃的，出行天气");
         SCENES.put("edit", "改已保存的行程：查看我的行程，换景点、调顺序、加减天、改日期、换酒店或航班");
         SCENES.put("hiking", "爬山徒步：算用时、最晚出发时间、山顶温度、风险评估");
         SCENES.put("doc", "用户上传了机票行程单、酒店订单等单据，识别后记进行程");
@@ -108,7 +111,8 @@ public class TravelSkill implements LifeSkill {
             "plan", Set.of("askTripRequirements", "proposeTripPlans", "saveTripPlan", "confirmTrip", "listMyTrips",
                     "dailyWeather", "quickHotels", "quickFlights", "quickTrains", "quickDrive", "findRestaurants", "createEvent"),
             "query", Set.of("dailyWeather", "hourlyWeather", "findAndCompareHotels", "compareHotelPrices", "hotelLinks",
-                    "compareFlights", "quickTrains", "quickDrive", "compareRoutes", "searchGuides", "findRestaurants"),
+                    "compareFlights", "quickTrains", "quickDrive", "compareRoutes", "searchGuides", "findRestaurants",
+                    "flightStatus"),
             "edit", Set.of("listMyTrips", "getTrip", "replaceTripItems", "removeTripItems", "addTripItems", "reorderTripDay",
                     "swapTripDays", "rewriteTripDays", "changeTripHotel", "findAndCompareHotels", "quickHotels", "quickFlights",
                     "quickTrains", "confirmTrip", "createEvent", "listEvents", "deleteEvent", "dailyWeather"),
@@ -207,7 +211,9 @@ public class TravelSkill implements LifeSkill {
                 - 机票：用 compareFlights（往返就去程、回程各查一次），按用户在意的价格或时间挑一两班，提醒早班机算好去机场的时间、
                   价格可能不含机建燃油。直飞没有或太贵时，把几种走法列给用户比，问他选哪种；"只要直飞"就不推荐中转。
                   一班都没查到时按返回的 notice 说原因，不要把报错原样念给用户，也不要编航班和价格。
-                - 天气：为出行、爬山问天气用 dailyWeather，爬山当天看 hourlyWeather。""");
+                - 天气：为出行、爬山问天气用 dailyWeather，爬山当天看 hourlyWeather。
+                - 航班动态（现在什么情况、登机口、延误了吗、行李转盘）：用 flightStatus，挑用户关心的说；
+                  返回 hint 时在最后用一句话带上（还能试查几次、会员能随时查）；返回 error 原样转告。""");
         PROMPTS.put("edit", """
                 【改已保存的行程】只改相关的部分，不要整份重写：
                 - 先 getTrip 读出当前内容（不知道是哪个行程时先 listMyTrips），用里面的 id 和日期定位；id 对不上时重新 getTrip 再改。
@@ -235,7 +241,7 @@ public class TravelSkill implements LifeSkill {
     @Override
     public List<Object> tools() {
         return List.of(weatherTools, hikingTools, tripTools, tripEditTools, scheduleTools, hotelLinkTools, hotelPriceTools,
-                flightTools, foodTools, webSearchTools, routeTools, trainTools);
+                flightTools, foodTools, webSearchTools, routeTools, trainTools, flightStatusTools);
     }
 
     /** MCP 工具：高德地图和 RollingGo 酒店（都是用到才连，出错自动重连）；没配置的返回空。 */

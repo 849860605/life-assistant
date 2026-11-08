@@ -906,3 +906,49 @@ export interface UserAddress {
   address: string;
   isDefault: boolean;
 }
+
+/** 航班实时动态（飞常准）。时间是"yyyy-MM-dd HH:mm"当地时间：plan 计划、estimate 预计、actual 实际；没有的为空 */
+export interface FlightStatus {
+  flightNo: string;
+  airline?: string | null;
+  state?: string | null;
+  depCity?: string | null;
+  arrCity?: string | null;
+  depAirport?: string | null;
+  arrAirport?: string | null;
+  depTerminal?: string | null;
+  arrTerminal?: string | null;
+  planDep?: string | null;
+  planArr?: string | null;
+  estimateDep?: string | null;
+  estimateArr?: string | null;
+  actualDep?: string | null;
+  actualArr?: string | null;
+  checkinCounters?: string | null;
+  securityGate?: string | null;
+  boardGate?: string | null;
+  boardStart?: string | null;
+  boardEnd?: string | null;
+  lastCheckin?: string | null;
+  baggage?: string | null;
+  onTimeRate?: string | null;
+  aircraft?: string | null;
+  delayReason?: string | null;
+  exitMinutes?: string | null;
+  queriedAt?: string | null;
+}
+
+/** 航班动态的免费试查情况：available 为 false 表示服务端没配飞常准 */
+export interface FlightTrial {
+  available: boolean;
+  member: boolean;
+  total: number;
+  left: number;
+}
+
+/** 查一次航班动态的结果：cached 为 true 表示 5 分钟内查过、没扣次数 */
+export interface FlightStatusResult {
+  status: FlightStatus;
+  cached: boolean;
+  usage: { member: boolean; total: number; left: number };
+}

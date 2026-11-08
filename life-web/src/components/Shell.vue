@@ -33,7 +33,7 @@
             <Icon name="heart" :size="15" :color="group === 'fav' ? 'var(--accent)' : 'var(--muted)'" /><text>收藏</text>
           </view>
           <view class="me" :class="{ on: group === 'me' }" @click="go('/pages/me/me')">
-            <view class="avatar">{{ initial }}</view>
+            <UserAvatar :size="30" />
           </view>
         </view>
       </view>
@@ -46,12 +46,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
-import { api } from "../api";
-import { getToken } from "../api/http";
+import { computed, ref } from "vue";
 import BrandMark from "./BrandMark.vue";
 import CityPicker from "./CityPicker.vue";
 import Icon from "./Icon.vue";
+import UserAvatar from "./UserAvatar.vue";
 import { currentCity, setCurrentCity } from "../utils/place";
 import { useWide } from "../utils/screen";
 
@@ -101,13 +100,6 @@ const city = currentCity();
 const group = computed(() => GROUP[props.active] || "");
 const menu = ref(false);
 const picking = ref(false);
-const nickname = ref("");
-const initial = computed(() => (nickname.value || "我").slice(0, 1).toUpperCase());
-
-onMounted(() => {
-  if (!wide.value || !getToken()) return;
-  api.me().then((u) => (nickname.value = u.nickname || u.username)).catch(() => {});
-});
 
 /** 顶部导航跳转用 reLaunch，不在电脑上堆出很深的页面栈。 */
 function go(url: string) {
@@ -127,19 +119,18 @@ function changeCity(c: string) {
 </script>
 
 <style scoped>
-.shell.wide { min-height: 100vh; background: var(--bg); display: flex; flex-direction: column; }
+.shell.wide { min-height: 100vh; background: transparent; display: flex; flex-direction: column; }
 .topnav {
   position: sticky;
   top: 0;
   z-index: 50;
   height: 64px;
-  background: rgba(255, 255, 255, 0.86);
+  background: var(--nav-bg);
   backdrop-filter: saturate(180%) blur(20px);
   -webkit-backdrop-filter: saturate(180%) blur(20px);
   border-bottom: 1px solid var(--line);
   flex-shrink: 0;
 }
-@media (prefers-color-scheme: dark) { .topnav { background: rgba(28, 28, 30, 0.86); } }
 .topnav-inner { max-width: 1200px; height: 100%; margin: 0 auto; padding: 0 24px; box-sizing: border-box; display: flex; align-items: center; gap: 32px; }
 .brand { display: flex; align-items: center; gap: 8px; cursor: pointer; flex-shrink: 0; }
 .brand-name { font-size: 17px; font-weight: 700; }
@@ -170,8 +161,9 @@ function changeCity(c: string) {
 .r-item:hover, .r-item.on { color: var(--ink); }
 .me { cursor: pointer; border-radius: 50%; padding: 2px; }
 .me.on { box-shadow: 0 0 0 2px var(--accent); }
-.avatar { width: 30px; height: 30px; border-radius: 50%; background: var(--ink); color: var(--surface); font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; }
 .content { flex: 1; min-width: 0; }
 .shell.fill { height: 100vh; min-height: 0; }
+/* 带左边对话栏的页面（首页、对话）：导航铺满整宽，Logo 对齐左栏，头像贴右边 */
+.shell.fill .topnav-inner { max-width: none; padding: 0 24px 0 20px; }
 .shell.fill .content { min-height: 0; display: flex; flex-direction: column; }
 </style>

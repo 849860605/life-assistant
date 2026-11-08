@@ -9,7 +9,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** 出游按场景拼提示词和工具：只带选中场景的，多选时合起来，不选时全部。 */
 class TravelSkillScenesTest {
 
-    private final TravelSkill skill = new TravelSkill(null, null, null, null, null, null, null, null, null, null, null, null, null);
+    private final TravelSkill skill = new TravelSkill(null, null, null, null, null, null, null, null, null, null, null, null, null, null);
 
     @Test
     void planOnlyCarriesPlanRulesAndQuickTools() {

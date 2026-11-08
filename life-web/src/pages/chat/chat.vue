@@ -55,7 +55,7 @@
                   <text v-else class="seen"><Icon name="check" :size="11" color="var(--ok)" /> 星络已看到</text>
                 </view>
               </view>
-              <view class="me-avatar">{{ myInitial }}</view>
+              <UserAvatar :size="30" />
             </template>
             <view v-else class="answer">
               <view class="answer-head">
@@ -157,6 +157,7 @@ import PlanPanel from "../../components/PlanPanel.vue";
 import ModelPicker from "../../components/ModelPicker.vue";
 import Shell from "../../components/Shell.vue";
 import ConvSidebar from "../../components/ConvSidebar.vue";
+import UserAvatar from "../../components/UserAvatar.vue";
 import VoiceButton from "../../components/VoiceButton.vue";
 import { useWide } from "../../utils/screen";
 import { savePlans } from "../../utils/plans";
@@ -265,8 +266,6 @@ const suggestions = [
 ];
 
 const wide = useWide();
-const myInitial = ref("我");
-api.me().then((u) => (myInitial.value = (u.nickname || u.username).slice(0, 1).toUpperCase())).catch(() => {});
 
 /** 当前会话里最后一张行程卡，电脑上的右侧面板显示它；之后在对话里局部改过的，版本号用最新改动卡上的，面板会重新加载 */
 const latestTrip = computed(() => {
@@ -744,7 +743,7 @@ function openMember() {
 
 .messages { flex: 1; height: 0; }
 .thread {
-  max-width: 760px;
+  max-width: 880px;
   margin: 0 auto;
   padding: 16px max(16px, env(safe-area-inset-right)) 24px max(16px, env(safe-area-inset-left));
   display: flex;
@@ -823,7 +822,7 @@ function openMember() {
   padding: 10px max(16px, env(safe-area-inset-right)) 10px max(16px, env(safe-area-inset-left));
 }
 .composer-inner {
-  max-width: 760px;
+  max-width: 880px;
   margin: 0 auto;
   display: flex;
   align-items: flex-end;
@@ -854,6 +853,7 @@ function openMember() {
   bottom: 0;
   left: 0;
   width: min(300px, 82vw);
+  background: var(--surface);
   transform: translateX(-100%);
   transition: transform 0.2s ease;
 }
@@ -885,9 +885,8 @@ function openMember() {
 .beta { font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 6px; background: var(--accent-soft); color: var(--accent); margin-left: 4px; }
 .bot-sub { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .greet-tip { margin-top: 6px; color: var(--muted); }
-.me-avatar { width: 30px; height: 30px; border-radius: 50%; background: #f59e0b; color: #fff; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .msg.user { gap: 8px; align-items: flex-start; }
-.composer-box { max-width: 760px; margin: 0 auto; border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px 8px; background: var(--surface); }
+.composer-box { max-width: 880px; margin: 0 auto; border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px 8px; background: var(--surface); }
 .composer-box .composer-input { border: none; background: transparent; padding: 2px 0; width: 100%; }
 .answer-actions { display: flex; gap: 6px; margin-top: -2px; }
 .act-btn { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); padding: 4px 8px; border-radius: 8px; cursor: pointer; }

@@ -254,6 +254,8 @@ export interface MemberSetting {
   payReady: boolean;
   freeDaily: number;
   memberDaily: number;
+  /** 免费用户总共能试查几次航班实时动态 */
+  flightTrial: number;
 }
 
 /** 一条会员变动记录：source 为 PAY 付费开通 / ADMIN 后台调整，days 为负是扣减 */
@@ -356,6 +358,7 @@ export const api = {
   memberStatus: (userId: number) => request<MemberStatus>("GET", `/pay/members/${userId}`),
   grantMember: (userId: number, days: number, note?: string) => request<MemberStatus>("POST", `/pay/members/${userId}/grant`, { days, note }),
   setChatQuota: (freeDaily: number, memberDaily: number) => request<MemberSetting>("PUT", "/pay/member/quota", { freeDaily, memberDaily }),
+  setFlightTrial: (flightTrial: number) => request<MemberSetting>("PUT", "/pay/member/trial", { flightTrial }),
   billingStats: () => request<BillingStats>("GET", "/pay/stats"),
   memberLogs: (limit = 100) => request<MemberLogRow[]>("GET", `/pay/member-logs?limit=${limit}`),
 };

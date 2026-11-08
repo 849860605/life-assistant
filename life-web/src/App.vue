@@ -14,7 +14,8 @@ onLaunch((opts) => {
 <style>
 /*
  * 版式：工具型界面，白底浅灰、近黑正文、灰色辅助字；蓝色只用于主要操作和选中状态。
- * 8px 间距体系；圆角小、边框细、阴影轻；不用渐变、发光和彩色图标方块。价格用暗橙和蓝色主操作区分开。
+ * 8px 间距体系；圆角小、边框细、阴影轻；默认不用渐变、发光和彩色图标方块。价格用暗橙和蓝色主操作区分开。
+ * 用户可以在外观设置里换成深色，或换"星光紫"背景（见下面 data-theme / data-bg）。
  */
 page {
   --bg: #f5f5f7;
@@ -40,6 +41,8 @@ page {
   --tile-shadow: none;
   --brand-shadow: none;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 16px rgba(0, 0, 0, 0.05);
+  --nav-bg: rgba(255, 255, 255, 0.86);
+  --side-bg: var(--surface-2);
   --radius: 12px;
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
   --mono: "SF Mono", Menlo, Consolas, monospace;
@@ -52,33 +55,72 @@ page {
   -webkit-font-smoothing: antialiased;
 }
 
-@media (prefers-color-scheme: dark) {
-  page {
-    --bg: #000000;
-    --surface: #1c1c1e;
-    --surface-2: #2c2c2e;
-    --ink: #f5f5f7;
-    --muted: #98989d;
-    --line: #38383a;
-    --accent: #2997ff;
-    --accent-ink: #ffffff;
-    --accent-soft: #0f2a47;
-    --danger: #ff6b5e;
-    --danger-soft: #3a1d1a;
-    --price: #ff9f5a;
-    --ok: #4cd18a;
-    --ok-soft: #12301f;
-    --warn: #f5b84a;
-    --warn-soft: #3a2a10;
-    --skill-schedule: #b9a0ea;
-    --skill-schedule-soft: #2a2140;
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
-  }
+/* 深色：<html data-theme="dark">，由 utils/theme.ts 按用户设置（或跟随系统）写上 */
+html[data-theme="dark"] page {
+  color-scheme: dark;
+  --bg: #000000;
+  --surface: #1c1c1e;
+  --surface-2: #2c2c2e;
+  --ink: #f5f5f7;
+  --muted: #98989d;
+  --line: #38383a;
+  --accent: #2997ff;
+  --accent-ink: #ffffff;
+  --accent-soft: #0f2a47;
+  --danger: #ff6b5e;
+  --danger-soft: #3a1d1a;
+  --price: #ff9f5a;
+  --ok: #4cd18a;
+  --ok-soft: #12301f;
+  --warn: #f5b84a;
+  --warn-soft: #3a2a10;
+  --skill-schedule: #b9a0ea;
+  --skill-schedule-soft: #2a2140;
+  --nav-bg: rgba(28, 28, 30, 0.86);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+/*
+ * 星光紫背景：<html data-bg="aurora">。主色换成紫色，页面底是淡紫到淡粉的渐变，卡片仍是实色，保证字看得清。
+ * 深色下是深靛蓝底和紫色光晕。
+ */
+html[data-bg="aurora"] page {
+  --bg: #f3f1fc;
+  --surface-2: #f1eefb;
+  --line: #e4dff5;
+  --muted: #6b6880;
+  --accent: #6a4ff0;
+  --accent-soft: #eeeaff;
+  --nav-bg: rgba(255, 255, 255, 0.62);
+  --shadow: 0 1px 2px rgba(60, 40, 140, 0.05), 0 8px 24px rgba(90, 70, 180, 0.08);
+  --side-bg: rgba(255, 255, 255, 0.4);
+  background: radial-gradient(1100px 560px at 70% -8%, #cbbdff 0%, rgba(203, 189, 255, 0) 70%),
+    radial-gradient(800px 520px at -5% 25%, #ddd4ff 0%, rgba(221, 212, 255, 0) 70%),
+    radial-gradient(900px 420px at 60% 110%, #f7cfe2 0%, rgba(247, 207, 226, 0) 70%),
+    linear-gradient(180deg, #ebe6ff 0%, #f2effd 50%, #f8eef6 100%) fixed;
+}
+html[data-theme="dark"][data-bg="aurora"] page {
+  --bg: #0e0c1d;
+  --surface: #18152c;
+  --surface-2: #221e3a;
+  --line: #2f2a4c;
+  --muted: #a19cbb;
+  --accent: #9d8bff;
+  --accent-soft: #2b2453;
+  --nav-bg: rgba(20, 17, 38, 0.7);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --side-bg: rgba(24, 21, 44, 0.55);
+  background: radial-gradient(1100px 560px at 70% -8%, #3a2b85 0%, rgba(58, 43, 133, 0) 70%),
+    radial-gradient(800px 520px at -5% 25%, #241d57 0%, rgba(36, 29, 87, 0) 70%),
+    radial-gradient(900px 420px at 60% 110%, #3a1838 0%, rgba(58, 24, 56, 0) 70%),
+    linear-gradient(180deg, #141029 0%, #0e0c1d 60%, #170f22 100%) fixed;
 }
 
 /* 内容不满一屏时，下面也是页面底色 */
 html, body { background: #f5f5f7; }
-@media (prefers-color-scheme: dark) { html, body { background: #000; } }
+html[data-theme="dark"], html[data-theme="dark"] body { background: #000; }
+html[data-bg="aurora"], html[data-bg="aurora"] body { background: #f3f1fc; }
+html[data-theme="dark"][data-bg="aurora"], html[data-theme="dark"][data-bg="aurora"] body { background: #0e0c1d; }
 
 /* 宽屏（电脑）：顶部导航代替底部标签栏和顶部标题栏，见 components/Shell.vue */
 @media (min-width: 1024px) {
@@ -123,7 +165,7 @@ html, body { background: #f5f5f7; }
 .chip.schedule { background: var(--skill-schedule-soft); color: var(--skill-schedule); }
 .chip.food { background: #fdeee3; color: #c2560c; }
 .chip.ok { background: var(--ok-soft); color: var(--ok); }
-@media (prefers-color-scheme: dark) { .chip.food { background: #3a2617; color: #ffb27a; } }
+html[data-theme="dark"] .chip.food { background: #3a2617; color: #ffb27a; }
 
 /* 对话里的卡片：工具结果直接渲染，和回答文字区分开 */
 .xcard {
@@ -226,8 +268,6 @@ html, body { background: #f5f5f7; }
 .md th { background: var(--surface-2); font-weight: 600; }
 .md hr { border: none; border-top: 1px solid var(--line); margin: 12px 0; }
 /* 原生底部栏的底色写死在 pages.json，深色模式下跟着页面变暗 */
-@media (prefers-color-scheme: dark) {
-  .uni-tabbar { background-color: #1c1c1e !important; }
-  .uni-tabbar-border { background-color: rgba(255, 255, 255, 0.08) !important; }
-}
+html[data-theme="dark"] .uni-tabbar { background-color: #1c1c1e !important; }
+html[data-theme="dark"] .uni-tabbar-border { background-color: rgba(255, 255, 255, 0.08) !important; }
 </style>

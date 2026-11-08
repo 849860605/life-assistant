@@ -8,8 +8,7 @@ import type {
   BookingState, ChangeReason, ChatMessage, Conversation, DayPreview, FlightPick, FlightPreview, FlightRules, FlightSearch, FoodResult, DayTickets, HotelComparison, HotelSearchResult, SpotRules, TicketProduct, TuniuTicket, TicketSpot, TuniuCabin, StayPick, StayPreview, Meal, MealPreview, MemoryCategory, MemoryItem, OptimizeGoal, Place, PlacePick,
   ScheduleEvent, TokenView, PayOrder, PayQuery, MembershipView, MembershipLog,
   TripDetail, TripVersion, Trip, UserView, EmailCodePurpose,
-  WeatherBoard, TripForecast, SwapPreview, TripBooking, TripExpense, BookingInput, ExpenseInput, Favorite, UserAddress,
-} from "./types";
+  WeatherBoard, TripForecast, SwapPreview, TripBooking, TripExpense, BookingInput, ExpenseInput, Favorite, UserAddress, FlightStatusResult, FlightTrial } from "./types";
 
 /** 拼查询串，跳过空值。 */
 function qs(params: Record<string, string | number | boolean | null | undefined>): string {
@@ -210,6 +209,9 @@ export const api = {
   addFavorite: (body: Omit<Favorite, "id" | "createdAt">) => request<Favorite>("POST", "/api/v1/favorites", body),
   removeFavorite: (id: number) => request<void>("DELETE", `/api/v1/favorites/${id}`),
   membership: () => request<MembershipView>("GET", "/api/v1/membership"),
+  /** 航班实时动态：免费用户扣试查次数，会员不限；date 不填是今天 */
+  flightStatus: (no: string, date?: string) => request<FlightStatusResult>("GET", "/api/v1/flights/status" + qs({ no, date })),
+  flightTrial: () => request<FlightTrial>("GET", "/api/v1/flights/status/trial"),
   /** 我的会员记录：付费开通、星络赠送或调整 */
   membershipLogs: () => request<MembershipLog[]>("GET", "/api/v1/membership/logs"),
   /** 买一个月会员：返回订单号和支付表单 HTML（要渲染后自动提交，不能当链接跳转） */

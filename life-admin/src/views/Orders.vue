@@ -43,6 +43,17 @@
         </div>
         <div class="muted small">按北京时间每天零点清零；用完后 App 会提示去开通会员<span v-if="!isSuper()">。只有超级管理员能改</span></div>
       </div>
+
+      <div class="card stack">
+        <div class="card-title">航班实时动态免费试查</div>
+        <div class="row">
+          <span class="lbl">免费用户</span>
+          <el-input-number v-model="flightTrial" :min="0" :max="100" :disabled="!isSuper()" />
+          <span class="muted">次（总共，不按天清零）</span>
+          <el-button v-if="isSuper()" type="primary" :disabled="!setting || setting.flightTrial === flightTrial" :loading="saving === 'trial'" @click="saveTrial">保存</el-button>
+        </div>
+        <div class="muted small">会员不限次数；同一航班 5 分钟内重复查看不扣次数。查一次飞常准按次计费（约 ¥0.5），填 0 表示不给免费用户试用</div>
+      </div>
     </div>
 
     <div class="card">
@@ -126,7 +137,8 @@ const setting = ref<MemberSetting | null>(null);
 const price = ref(9.9);
 const freeDaily = ref(20);
 const memberDaily = ref(200);
-const saving = ref<"" | "price" | "quota">("");
+const flightTrial = ref(2);
+const saving = ref<"" | "price" | "quota" | "trial">("");
 const priceChanged = computed(() => setting.value != null && Number(setting.value.price) !== price.value);
 const quotaChanged = computed(() => setting.value != null
   && (setting.value.freeDaily !== freeDaily.value || setting.value.memberDaily !== memberDaily.value));
@@ -151,6 +163,7 @@ function applySetting(s: MemberSetting) {
   price.value = Number(s.price);
   freeDaily.value = s.freeDaily;
   memberDaily.value = s.memberDaily;
+  flightTrial.value = s.flightTrial;
 }
 
 async function savePrice() {
@@ -167,6 +180,16 @@ async function saveQuota() {
   saving.value = "quota";
   try {
     applySetting(await api.setChatQuota(freeDaily.value, memberDaily.value));
+    ElMessage.success("已保存，马上生效");
+  } finally {
+    saving.value = "";
+  }
+}
+
+async function saveTrial() {
+  saving.value = "trial";
+  try {
+    applySetting(await api.setFlightTrial(flightTrial.value));
     ElMessage.success("已保存，马上生效");
   } finally {
     saving.value = "";

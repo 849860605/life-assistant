@@ -2,7 +2,7 @@
   <Shell active="me">
   <view class="page-wrap me-page">
     <view v-if="user" class="account">
-      <view class="avatar">{{ (user.nickname || user.username).slice(0, 1).toUpperCase() }}</view>
+      <UserAvatar :size="52" />
       <view class="account-body">
         <view class="name">{{ user.nickname || user.username }}</view>
         <view class="muted small">{{ user.username }}<text v-if="user.email"> · {{ user.email }}</text> · 时区 {{ user.timezone }}</view>
@@ -64,6 +64,9 @@
     </view>
 
     <!-- 常用地址：默认地址同步成家庭地址，首页今日安排按它算几点出发 -->
+    <view class="section-title">外观</view>
+    <view class="card theme-card"><ThemePicker /></view>
+
     <view class="section-title">常用地址</view>
     <AddressList />
 
@@ -163,6 +166,8 @@ import { onShow } from "@dcloudio/uni-app";
 import { useWide } from "../../utils/screen";
 import { api } from "../../api";
 import { showError, toLogin } from "../../api/http";
+import ThemePicker from "../../components/ThemePicker.vue";
+import UserAvatar from "../../components/UserAvatar.vue";
 import { looksLikeEmail, passwordProblem } from "../../utils/password";
 import type { Brief, BriefSettings, MembershipView, MemoryCategory, MemoryItem, TokenView, UserView } from "../../api/types";
 
@@ -427,11 +432,11 @@ function go(url: string) {
 </script>
 
 <style scoped>
+.theme-card { padding: 8px 8px 8px 4px; }
 .me-page { max-width: 760px; }
 .account { display: flex; align-items: center; gap: 14px; padding: 4px 0; }
 .account .btn { margin: 0; }
 .account-body { flex: 1; min-width: 0; }
-.avatar { width: 52px; height: 52px; border-radius: 50%; background: var(--ink); color: var(--surface); font-size: 20px; font-weight: 600; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .name { font-size: 22px; font-weight: 700; }
 .member-card { display: flex; flex-direction: column; gap: 12px; padding: 18px 20px; }
 .mc-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
