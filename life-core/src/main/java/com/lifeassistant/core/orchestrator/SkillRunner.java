@@ -15,6 +15,8 @@ import com.lifeassistant.core.user.UserService;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.tool.ToolCallback;
+import org.springframework.ai.tool.method.MethodToolCallbackProvider;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 
@@ -23,6 +25,7 @@ import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -57,17 +60,31 @@ public class SkillRunner {
 
     /** 流式执行技能：挂技能工具和记忆工具，按会话 id 读写聊天记忆；流正常结束后按最后一个带用量的响应记一次 token 用量。 */
     public Flux<ChatResponse> stream(LifeSkill skill, UserCtx ctx, String conversationId, String input) {
+        return stream(skill, ctx, conversationId, input, Set.of());
+    }
+
+    /**
+     * 按场景执行：分了场景的技能只带选中场景的提示词和工具（scenes 为空时全部带上）。
+     * 记忆工具总是带着。
+     */
+    public Flux<ChatResponse> stream(LifeSkill skill, UserCtx ctx, String conversationId, String input, Set<String> scenes) {
         ModelSpec model = chatModels.resolve(modelFor(skill, ctx));
-        List<Object> tools = new ArrayList<>(skill.tools());
-        tools.add(memoryTools);
+        Set<String> allowed = scenes == null || scenes.isEmpty() ? null : skill.toolNames(scenes);
+        List<ToolCallback> callbacks = new ArrayList<>();
+        for (ToolCallback c : MethodToolCallbackProvider.builder().toolObjects(skill.tools().toArray()).build().getToolCallbacks()) {
+            if (allowed == null || allowed.contains(c.getToolDefinition().name())) {
+                callbacks.add(c);
+            }
+        }
+        callbacks.addAll(List.of(MethodToolCallbackProvider.builder().toolObjects(memoryTools).build().getToolCallbacks()));
+        callbacks.addAll(scenes == null || scenes.isEmpty() ? skill.toolCallbacks() : skill.toolCallbacks(scenes));
         AtomicReference<ChatResponse> last = new AtomicReference<>();
 
         return chatModels.chatClient(model).prompt()
-                .system(systemPrompt(skill, ctx))
+                .system(systemPrompt(skill, ctx, scenes))
                 .user(input)
                 .options(ChatModelRegistry.options(model, null))
-                .tools(tools.toArray())
-                .toolCallbacks(skill.toolCallbacks())
+                .toolCallbacks(callbacks)
                 .toolContext(ToolContexts.of(ctx, conversationId, skill.id()))
                 .advisors(MessageChatMemoryAdvisor.builder(chatMemory).conversationId(conversationId).build())
                 .stream()
@@ -100,6 +117,11 @@ public class SkillRunner {
 
     /** 拼系统提示词：用户时区的当前时间、昵称、已记住的用户信息、通用安全规则，最后接技能自己的提示词。 */
     String systemPrompt(LifeSkill skill, UserCtx ctx) {
+        return systemPrompt(skill, ctx, Set.of());
+    }
+
+    /** 拼系统提示词：公共部分（身份、时间、记忆、通用规则）加技能按场景给的部分。 */
+    String systemPrompt(LifeSkill skill, UserCtx ctx, Set<String> scenes) {
         User user = userService.get(ctx.userId());
         String now = ZonedDateTime.now(ZoneId.of(user.getTimezone())).format(NOW_FORMAT);
         return """
@@ -120,6 +142,7 @@ public class SkillRunner {
                 - 涉及户外安全（雷暴、大风、天黑前下不了山）时，结论以工具和规则计算的结果为准。
 
                 %s""".formatted(now, user.getTimezone(), user.getNickname(),
-                memoryService.promptSnippet(ctx), skill.systemPrompt());
+                memoryService.promptSnippet(ctx),
+                scenes == null || scenes.isEmpty() ? skill.systemPrompt() : skill.systemPrompt(scenes));
     }
 }

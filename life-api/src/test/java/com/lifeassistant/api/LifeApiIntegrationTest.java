@@ -254,7 +254,7 @@ class LifeApiIntegrationTest {
     void chatStreamsThroughGraphAndPersistsCheckpoint() throws Exception {
         when(routerService.route(anyString(), any(), any(), anyString()))
                 .thenReturn(new RouterService.RouteDecision("travel", "测试"));
-        when(skillRunner.stream(any(), any(), anyString(), anyString()))
+        when(skillRunner.stream(any(), any(), anyString(), anyString(), any()))
                 .thenAnswer(invocation -> Flux.just(chunk("泰山"), chunk("周六"), chunk("天气不错")));
 
         String conversationId = post("/api/v1/conversations", Map.of()).path("data").path("id").asText();
@@ -282,7 +282,7 @@ class LifeApiIntegrationTest {
         // 编排图内部用 flatMap 转换输出，背压下会打乱顺序，ChatOrchestrator 必须保证顺序不变
         when(routerService.route(anyString(), any(), any(), anyString()))
                 .thenReturn(new RouterService.RouteDecision("travel", "测试"));
-        when(skillRunner.stream(any(), any(), anyString(), anyString()))
+        when(skillRunner.stream(any(), any(), anyString(), anyString(), any()))
                 .thenAnswer(invocation -> Flux.range(0, 300).buffer(20).delayElements(Duration.ofMillis(2))
                         .flatMapIterable(batch -> batch).map(i -> chunk(i + ",")));
         User alice = userService.findByUsername("alice").orElseThrow();

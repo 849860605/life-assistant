@@ -13,6 +13,7 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.stereotype.Service;
 
 import java.util.regex.Pattern;
+import java.util.List;
 import java.util.stream.Collectors;
 
 /**
@@ -39,8 +40,15 @@ public class RouterService {
         this.usageRecorder = usageRecorder;
     }
 
-    /** 路由结果，模型按这个结构输出 JSON。 */
-    public record RouteDecision(String skillId, String reason) {
+    /**
+     * 路由结果，模型按这个结构输出 JSON。scenes 是分了场景的技能这一轮要用的场景（可多个）；
+     * 为 null 表示沿用上一轮的场景，为空表示拿不准、全部带上。
+     */
+    public record RouteDecision(String skillId, String reason, List<String> scenes) {
+
+        public RouteDecision(String skillId, String reason) {
+            this(skillId, reason, null);
+        }
     }
 
     /**
@@ -68,7 +76,11 @@ public class RouterService {
             if (decision == null || !skillRegistry.contains(decision.skillId())) {
                 return fallback(lastSkillId, "路由结果无效");
             }
-            return decision;
+            // 只留这个技能真有的场景；分场景的技能没给出有效场景时按全部带上
+            java.util.Map<String, String> known = skillRegistry.get(decision.skillId()).scenes();
+            List<String> scenes = decision.scenes() == null ? List.of()
+                    : decision.scenes().stream().filter(known::containsKey).distinct().toList();
+            return new RouteDecision(decision.skillId(), decision.reason(), scenes);
         } catch (RuntimeException e) {
             log.warn("路由失败，使用兜底技能：{}", e.getMessage());
             return fallback(lastSkillId, "路由失败");
@@ -97,7 +109,9 @@ public class RouterService {
     private String systemPrompt(String lastSkillId) {
         String skills = skillRegistry.all().stream()
                 .map(LifeSkill.class::cast)
-                .map(s -> "- %s：%s。例如：%s".formatted(s.id(), s.description(), String.join("；", s.routingExamples())))
+                .map(s -> "- %s：%s。例如：%s".formatted(s.id(), s.description(), String.join("；", s.routingExamples()))
+                        + (s.scenes().isEmpty() ? "" : "\n  场景（scenes 填 id，可多选）：" + s.scenes().entrySet().stream()
+                        .map(e -> e.getKey() + " " + e.getValue()).collect(Collectors.joining("；"))))
                 .collect(Collectors.joining("\n"));
         return """
                 你是个人生活助手的路由器。根据用户这句话，判断应该交给哪个技能处理。
@@ -116,6 +130,9 @@ public class RouterService {
                 7. 订机票、酒店，问交通路线、景点和攻略，都归出游。
                 8. 找餐厅、吃什么、问某家店怎么样，归美食；规划行程时顺带安排吃饭归出游，
                    上一轮在出游里追问"附近有什么好吃的"按规则 1 沿用出游。
+                选的技能有场景时，scenes 填这句话要用到的场景 id：一件事一个场景，几件相关的事可以多选
+                （比如规划爬山行程选 plan 和 hiking，规划时顺便比价选 plan 和 query）；拿不准就留空数组，会全部带上。
+                追问、确认上一轮时，scenes 填上一轮那件事的场景。
                 只输出 JSON，skillId 必须是上面列出的 id 之一，reason 用一句中文说明理由。"""
                 .formatted(skills, lastSkillId == null ? "无" : lastSkillId);
     }

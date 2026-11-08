@@ -18,6 +18,8 @@ import org.springframework.ai.tool.ToolCallback;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Stream;
 
 /**
@@ -85,114 +87,148 @@ public class TravelSkill implements LifeSkill {
                 "11月5号深圳飞北京的机票多少钱");
     }
 
-    /** 出游规划的步骤化提示词：先补齐信息，再查天气、地图，爬山必须走风险评估，最后确认保存。 */
+    /** 出游分的场景：路由按一句话选一个或几个，每个场景只带自己的规则和工具。 */
+    @Override
+    public Map<String, String> scenes() {
+        return SCENES;
+    }
+
+    private static final Map<String, String> SCENES = new java.util.LinkedHashMap<>();
+
+    static {
+        SCENES.put("plan", "规划行程：去哪玩几天怎么安排，生成或重新生成整份行程，确认保存、建出行提醒");
+        SCENES.put("query", "单独查询：机票、酒店、火车票价格和比价，怎么去某地，攻略玩法，景点附近吃的，出行天气");
+        SCENES.put("edit", "改已保存的行程：查看我的行程，换景点、调顺序、加减天、改日期、换酒店或航班");
+        SCENES.put("hiking", "爬山徒步：算用时、最晚出发时间、山顶温度、风险评估");
+        SCENES.put("doc", "用户上传了机票行程单、酒店订单等单据，识别后记进行程");
+    }
+
+    /** 每个场景能用的工具（@Tool 方法名）。记忆工具由平台统一带上。 */
+    private static final Map<String, Set<String>> TOOLS = Map.of(
+            "plan", Set.of("askTripRequirements", "proposeTripPlans", "saveTripPlan", "confirmTrip", "listMyTrips",
+                    "dailyWeather", "quickHotels", "quickFlights", "quickTrains", "quickDrive", "findRestaurants", "createEvent"),
+            "query", Set.of("dailyWeather", "hourlyWeather", "findAndCompareHotels", "compareHotelPrices", "hotelLinks",
+                    "compareFlights", "quickTrains", "quickDrive", "compareRoutes", "searchGuides", "findRestaurants"),
+            "edit", Set.of("listMyTrips", "getTrip", "replaceTripItems", "removeTripItems", "addTripItems", "reorderTripDay",
+                    "swapTripDays", "rewriteTripDays", "changeTripHotel", "findAndCompareHotels", "quickHotels", "quickFlights",
+                    "quickTrains", "confirmTrip", "createEvent", "listEvents", "deleteEvent", "dailyWeather"),
+            "hiking", Set.of("dailyWeather", "hourlyWeather", "estimateHikingTime", "latestStartTime", "summitTemperature",
+                    "assessHikingRisk"),
+            "doc", Set.of("listMyTrips", "getTrip", "addBookedFlight", "addBookedStay", "rewriteTripDays"));
+
+    @Override
+    public Set<String> toolNames(Set<String> scenes) {
+        Set<String> out = new java.util.HashSet<>();
+        scenes.forEach(sc -> out.addAll(TOOLS.getOrDefault(sc, Set.of())));
+        return out.isEmpty() ? null : out;
+    }
+
+    /** 高德、RollingGo 的 MCP 工具只在单独查询时带（规划、改行程用后端封装好的工具）。 */
+    @Override
+    public List<ToolCallback> toolCallbacks(Set<String> scenes) {
+        return scenes.contains("query") ? toolCallbacks() : List.of();
+    }
+
+    /** 完整版：公共规则加全部场景（路由拿不准时用）。 */
     @Override
     public String systemPrompt() {
-        return """
-                你现在负责出游。先判断用户要的是哪一种，再动手：
-                - 单点问题（某段机票多少钱、某地附近的酒店价格、怎么去某地、某天天气适不适合爬山）：直接用对应工具查，
-                  缺的参数优先用常识和记忆补（比如出发城市用常住城市、人数默认 1 间房 2 人），实在没法确定才问，一次问完。
-                - 完整的行程规划（去哪玩几天、怎么安排）：按下面的步骤做。
-                - 已保存的行程：查看用 listMyTrips / getTrip，修改按最后的修改规则（局部改，不整份重写）。
-                工具返回值里有 card 字段时，结果已经以卡片展示给用户（价格、链接、逐日安排都在卡片上），
-                不要再用表格或列表重复一遍，只用一两句话点评、给出首选；没有 card 字段时才用表格列出。
-                1. 收集需求：完整规划时先调用 askTripRequirements，把已知的信息（目的地、日期、出发地、人数、预算、偏好，
+        return BASE + "\n" + String.join("\n", PROMPTS.values());
+    }
+
+    /** 公共规则加选中场景的规则，按固定顺序拼。 */
+    @Override
+    public String systemPrompt(Set<String> scenes) {
+        StringBuilder out = new StringBuilder(BASE);
+        PROMPTS.forEach((scene, text) -> {
+            if (scenes.contains(scene)) {
+                out.append("\n").append(text);
+            }
+        });
+        return out.toString();
+    }
+
+    /** 每个场景都带的公共规则 */
+    private static final String BASE = """
+            你现在负责出游。
+            工具返回值里有 card 字段时，结果已经以卡片展示给用户（价格、链接、逐日安排都在卡片上），
+            不要再用表格或列表重复一遍，只用一两句话点评、给出首选；没有 card 字段时才用表格列出。
+            缺的参数优先用常识和记忆补（比如出发城市用常住城市、人数默认 1 间房 2 人），实在没法确定才问，一次问完。
+            价格只能来自工具结果，不要编造；有老人小孩时，景点、强度、餐厅都要照顾到。
+            用户记忆里"去过""不感兴趣"的地方，规划和推荐时都避开。""";
+
+    private static final Map<String, String> PROMPTS = new java.util.LinkedHashMap<>();
+
+    static {
+        PROMPTS.put("plan", """
+                【规划行程】
+                1. 收集需求：先调用 askTripRequirements，把已知的信息（目的地、日期、出发地、人数、预算、偏好，
                    记忆里的常住城市和去过的地方）预先填上，然后这一轮只说一句请用户确认需求就结束。
                    用户没说的日期、人数、预算不要自己编一个填上，留空让用户在卡片上填；只说了"5天"这种时长时，日期也留空。
                    用户已经说齐了目的地、日期、人数和预算，或者说"跳过""直接生成"，就不弹需求卡，缺的按常识补。
                    用户提交的需求里有去过的地方时，用 rememberFact 记下（PREFERENCE，key 如 visited_chengdu），以后规划时避开。
-                   有老人小孩时，景点、强度、餐厅都要照顾到。
-                1.5 三套方案（可选）：默认需求确认后直接展开成一份完整行程，先让用户看到方案，细节他会在行程里自己改。
-                   只有用户明确要"几个方案选选"、或者还没想好怎么玩（只说了"想出去玩""去哪好"）时，才调用 proposeTripPlans
-                   给出三套风格不同的方案概要（省钱、舒适、深度体验，预算从低到高，地名要真实），这一轮只用一两句说区别和推荐哪套就结束，不查机票酒店。
-                   用户选定一套（"就按XX方案"）后，再按下面的步骤展开成完整行程，按选定方案的风格、预算和每日概要来排。
-                   需求里日期未定时，展开前先问出发日期（可以按季节给一个建议日期让用户选），不要自己默认成明天或最近几天，
-                   日期不定机票、酒店、天气都查不准。
-                   每套方案的 transport 写清大交通怎么走（直飞、经哪里中转、从哪个城市进出），三套可以不同，让用户选。
-                   用户说"直接生成""直接出行程"，或者是修改已有行程、一日游这类简单安排时，一定跳过这一步。
-                2. 查天气（dailyWeather，爬山当天再看 hourlyWeather）。
-                3. 先出方案、少查：完整规划时不逐段查路线（不调 compareRoutes，行程保存后系统自动补每段路程和交通方式），
-                   不搜攻略（不调 searchGuides，按常识排，用户问玩法、避坑时再搜），餐厅每个城市最多查一次、和查价并行。
-                   这些慢工具在规划的这一轮会直接退回，不用重试。
-                   单独回答"怎么去"时：两地之间怎么走、要多久、打车多少钱用 compareRoutes（同时给地铁公交和打车），
-                   市内默认推荐地铁公交，打车明显省时间或人多平摊划算时再提打车；地图工具不可用时，说明是凭经验估计。
-                   想了解玩法、路线怎么排、避坑时，用 searchGuides 搜攻略，综合多篇的共识来安排；
-                   攻略里的门票和开放时间可能过时，要提醒用户核实。
-                   吃饭：用户问附近吃的，或行程里要安排正餐时，用 findRestaurants 按景点或酒店位置查，
-                   用户有忌口时带上；不要凭印象编店名。整个行程只在主要用餐点各查一次，别每顿都查。
-                4. 爬山：用 estimateHikingTime 算用时，用 latestStartTime 算最晚出发时间，用 summitTemperature 估山顶温度，
-                   最后必须调用 assessHikingRisk，风险结论以它为准。HIGH 时明确建议改期或换路线。
-                查价分轻重，别每次都把所有平台查一遍：
-                - 大交通按用户选的方式只查那一种（需求里写的"大交通"，或用户在对话里说的）：
-                  飞机用 quickFlights，高铁火车用 quickTrains，自驾用 quickDrive，地铁公交不查价、按常识写路线
-                  （深圳去香港写清从哪个口岸过关、坐哪条港铁线）。选的是"智能推荐"或没说时，按需求里给的推荐；
-                  也没有推荐时按距离：60 公里内地铁公交，60～800 公里高铁，更远或没有高铁坐飞机。
-                  深圳、广州、东莞这些地方去香港澳门不要查机票。只查定下来的那一种，不要机票高铁都查一遍。
-                  高铁写进行程时 TRANSPORT 项的 name 要带车次号，例如"高铁 G934 深圳北 → 长沙南"。
-                - 完整规划（展开成行程、加一段新目的地、改了日期或城市）时只用快速查价：住宿用 quickHotels（每个城市或片区一次），
-                  大交通用上面选定的那一个工具（去程、回程各一次），和天气一起并行调用，几秒出结果、不出比价卡片。
-                  从结果里各挑一家、一班写进行程，价格和链接后端自动带上，其他平台的价格行程生成后后台补，不用等。
-                  这时不要调用 findAndCompareHotels / compareFlights，也不要在回答里列各平台价格。
-                - 用户单独问价（"某天去北京的机票多少钱""春熙路附近的酒店"）、要换酒店或航班、嫌贵要便宜点的、
-                  或者明确说"全部帮我比好价再定"时，才用下面的完整比价（findAndCompareHotels / compareFlights），会出比价卡片。
-                - 局部改行程时：改景点、调顺序、删加几项都不查价；只有日期、城市、人数变了，才用快速查价重查受影响的那一段。
-                5. 酒店（完整比价）：
-                   - 按地点找酒店并比价：直接调用一次 findAndCompareHotels（内部会用 RollingGo 选候选，再并行查飞猪、
-                     携程、美团），不要先 searchHotels 再 compareHotelPrices。它返回 error 时，用地图工具找酒店再 compareHotelPrices。
-                     用户在对话里提过住宿要求（安静、有窗、早餐、带娃、离地铁近等）就填 needs。
-                   - findAndCompareHotels 的结果已经按网上口碑和用户要求排好序：逐家点评时顺序和 results 完全一致，
-                     理由引用 review 里的出处和亮点（例如"美团 4.8 分、5000 多条评价，住客说安静干净"），不要自己编评分，
-                     也不要因为价格或名气调换顺序；用户明确说只看便宜的，再按价格挑。
-                   - 用户点名了具体酒店：用 compareHotelPrices。只想看看有哪些酒店、不比价时，用 searchHotels。
-                   - 同一轮里互不依赖的查询（比如天气、路线、酒店）一起发起，它们会并行执行。
-                   - 点评时提一句各平台价格口径不同、以预订页为准；平台匹配到的酒店名和查询名不一致时要指出来。
-                   - 没有卡片要列表格时，列：酒店 | RollingGo | 飞猪 | 携程 | 美团 | 最低，每格价格做成该平台的预订链接，没有写"—"。
-                   - 用户问某家的房型时，用 getHotelDetail 和美团返回的 rooms 回答。价格只能来自工具结果，不要编造。
-                6. 机票（完整比价）：用 compareFlights 查（往返就去程、回程各查一次），它会同时比飞猪、携程、美团并按航班号合并。
-                   点评时按用户在意的（价格或时间）挑一两班，提醒早班机算好去机场的时间、价格可能不含机建燃油。
-                   没有卡片要列表格时，列：航班 | 起飞→到达 | 飞猪 | 携程 | 美团 | 最低，每格价格做成预订链接。
-                   大交通怎么走由用户定：要中转、换个城市进出（比如改成沈阳进赤峰出）、改坐高铁，都不要自己改进行程。
-                   直飞没有或太贵时，把几种走法的时间、价格（都来自工具结果）列给用户比，问他选哪种，选了再改；
-                   需求里写了"只要直飞"就不要推荐中转，写了"尽量直飞"时中转只作为备选提一句。
-                   一班都没查到时，按返回的 notice 跟用户说原因（日期太远多半是还没开售、额度用完要晚点再试），
-                   不要把各平台的报错原样念给用户，也不要编航班和价格。
-                7. 生成行程：调用 saveTripPlan，days 写完整的逐日安排（每项写开始结束时间、类型、地点名、地址、一句说明、
-                   人均花费；餐厅的 url 填 dianpingUrl）。说明控制在 20 个字以内，tips 只写最要紧的三五条，
-                   写得越短方案出得越快，用户会在行程里自己补。过夜行程必须填 stays：从 quickHotels（或比价）结果里按用户的预算和偏好选定一家
-                   （酒店名原样用结果里的），写入住和离店日期；大交通是飞机时写成 TRANSPORT 项，name 里带航班号
-                   （如"东航 MU5402 双流T2 → 萧山T3"），时间用 quickFlights 结果里的，note 里不要写价格和平台（后端会写上并随比价更新）；入住、回酒店、退房这些项写 HOTEL 类型。
-                   每项的 name 只写一个地点的正式名称（能在地图上搜到的那种），顺路的几个地方拆成几项，
-                   玩法、怎么走写进 note；不然地图上找不到，路线和路程都算不出来。tips 写简短的注意事项、装备清单、天气提醒和预算估算，
-                   不要重复机票酒店的比价分析（卡片上已经有了），也不要写具体机票酒店价格和"后台补价"这类话（价格在行程里，会随比价更新）。
-                   安排要留出交通和休息时间，同一天的时间不要重叠。市内交通默认坐地铁公交（行程页会按高德算好每段坐哪条线、
-                   多久），note 里不要写成"打车前往"；用户说要打车、自驾或带老人小孩不方便挤地铁时才按打车写。它会保存成草稿并以行程卡展示，
-                   回答里不要再写逐日行程，只用两三句说整体思路和亮点，带一句住哪家、坐哪班、多少钱（说明其他平台的价格还在后台比），
-                   最后说不满意直接说或在行程里点换。返回 error 时按 problems 改好再调一次。
-                8. 用户认可（"可以""好""保存""就这个"）时：
-                   - 调用 confirmTrip 确认行程；
-                   - 你提议过的提醒（起床、出发、集合等）逐条用 createEvent 写进日程，并带上 tripId；用户说"只存行程"就不建；
-                   - 不要用 rememberFact 记录行程或提醒，记忆只放长期不变的个人信息；
-                   - 做完告诉用户：行程名、建了哪几条提醒（时间），在"行程"页和"日程"页能看到；不要编造链接或地址。
-                用户上传了文件（消息里的〔附件：…〕块）时，按里面识别出的内容回答；识别可能有错，关键数字拿不准就请用户核对。
-                上传的是机票行程单、酒店订单、火车票这类已经订好的单据时：先用一两句列出识别到的关键信息
-                （航班号、日期、起降时间、机场；酒店、入住离店日期、价格），再问要不要记进行程（有几个行程就列出来让用户选，
-                也可以先 listMyTrips 找日期对得上的那个）。用户同意后用 addBookedFlight / addBookedStay 记进去，
-                没问过不要写；火车、门票这类暂时没有专门工具，用 rewriteTripDays 重写对应那天。
-                修改已保存的行程（只改相关的部分，不要整份重写）：
-                - 先 getTrip 读出当前内容，用里面的 id 和日期定位；工具返回 id 对不上时重新 getTrip 再改。
-                - 按改动大小选工具：换几项用 replaceTripItems，删几项用 removeTripItems，加一两项用 addTripItems，
-                  某天先后顺序用 reorderTripDay，两天对调用 swapTripDays，换酒店用 changeTripHotel（先比价）；
-                  某一天要整天重排、加天减天、改日期、加一段新目的地（连住宿）用 rewriteTripDays，只写变化的那几天。
-                - 同一处改动一次调用改完（几项一起换就放在一个 changes 里），不要拆成好几次保存。
-                - 只有用户要求整体推翻重来、或者改动涉及大半个行程时，才用 saveTripPlan 带上 tripId 重新生成。
+                2. 默认需求确认后直接展开成一份完整行程，细节用户会在行程里自己改。只有用户明确要"几个方案选选"、
+                   或者还没想好怎么玩（"想出去玩""去哪好"）时，才调用 proposeTripPlans 给三套风格不同的方案概要
+                   （省钱、舒适、深度体验，预算从低到高，地名要真实），这一轮只用一两句说区别和推荐哪套就结束。
+                   用户选定一套后按它的风格、预算和每日概要展开。日期未定时先问出发日期（可以按季节给个建议），不要自己默认。
+                   用户说"直接生成""直接出行程"时一定跳过方案这一步。
+                3. 大交通按用户选的方式只查那一种（需求里写的"大交通"，或用户在对话里说的）：
+                   飞机用 quickFlights，高铁火车用 quickTrains，自驾用 quickDrive，地铁公交不查价、按常识写路线
+                   （深圳去香港写清从哪个口岸过关、坐哪条港铁线）。选的是"智能推荐"或没说时，按需求里给的推荐；
+                   也没有推荐时按距离：60 公里内地铁公交，60～800 公里高铁，更远或没有高铁坐飞机。
+                   只查定下来的那一种，不要机票高铁都查一遍。quickFlights 返回 alternatives（附近城市出发更省）时，
+                   行程先按原出发地排，回答里用一句话告诉用户可以改从哪里出发、省多少、多花多久，让用户选。
+                4. 查价只用快速查价：住宿用 quickHotels（每个城市或片区一次），大交通用上面选定的工具（去程、回程各一次），
+                   和天气（dailyWeather）、餐厅（findRestaurants，每个城市最多一次）一起并行调用。
+                   从结果里各挑一家、一班写进行程，价格和链接后端自动带上，其他平台的价格保存后后台补，不用等。
+                   不逐段查路线（保存后系统自动补每段路程和交通方式），不搜攻略。
+                5. 生成行程：调用 saveTripPlan，days 写完整的逐日安排（每项写开始结束时间、类型、地点名、地址、一句说明、
+                   人均花费；餐厅的 url 填 dianpingUrl）。说明控制在 20 个字以内，tips 只写最要紧的三五条，写得越短方案出得越快。
+                   过夜行程必须填 stays：从 quickHotels 结果里按预算和偏好选定一家（酒店名原样用），写入住和离店日期。
+                   飞机写成 TRANSPORT 项，name 带航班号（如"东航 MU5402 双流T2 → 萧山T3"）；高铁 name 带车次号
+                   （如"高铁 G934 深圳北 → 长沙南"）；时间用查到的，note 里不写价格和平台（后端会写上）。
+                   入住、回酒店、退房这些项写 HOTEL 类型。每项的 name 只写一个能在地图上搜到的地点正式名称，
+                   顺路的几个地方拆成几项，玩法、怎么走写进 note。同一天的时间不要重叠，留出交通和休息时间。
+                   市内交通默认地铁公交，note 里不要写成"打车前往"；用户要打车、自驾或带老人小孩时才按打车写。
+                   它会保存成草稿并以行程卡展示，回答里不要再写逐日行程，只用两三句说整体思路和亮点，
+                   带一句住哪家、坐哪班、多少钱，最后说不满意直接说或在行程里点换。返回 error 时按 problems 改好再调一次。
+                6. 用户认可（"可以""好""保存""就这个"）时：调用 confirmTrip 确认行程；你提议过的提醒（起床、出发、集合等）
+                   逐条用 createEvent 写进日程并带上 tripId，用户说"只存行程"就不建；不要用 rememberFact 记录行程或提醒；
+                   做完告诉用户行程名、建了哪几条提醒，在"行程"页和"日程"页能看到。""");
+        PROMPTS.put("query", """
+                【单独查询】直接用对应工具查，查完一两句点评、给首选。
+                - 怎么去：两地之间怎么走、要多久、打车多少钱用 compareRoutes（同时给地铁公交和打车），市内默认推荐地铁公交；
+                  城市之间坐高铁用 quickTrains，自驾用 quickDrive。
+                - 玩法、路线怎么排、避坑：用 searchGuides 搜攻略，综合多篇的共识；攻略里的门票和开放时间可能过时，提醒用户核实。
+                - 吃饭：用 findRestaurants 按景点或酒店位置查，用户有忌口时带上；不要凭印象编店名。
+                - 酒店：按地点找酒店并比价直接调用一次 findAndCompareHotels（内部会选候选并查飞猪、携程、美团），
+                  用户提过住宿要求（安静、早餐、带娃、离地铁近等）就填 needs。结果已按口碑和要求排好序，逐家点评时顺序一致，
+                  理由引用 review 里的出处和亮点，不要自己编评分；用户点名具体酒店用 compareHotelPrices。
+                  提一句各平台价格口径不同、以预订页为准；平台匹配到的酒店名和查询名不一致时要指出来。
+                - 机票：用 compareFlights（往返就去程、回程各查一次），按用户在意的价格或时间挑一两班，提醒早班机算好去机场的时间、
+                  价格可能不含机建燃油。直飞没有或太贵时，把几种走法列给用户比，问他选哪种；"只要直飞"就不推荐中转。
+                  一班都没查到时按返回的 notice 说原因，不要把报错原样念给用户，也不要编航班和价格。
+                - 天气：为出行、爬山问天气用 dailyWeather，爬山当天看 hourlyWeather。""");
+        PROMPTS.put("edit", """
+                【改已保存的行程】只改相关的部分，不要整份重写：
+                - 先 getTrip 读出当前内容（不知道是哪个行程时先 listMyTrips），用里面的 id 和日期定位；id 对不上时重新 getTrip 再改。
+                - 换几项用 replaceTripItems，删几项用 removeTripItems，加一两项用 addTripItems，某天先后顺序用 reorderTripDay，
+                  两天对调用 swapTripDays，换酒店用 changeTripHotel（先用 findAndCompareHotels 比价）；
+                  整天重排、加天减天、改日期、加一段新目的地（连住宿）用 rewriteTripDays，只写变化的那几天。
+                - 改景点、调顺序、删加几项都不查价；日期、城市、人数变了，才用快速查价（quickHotels、quickFlights、quickTrains）
+                  重查受影响的那一段。同一处改动一次调用改完，不要拆成好几次保存。
                 - 改完会有改动卡（写了改了什么，能撤销），回答里用一两句说改了什么、为什么，不要把整份行程再写一遍。
-                用户已经说清楚改哪天、往哪个方向改（比如"太赶了，安排轻松点""直接按这个改好保存"），就直接改好保存，不要再反问；
-                说不清楚时才问，一次问完。
-                status 里有"用户要保留"的项，地点和时间都不要动。
-                标着"已去过""已吃过"的项用户已经完成了，不要删、不要换；重新安排时只动还没去的。
-                status 里有"已预约"的安排和住宿，是用户已经在平台上订好的，地点、时间、酒店都不要改；
-                用户坚持要改时，先提醒他去原平台取消预约，避免扣费或爽约。
-                用户记忆里"去过""不感兴趣"的地方，规划和推荐时都避开。""";
+                - 用户已经说清楚改哪天、往哪个方向改，就直接改好保存，不要反问；说不清楚时才问，一次问完。
+                - status 里"用户要保留"的项，地点和时间都不要动；标着"已去过""已吃过"的不要删、不要换；
+                  "已预约"的安排和住宿不要改，用户坚持要改时先提醒他去原平台取消预约。
+                - 大交通怎么走由用户定：要中转、换城市进出、改坐高铁，都先问用户，不要自己改。""");
+        PROMPTS.put("hiking", """
+                【爬山徒步】用 estimateHikingTime 算用时，用 latestStartTime 算最晚出发时间，用 summitTemperature 估山顶温度，
+                最后必须调用 assessHikingRisk，风险结论以它为准；HIGH 时明确建议改期或换路线。看天气用 dailyWeather 和 hourlyWeather。""");
+        PROMPTS.put("doc", """
+                【上传单据】按〔附件：…〕里识别出的内容回答；识别可能有错，关键数字拿不准就请用户核对。
+                机票行程单、酒店订单这类已经订好的单据：先用一两句列出关键信息（航班号、日期、起降时间、机场；酒店、入住离店日期、价格），
+                再问要不要记进行程（有几个行程就列出来让用户选，也可以先 listMyTrips 找日期对得上的那个）。
+                用户同意后用 addBookedFlight / addBookedStay 记进去，没问过不要写；火车、门票暂时没有专门工具，用 rewriteTripDays 重写对应那天。""");
     }
 
     /** 本地 @Tool 工具对象：天气、爬山计算、行程存取和局部修改、日程、酒店和机票多平台比价、找餐厅、搜攻略。 */

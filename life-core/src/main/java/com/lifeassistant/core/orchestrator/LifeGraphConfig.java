@@ -40,6 +40,8 @@ public class LifeGraphConfig {
     public static final String SPACE_ID = "spaceId";
     public static final String CONVERSATION_ID = "conversationId";
     public static final String SKILL_ID = "skillId";
+    /** 这一轮用的场景（逗号分隔，空表示全部），分了场景的技能按它带提示词和工具 */
+    public static final String SCENES = "scenes";
     public static final String ANSWER = "answer";
     public static final String NODE_ROUTE = "route";
     public static final String NODE_SKILL = "skill";
@@ -68,7 +70,7 @@ public class LifeGraphConfig {
                                    BaseCheckpointSaver graphCheckpointSaver) throws GraphStateException {
         StateGraph graph = new StateGraph("life", () -> {
             Map<String, KeyStrategy> strategies = new HashMap<>();
-            for (String key : Set.of(INPUT, USER_ID, SPACE_ID, CONVERSATION_ID, SKILL_ID, ANSWER, FOLLOW_UP, "messages")) {
+            for (String key : Set.of(INPUT, USER_ID, SPACE_ID, CONVERSATION_ID, SKILL_ID, SCENES, ANSWER, FOLLOW_UP, "messages")) {
                 strategies.put(key, KeyStrategy.REPLACE);
             }
             return strategies;
@@ -84,7 +86,12 @@ public class LifeGraphConfig {
                     state.value(SKILL_ID, String.class).orElse(null),
                     userCtx(state.data()).userId(),
                     state.value(CONVERSATION_ID, ""));
-            return Map.of(SKILL_ID, decision.skillId());
+            // scenes 为 null（确认上一轮、路由失败）时沿用上一轮的场景；换了技能就从全部开始
+            if (decision.scenes() == null) {
+                return decision.skillId().equals(last) ? Map.of(SKILL_ID, decision.skillId())
+                        : Map.of(SKILL_ID, decision.skillId(), SCENES, "");
+            }
+            return Map.of(SKILL_ID, decision.skillId(), SCENES, String.join(",", decision.scenes()));
         }));
 
         // 返回值里放 Flux<ChatResponse>，Graph 会边生成边往外推 StreamingOutput，结束后把完整回答写回状态
@@ -92,7 +99,8 @@ public class LifeGraphConfig {
                 skillRegistry.get(state.value(SKILL_ID, "")),
                 userCtx(state.data()),
                 state.value(CONVERSATION_ID, ""),
-                state.value(INPUT, "")))));
+                state.value(INPUT, ""),
+                scenes(state.value(SCENES, ""))))));
 
         graph.addEdge(StateGraph.START, NODE_ROUTE);
         graph.addEdge(NODE_ROUTE, NODE_SKILL);
@@ -101,6 +109,13 @@ public class LifeGraphConfig {
         return graph.compile(CompileConfig.builder()
                 .saverConfig(SaverConfig.builder().register(graphCheckpointSaver).build())
                 .build());
+    }
+
+    /** 逗号分隔的场景转成集合，空串是空集合（全部带上）。 */
+    static Set<String> scenes(String value) {
+        return value == null || value.isBlank() ? Set.of()
+                : java.util.Arrays.stream(value.split(",")).map(String::trim).filter(s -> !s.isEmpty())
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
     }
 
     /** 从图状态还原用户上下文；状态里没有租户和角色，统一填默认值。 */
