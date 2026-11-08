@@ -18,6 +18,7 @@ export const router = createRouter({
         { path: "orders", name: "orders", component: () => import("./views/Orders.vue"), meta: { title: "会员与账单" } },
         { path: "models", name: "models", component: () => import("./views/Models.vue"), meta: { title: "模型配置" } },
         { path: "integrations", name: "integrations", component: () => import("./views/Integrations.vue"), meta: { title: "第三方平台" } },
+        { path: "spot-intros", name: "spot-intros", component: () => import("./views/SpotIntros.vue"), meta: { title: "景点简介" } },
         { path: "logs", name: "logs", component: () => import("./views/OpLogs.vue"), meta: { title: "操作日志" } },
         { path: "password", name: "password", component: () => import("./views/Password.vue"), meta: { title: "修改密码" } },
       ],

@@ -10,6 +10,7 @@ import com.lifeassistant.skill.travel.flight.TuniuFlightSource;
 import com.lifeassistant.skill.travel.hotel.HotelPriceTools;
 import com.lifeassistant.skill.travel.hotel.HotelQuoteBook;
 import com.lifeassistant.skill.travel.hotel.HotelSearch;
+import com.lifeassistant.skill.travel.ticket.SpotIntroService;
 import com.lifeassistant.skill.travel.ticket.TicketRules;
 import com.lifeassistant.skill.travel.ticket.TicketSearch;
 import com.lifeassistant.skill.travel.ticket.TuniuTickets;
@@ -46,6 +47,7 @@ public class SearchController {
     /** 同样的查询多久内不重复扣积分 */
     private static final Duration SAME_QUERY = Duration.ofMinutes(10);
     private final TicketRules ticketRules;
+    private final SpotIntroService spotIntros;
     private final TuniuTickets tuniuTickets;
     private final com.lifeassistant.core.cache.QueryCache queryCache;
     private final FoodTools foodTools;
@@ -167,6 +169,15 @@ public class SearchController {
                                                                @RequestParam(required = false) String category,
                                                                @RequestParam(defaultValue = "false") boolean refresh) {
         return ApiResponse.ok(ticketSearch.spots(city, keyword, category, refresh));
+    }
+
+    /**
+     * GET /api/v1/search/spots/detail?city=长沙&spot=岳麓书院：景点详情（飞猪的几 A、榜单、照片）和两三句简介；
+     * 简介第一次打开时根据资料生成并存下来，之后所有人共用。看详情不扣积分。
+     */
+    @GetMapping("/spots/detail")
+    public ApiResponse<SpotIntroService.Detail> spotDetail(@RequestParam(required = false) String city, @RequestParam String spot) {
+        return ApiResponse.ok(spotIntros.detail(city, spot, authFacade.current().userId()));
     }
 
     /** GET /api/v1/search/spots/rules?city=西安&spot=陕西历史博物馆：预约规则、开放时间（携程问道，按需查，十几秒）。 */

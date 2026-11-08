@@ -15,6 +15,7 @@
         <el-menu-item index="/orders"><el-icon><Wallet /></el-icon><template #title>会员与账单</template></el-menu-item>
         <el-menu-item index="/models"><el-icon><Cpu /></el-icon><template #title>模型配置</template></el-menu-item>
         <el-menu-item index="/integrations"><el-icon><Connection /></el-icon><template #title>第三方平台</template></el-menu-item>
+        <el-menu-item index="/spot-intros"><el-icon><Location /></el-icon><template #title>景点简介</template></el-menu-item>
         <el-menu-item index="/logs"><el-icon><Document /></el-icon><template #title>操作日志</template></el-menu-item>
       </el-menu>
     </el-aside>
@@ -47,7 +48,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ArrowDown, Avatar, Connection, Cpu, DataLine, Document, Expand, Fold, Key, SwitchButton, User, Wallet } from "@element-plus/icons-vue";
+import { ArrowDown, Avatar, Connection, Cpu, DataLine, Document, Expand, Fold, Key, Location, SwitchButton, User, Wallet } from "@element-plus/icons-vue";
 import { isSuper, session, signOut } from "../session";
 
 /** 后台框架：左侧菜单（管理员菜单只有超级管理员看得到）、顶部账号菜单 */

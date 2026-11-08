@@ -43,6 +43,7 @@
       <view v-for="t in TTABS" :key="t.key" class="ttab" :class="{ on: ttab === t.key }" role="tab" @click="setTab(t.key)">{{ t.label }}</view>
     </view>
 
+    <TripTips v-if="ttab === 'schedule' && tips" :text="tips" class="ed-tips" />
     <view v-if="ttab === 'schedule'" class="ed-cols">
       <!-- 左：当天时间线 -->
       <view class="ed-left">
@@ -63,13 +64,13 @@
             <view class="tl-item">
               <view class="tl-time">{{ item.start }}</view>
               <view class="tl-dot" />
-              <view class="tl-card" :class="{ locked: item.locked }">
+              <view class="tl-card" :class="{ locked: item.locked, viewing: sheetId === item.id }">
                 <view class="tl-main">
-                  <image v-if="item.photo && !broken[item.id]" class="tl-img" @error="broken[item.id] = true" :src="item.photo" mode="aspectFill" />
+                  <image v-if="item.photo && !broken[item.id]" class="tl-img" :class="{ tap: item.type === 'SPOT' }" @error="broken[item.id] = true" @click="item.type === 'SPOT' && openSpot(item)" :src="item.photo" mode="aspectFill" />
                   <view v-else class="tl-img ph" :class="[item.type, { mini: MINI.includes(item.type) }]"><Icon :name="itemIcon(item)" :size="MINI.includes(item.type) ? 18 : 24" :color="MINI.includes(item.type) ? 'var(--accent)' : '#fff'" /></view>
                   <view class="tl-body">
                     <view class="tl-name">
-                      <text :class="{ link: itemLink(item) || pendingFlight(item) }" @click="pendingFlight(item) ? changeFlight() : openUrl(itemLink(item))">{{ item.name }}</text>
+                      <text :class="{ link: item.type === 'SPOT' || itemLink(item) || pendingFlight(item) }" @click="clickName(item)">{{ item.name }}</text>
                       <text v-if="item.type === 'SPOT' && (item.rating || 0) >= 4.8" class="must">高分景点</text>
                       <text v-if="item.locked" class="kept-tag">已保留</text>
                       <text v-if="isBooked(item.id)" class="booked-tag">已预约</text>
@@ -92,16 +93,13 @@
                   <view v-if="isCurrent" class="tl-more" @click="more(item)"><Icon name="more" :size="16" color="var(--muted)" /></view>
                 </view>
                 <FlightStatusCard v-if="day && flightNoOf(item)" :flight-no="flightNoOf(item)!" :date="day.date" />
-                <view v-if="isCurrent && (BOOKABLE.includes(item.type) || doneable(item.type))" class="tl-acts">
-                  <template v-if="EDITABLE.includes(item.type)">
-                    <view class="a keep" :class="{ on: item.locked }" @click="toggleKeep(item)"><Icon name="heart" :size="13" :fill="!!item.locked" color="var(--ok)" />{{ item.locked ? "已保留" : "喜欢，保留" }}</view>
-                    <view class="a swap" @click="openReplace(item, 'VISITED')"><Icon name="refresh" :size="13" color="var(--accent)" />以前去过，换一个</view>
-                    <view class="a" @click="openReplace(item, 'DISLIKE')"><Icon name="close" :size="13" color="var(--muted)" />不感兴趣</view>
-                  </template>
+                <!-- 卡片上只留常用的；换一个、不感兴趣、已预约、已去在详情和右上角"⋯"里 -->
+                <view v-if="isCurrent && (EDITABLE.includes(item.type) || item.type === 'TRANSPORT')" class="tl-acts">
+                  <view v-if="EDITABLE.includes(item.type)" class="a keep" :class="{ on: item.locked }" @click="toggleKeep(item)"><Icon name="heart" :size="13" :fill="!!item.locked" color="var(--ok)" />{{ item.locked ? "已保留" : "喜欢，保留" }}</view>
+                  <view v-if="item.type === 'SPOT'" class="a" @click="openSpot(item)"><Icon name="right" :size="13" color="var(--ink)" />景点详情</view>
                   <view v-if="flightNoOf(item) && !isBooked(item.id)" class="a swap" @click="changeFlight"><Icon name="refresh" :size="13" color="var(--accent)" />比价换航班</view>
                   <view v-if="pendingFlight(item)" class="a swap" @click="changeFlight"><Icon name="plane" :size="13" color="var(--accent)" />去选航班</view>
-                  <view v-if="BOOKABLE.includes(item.type)" class="a book" :class="{ on: isBooked(item.id) }" @click="toggleBooked(item.id, item.name)"><Icon name="checkCircle" :size="13" color="var(--ok)" />{{ isBooked(item.id) ? "已预约" : "标记已预约" }}</view>
-                  <view v-if="doneable(item.type)" class="a book" :class="{ on: isDone(item.id) }" @click="toggleDone(item)"><Icon name="check" :size="13" color="var(--ok)" />{{ doneText(item.type, isDone(item.id)) }}</view>
+                  <view v-if="item.type === 'TRANSPORT'" class="a book" :class="{ on: isBooked(item.id) }" @click="toggleBooked(item.id, item.name)"><Icon name="checkCircle" :size="13" color="var(--ok)" />{{ isBooked(item.id) ? "已预约" : "标记已预约" }}</view>
                 </view>
               </view>
             </view>
@@ -111,72 +109,76 @@
         <view class="tl-add" @click="addStop"><Icon name="plus" :size="16" color="var(--accent)" />添加景点 / 活动</view>
       </view>
 
-      <!-- 中：当天概览、美食、酒店 -->
+      <!-- 中：当天概览、美食、酒店；看景点详情时换成详情（紧挨着左边点的卡片，关掉再换回来） -->
       <view class="ed-mid">
-        <view class="day-hero">
-          <image v-if="dayHero" class="day-hero-img" :src="dayHero" mode="aspectFill" />
-          <view v-else class="day-hero-img hero-ph" />
-          <view class="overview">
-            <view class="ov-title">当天行程概览</view>
-            <view class="ov-grid">
-              <view class="ov"><Icon name="pin" :size="18" color="var(--accent)" /><view><view class="ov-k">景点</view><view class="ov-v">{{ dayStats.spots }} 个</view></view></view>
-              <view class="ov"><Icon name="food" :size="18" color="var(--accent)" /><view><view class="ov-k">美食</view><view class="ov-v">{{ dayStats.foods }} 个</view></view></view>
-              <view class="ov"><Icon name="calendar" :size="18" color="var(--accent)" /><view><view class="ov-k">总时长</view><view class="ov-v">{{ dayStats.hours }}</view></view></view>
-              <view class="ov"><Icon name="car" :size="18" color="var(--accent)" /><view><view class="ov-k">路上</view><view class="ov-v">{{ travel.minutes ? duration2(travel.minutes) : "—" }}</view></view></view>
+        <SpotSheet v-if="sheetItem" inline :item="sheetItem" :city="city" :editable="isCurrent" :booked="isBooked(sheetItem.id)" :done="isDone(sheetItem.id)"
+          @close="sheetId = ''" @keep="toggleKeep(sheetItem)" @book="toggleBooked(sheetItem.id, sheetItem.name)" @done="toggleDone(sheetItem)" @replace="replaceFromSheet" />
+        <view v-show="!sheetItem" class="ed-mid-day">
+          <view class="day-hero">
+            <image v-if="dayHero" class="day-hero-img" :src="dayHero" mode="aspectFill" />
+            <view v-else class="day-hero-img hero-ph" />
+            <view class="overview">
+              <view class="ov-title">当天行程概览</view>
+              <view class="ov-grid">
+                <view class="ov"><Icon name="pin" :size="18" color="var(--accent)" /><view><view class="ov-k">景点</view><view class="ov-v">{{ dayStats.spots }} 个</view></view></view>
+                <view class="ov"><Icon name="food" :size="18" color="var(--accent)" /><view><view class="ov-k">美食</view><view class="ov-v">{{ dayStats.foods }} 个</view></view></view>
+                <view class="ov"><Icon name="calendar" :size="18" color="var(--accent)" /><view><view class="ov-k">总时长</view><view class="ov-v">{{ dayStats.hours }}</view></view></view>
+                <view class="ov"><Icon name="car" :size="18" color="var(--accent)" /><view><view class="ov-k">路上</view><view class="ov-v">{{ travel.minutes ? duration2(travel.minutes) : "—" }}</view></view></view>
+              </view>
             </view>
           </view>
-        </view>
 
-        <view class="panel">
-          <view class="panel-head"><text class="panel-title"><Icon name="food" :size="16" color="var(--accent)" /> 行程中的美食推荐</text><text class="more" @click="openFood">顺路找餐厅 ›</text></view>
-          <view class="muted small">{{ anchor ? `${anchor.name} 附近，高德评分从高到低` : "这一天还没有带位置的景点" }}</view>
-          <view v-if="nearLoading" class="muted small pad">正在找附近的餐厅…</view>
-          <view v-for="f in foods.slice(0, 3)" :key="f.id" class="food">
-            <image v-if="f.photo && !broken[f.id]" @error="broken[f.id] = true" class="food-img" :src="f.photo" mode="aspectFill" />
-            <view v-else class="food-img ph FOOD"><Icon name="food" :size="22" color="#fff" /></view>
-            <view class="food-body">
-              <view class="food-name">{{ f.name }}</view>
-              <view class="food-meta"><text v-if="f.rating" class="star">★ {{ f.rating }}</text> <text class="muted">高德评分</text></view>
-              <view class="food-tags"><text class="ftag">{{ f.category }}</text><text v-if="f.cost" class="ftag">人均 ¥{{ f.cost }}</text></view>
-              <view v-if="f.distance != null" class="muted small">距离{{ anchor?.name }} {{ distanceText(f.distance) }}</view>
+          <view class="panel">
+            <view class="panel-head"><text class="panel-title"><Icon name="food" :size="16" color="var(--accent)" /> 行程中的美食推荐</text><text class="more" @click="openFood">顺路找餐厅 ›</text></view>
+            <view class="muted small">{{ anchor ? `${anchor.name} 附近，高德评分从高到低` : "这一天还没有带位置的景点" }}</view>
+            <view v-if="nearLoading" class="muted small pad">正在找附近的餐厅…</view>
+            <view v-for="f in foods.slice(0, 3)" :key="f.id" class="food">
+              <image v-if="f.photo && !broken[f.id]" @error="broken[f.id] = true" class="food-img" :src="f.photo" mode="aspectFill" />
+              <view v-else class="food-img ph FOOD"><Icon name="food" :size="22" color="#fff" /></view>
+              <view class="food-body">
+                <view class="food-name">{{ f.name }}</view>
+                <view class="food-meta"><text v-if="f.rating" class="star">★ {{ f.rating }}</text> <text class="muted">高德评分</text></view>
+                <view class="food-tags"><text class="ftag">{{ f.category }}</text><text v-if="f.cost" class="ftag">人均 ¥{{ f.cost }}</text></view>
+                <view v-if="f.distance != null" class="muted small">距离{{ anchor?.name }} {{ distanceText(f.distance) }}</view>
+              </view>
+              <button v-if="isCurrent" class="btn ghost small add" :class="{ done: added[f.id] }" :disabled="added[f.id]" @click="addPlace(f, 'FOOD')">{{ added[f.id] ? "已加入" : "加入行程" }}</button>
             </view>
-            <button v-if="isCurrent" class="btn ghost small add" :class="{ done: added[f.id] }" :disabled="added[f.id]" @click="addPlace(f, 'FOOD')">{{ added[f.id] ? "已加入" : "加入行程" }}</button>
           </view>
-        </view>
 
-        <view class="panel">
-          <view class="panel-head"><text class="panel-title"><Icon name="bed" :size="16" color="var(--accent)" /> 当日酒店</text></view>
-          <StayCard v-if="dayStay" :key="dayStay.id + dayStay.name" :stay="dayStay" :trip-id="tripId" :editable="isCurrent" :booked="isBooked(dayStay.id)" :checking="stayChecking(itinerary, dayStay)" @saved="onSaved" @updated="detail = $event" />
-          <template v-else-if="hotel">
-            <view class="muted small"><Icon name="checkCircle" :size="12" color="var(--ok)" /> {{ cnDate(day?.date) }} 住这里<text v-if="hotel.address"> · {{ hotel.address }}</text></view>
-            <view class="food">
-              <image v-if="hotel.photo" class="food-img" :src="hotel.photo" mode="aspectFill" />
-              <view v-else class="food-img ph"><Icon name="bed" :size="22" color="#fff" /></view>
-              <view class="food-body">
-                <view class="food-name">{{ hotel.name }}</view>
-                <view class="food-meta"><text v-if="hotel.rating" class="star">★ {{ hotel.rating }}</text> <text v-if="hotel.rating" class="muted">高德评分</text></view>
-                <view v-if="hotel.note" class="muted small">{{ hotel.note }}</view>
+          <view class="panel">
+            <view class="panel-head"><text class="panel-title"><Icon name="bed" :size="16" color="var(--accent)" /> 当日酒店</text></view>
+            <StayCard v-if="dayStay" :key="dayStay.id + dayStay.name" :stay="dayStay" :trip-id="tripId" :editable="isCurrent" :booked="isBooked(dayStay.id)" :checking="stayChecking(itinerary, dayStay)" @saved="onSaved" @updated="detail = $event" />
+            <template v-else-if="hotel">
+              <view class="muted small"><Icon name="checkCircle" :size="12" color="var(--ok)" /> {{ cnDate(day?.date) }} 住这里<text v-if="hotel.address"> · {{ hotel.address }}</text></view>
+              <view class="food">
+                <image v-if="hotel.photo" class="food-img" :src="hotel.photo" mode="aspectFill" />
+                <view v-else class="food-img ph"><Icon name="bed" :size="22" color="#fff" /></view>
+                <view class="food-body">
+                  <view class="food-name">{{ hotel.name }}</view>
+                  <view class="food-meta"><text v-if="hotel.rating" class="star">★ {{ hotel.rating }}</text> <text v-if="hotel.rating" class="muted">高德评分</text></view>
+                  <view v-if="hotel.note" class="muted small">{{ hotel.note }}</view>
+                </view>
+                <view class="hotel-side">
+                  <text v-if="hotel.cost" class="price">¥{{ hotel.cost }}</text>
+                  <button class="btn ghost small add" @click="go(`/pages/search/hotel?trip=${tripId}`)">{{ isCurrent ? "比价换酒店" : "去比价" }}</button>
+                </view>
               </view>
-              <view class="hotel-side">
-                <text v-if="hotel.cost" class="price">¥{{ hotel.cost }}</text>
-                <button class="btn ghost small add" @click="go(`/pages/search/hotel?trip=${tripId}`)">{{ isCurrent ? "比价换酒店" : "去比价" }}</button>
+            </template>
+            <template v-else>
+              <view class="muted small">行程里还没安排酒店，下面是{{ anchor?.name || "附近" }}的酒店（高德）<text class="more" @click="go(`/pages/search/hotel?trip=${tripId}`)">比价并设为住宿 ›</text></view>
+              <view v-for="h in hotels.slice(0, 2)" :key="h.id" class="food">
+                <image v-if="h.photo && !broken[h.id]" @error="broken[h.id] = true" class="food-img" :src="h.photo" mode="aspectFill" />
+                <view v-else class="food-img ph"><Icon name="bed" :size="22" color="#fff" /></view>
+                <view class="food-body">
+                  <view class="food-name">{{ h.name }}</view>
+                  <view class="food-meta"><text v-if="h.rating" class="star">★ {{ h.rating }}</text> <text class="muted">{{ h.category }}</text></view>
+                  <view v-if="h.distance != null" class="muted small">距离 {{ distanceText(h.distance) }}</view>
+                  <view v-if="nearbyPrice(h)" class="small" :class="nearbyPrice(h)?.price != null ? 'cost' : 'muted'">{{ priceText(nearbyPrice(h)) }}</view>
+                </view>
+                <button v-if="isCurrent" class="btn ghost small add" :class="{ done: added[h.id] }" :disabled="added[h.id]" @click="addPlace(h, 'HOTEL')">{{ added[h.id] ? "已加入" : "加入行程" }}</button>
               </view>
-            </view>
-          </template>
-          <template v-else>
-            <view class="muted small">行程里还没安排酒店，下面是{{ anchor?.name || "附近" }}的酒店（高德）<text class="more" @click="go(`/pages/search/hotel?trip=${tripId}`)">比价并设为住宿 ›</text></view>
-            <view v-for="h in hotels.slice(0, 2)" :key="h.id" class="food">
-              <image v-if="h.photo && !broken[h.id]" @error="broken[h.id] = true" class="food-img" :src="h.photo" mode="aspectFill" />
-              <view v-else class="food-img ph"><Icon name="bed" :size="22" color="#fff" /></view>
-              <view class="food-body">
-                <view class="food-name">{{ h.name }}</view>
-                <view class="food-meta"><text v-if="h.rating" class="star">★ {{ h.rating }}</text> <text class="muted">{{ h.category }}</text></view>
-                <view v-if="h.distance != null" class="muted small">距离 {{ distanceText(h.distance) }}</view>
-                <view v-if="nearbyPrice(h)" class="small" :class="nearbyPrice(h)?.price != null ? 'cost' : 'muted'">{{ priceText(nearbyPrice(h)) }}</view>
-              </view>
-              <button v-if="isCurrent" class="btn ghost small add" :class="{ done: added[h.id] }" :disabled="added[h.id]" @click="addPlace(h, 'HOTEL')">{{ added[h.id] ? "已加入" : "加入行程" }}</button>
-            </view>
-          </template>
+            </template>
+          </view>
         </view>
       </view>
 
@@ -264,6 +266,7 @@
       <view class="m-links">
         <text v-for="t in SHORTCUTS" :key="t" class="m-link" @click="switchTab(t)">{{ t }}</text>
       </view>
+      <TripTips v-if="tips" :text="tips" class="m-tips" />
       <scroll-view scroll-x class="days">
         <view class="days-inner">
           <view v-for="(d, i) in days" :key="d.date" class="day-tab" :class="{ active: i === dayIndex }" @click="dayIndex = i">
@@ -285,10 +288,10 @@
           </view>
           <view class="stop-card">
             <view class="stop-main">
-              <image v-if="item.photo && !broken[item.id]" class="thumb" @error="broken[item.id] = true" :src="item.photo" mode="aspectFill" />
+              <image v-if="item.photo && !broken[item.id]" class="thumb" @error="broken[item.id] = true" @click="item.type === 'SPOT' && openSpot(item)" :src="item.photo" mode="aspectFill" />
               <view v-else class="thumb placeholder" :class="[item.type, { mini: MINI.includes(item.type) }]"><Icon :name="itemIcon(item)" :size="MINI.includes(item.type) ? 18 : 22" :color="MINI.includes(item.type) ? 'var(--accent)' : '#fff'" /></view>
               <view class="stop-body">
-                <view class="stop-name" :class="{ link: item.url || pendingFlight(item) }" @click="pendingFlight(item) ? changeFlight() : openUrl(item.url)">{{ item.name }}<text v-if="isBooked(item.id)" class="booked-tag">已预约</text></view>
+                <view class="stop-name" :class="{ link: item.type === 'SPOT' || item.url || pendingFlight(item) }" @click="clickName(item)">{{ item.name }}<text v-if="isBooked(item.id)" class="booked-tag">已预约</text></view>
                 <text v-if="doneable(item.type)" class="done-btn" :class="{ on: isDone(item.id) }" @click.stop="toggleDone(item)">{{ isDone(item.id) ? "✓ " : "" }}{{ doneText(item.type, isDone(item.id)) }}</text>
                 <view class="stop-time">{{ item.start }}<text v-if="item.end && item.end !== item.start"> - {{ item.end }}</text><text v-if="item.rating" class="star"> · ★{{ item.rating }}</text><text v-if="item.cost" class="cost"> · ¥{{ item.cost }}/人</text><text v-if="day && flightChecking(itinerary, item, day.date)" class="checking"> · 其他平台比价中…</text></view>
                 <view v-if="item.note" class="stop-note">{{ item.note }}</view>
@@ -298,9 +301,18 @@
                   <text class="amap" @click.stop="openUrl(amapNavUrl(item, city))"><Icon name="nav" :size="12" color="var(--accent)" /> 导航</text>
                 </view>
               </view>
+              <view v-if="isCurrent" class="stop-more" @click="more(item)"><Icon name="more" :size="16" color="var(--muted)" /></view>
             </view>
             <view v-if="isCurrent && BOOKABLE.includes(item.type)" class="stop-actions">
-              <view class="act book" :class="{ on: isBooked(item.id) }" @click="toggleBooked(item.id, item.name)">
+              <view v-if="EDITABLE.includes(item.type)" class="act keep" :class="{ on: item.locked }" @click="toggleKeep(item)">
+                <Icon name="heart" :size="13" :fill="!!item.locked" color="var(--ok)" />
+                <text>{{ item.locked ? "已保留" : "喜欢，保留" }}</text>
+              </view>
+              <view v-if="item.type === 'SPOT'" class="act" @click="openSpot(item)">
+                <Icon name="right" :size="13" color="var(--ink)" />
+                <text>景点详情</text>
+              </view>
+              <view v-if="item.type === 'TRANSPORT'" class="act book" :class="{ on: isBooked(item.id) }" @click="toggleBooked(item.id, item.name)">
                 <Icon name="checkCircle" :size="13" color="var(--ok)" />
                 <text>{{ isBooked(item.id) ? "已预约" : "标记已预约" }}</text>
               </view>
@@ -313,21 +325,7 @@
                 <text>去选航班</text>
               </view>
             </view>
-            <view v-if="isCurrent && EDITABLE.includes(item.type)" class="stop-actions">
-              <view class="act keep" :class="{ on: item.locked }" @click="toggleKeep(item)">
-                <Icon name="heart" :size="13" :fill="!!item.locked" color="var(--ok)" />
-                <text>{{ item.locked ? "已保留" : "喜欢，保留" }}</text>
-              </view>
-              <view class="act" @click="openReplace(item, 'VISITED')">
-                <Icon name="refresh" :size="13" color="var(--ink)" />
-                <text>换一个</text>
-              </view>
-              <view class="act ghost" @click="openReplace(item, 'DISLIKE')">
-                <Icon name="close" :size="13" color="var(--muted)" />
-                <text>不感兴趣</text>
-              </view>
-              <view class="grip" @click="edit"><Icon name="grip" :size="16" color="var(--muted)" /></view>
-            </view>
+
             <view v-if="legFrom(day, item.id)" class="stop-leg"><LegRow :leg="legFrom(day, item.id)!" :day="day" :stays="stays" :editable="isCurrent" :busy="modeBusy" prefix="到下一站 " @mode="setLegMode(legFrom(day, item.id)!, $event)" /></view>
           </view>
         </view>
@@ -338,10 +336,6 @@
         </view>
       </view>
 
-      <view v-if="tips" class="tips">
-        <view class="tips-title">注意事项</view>
-        <MarkdownView :text="tips" />
-      </view>
     </template>
     <view v-else-if="detail && ttab === 'schedule'" class="card body">
       <MarkdownView :text="detail.version.content || ''" />
@@ -391,6 +385,9 @@
       </view>
     </view>
   </view>
+  <!-- 景点详情（手机）：从底部弹出；电脑上在中间栏 -->
+  <SpotSheet v-if="sheetItem && !wide" :item="sheetItem" :city="city" :editable="isCurrent" :booked="isBooked(sheetItem.id)" :done="isDone(sheetItem.id)"
+    @close="sheetId = ''" @keep="toggleKeep(sheetItem)" @book="toggleBooked(sheetItem.id, sheetItem.name)" @done="toggleDone(sheetItem)" @replace="replaceFromSheet" />
   </Shell>
 </template>
 
@@ -406,6 +403,8 @@ import FlightStatusCard from "../../components/FlightStatusCard.vue";
 import MarkdownView from "../../components/MarkdownView.vue";
 import ReplaceModal from "../../components/ReplaceModal.vue";
 import StayCard from "../../components/StayCard.vue";
+import SpotSheet from "../../components/SpotSheet.vue";
+import TripTips from "../../components/TripTips.vue";
 import LegRow from "../../components/LegRow.vue";
 import Shell from "../../components/Shell.vue";
 import TripBookings from "../../components/TripBookings.vue";
@@ -955,23 +954,48 @@ async function toggleKeep(item: ItineraryItem) {
 }
 
 /** 更多操作：删掉这一项、调整顺序 */
+/** 右上角"⋯"：换一个、不感兴趣、已预约、已去（卡片上放不下的）和删除、调整顺序 */
 function more(item: ItineraryItem) {
-  uni.showActionSheet({
-    itemList: ["删掉这一项", "调整这一天的顺序"],
-    success: async (res) => {
-      if (res.tapIndex === 1) {
-        edit();
-        return;
-      }
-      confirmBooked(item, async () => {
-        try {
-          onSaved(await api.removeItem(tripId.value, item.id, null));
-        } catch (e) {
-          showError(e);
-        }
-      });
-    },
-  });
+  const acts: [string, () => void][] = [];
+  if (EDITABLE.includes(item.type)) {
+    acts.push(["以前去过，换一个", () => openReplace(item, "VISITED")], ["不感兴趣，换一个", () => openReplace(item, "DISLIKE")]);
+  }
+  if (BOOKABLE.includes(item.type) && item.type !== "TRANSPORT") {
+    acts.push([isBooked(item.id) ? "取消已预约" : "标记已预约", () => toggleBooked(item.id, item.name)]);
+  }
+  if (doneable(item.type)) {
+    acts.push([isDone(item.id) ? `取消${doneText(item.type, true)}` : doneText(item.type, false), () => toggleDone(item)]);
+  }
+  acts.push(["删掉这一项", () => confirmBooked(item, async () => {
+    try {
+      onSaved(await api.removeItem(tripId.value, item.id, null));
+    } catch (e) {
+      showError(e);
+    }
+  })], ["调整这一天的顺序", edit]);
+  uni.showActionSheet({ itemList: acts.map((a) => a[0]), success: (res) => acts[res.tapIndex]?.[1]() });
+}
+
+/** 正在看详情的景点（按 id 找，保留、预约后跟着变） */
+const sheetId = ref("");
+const sheetItem = computed(() => (sheetId.value ? day.value?.items.find((x) => x.id === sheetId.value) || null : null));
+
+function openSpot(item: ItineraryItem) {
+  sheetId.value = item.id;
+}
+
+/** 点名字：景点看详情，待定的航班去选航班，其他打开链接 */
+function clickName(item: ItineraryItem) {
+  if (item.type === "SPOT") openSpot(item);
+  else if (pendingFlight(item)) changeFlight();
+  else openUrl(itemLink(item));
+}
+
+/** 详情里点"换一个""不感兴趣"：先关详情再打开替换 */
+function replaceFromSheet(reason: "VISITED" | "DISLIKE") {
+  const item = sheetItem.value;
+  sheetId.value = "";
+  if (item) openReplace(item, reason);
 }
 
 /** 把附近的餐厅、景点、酒店加进当天 */
@@ -1149,7 +1173,9 @@ async function loadVersions() {
 .ed-chip { display: flex; align-items: center; gap: 6px; font-size: 14px; padding: 8px 14px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); }
 .ed-tag { font-size: 13px; padding: 8px 12px; border-radius: 10px; background: var(--surface-2); }
 .ed-cols { display: grid; grid-template-columns: minmax(420px, 1.15fr) minmax(0, 1fr) 380px; gap: 16px; align-items: start; }
-.ed-left, .ed-mid, .ed-right { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.ed-left, .ed-mid, .ed-right, .ed-mid-day { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+/* 中间栏拉满整行高度，景点详情才能在往下滚时停住 */
+.ed-mid { align-self: stretch; }
 .ed-left { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 14px; }
 .ed-days { display: flex; gap: 8px; align-items: center; }
 .ed-day { flex: 1; display: flex; align-items: baseline; justify-content: center; gap: 4px; padding: 9px 0; border-radius: 10px; background: var(--surface-2); cursor: pointer; }
@@ -1179,7 +1205,10 @@ async function loadVersions() {
 .tl-facts { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted); margin-top: 4px; }
 .tl-facts text { display: inline-flex; align-items: center; gap: 3px; }
 .tl-more { cursor: pointer; padding: 2px; }
+.tl-img.tap { cursor: pointer; }
 .tl-card.locked { border-color: var(--ok); }
+/* 正在右边看详情的那一项 */
+.tl-card.viewing { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .kept-tag { font-size: 11px; font-weight: 600; color: var(--ok); background: var(--ok-soft); padding: 1px 6px; border-radius: 4px; }
 .tl-facts .star { color: var(--price); font-weight: 700; }
 .ver-chip, .mode-chip { gap: 4px; }
@@ -1334,7 +1363,7 @@ async function loadVersions() {
 .act.keep { color: var(--ok); border-color: var(--ok); }
 .act.keep.on { background: var(--ok-soft); }
 .act.ghost { color: var(--muted); }
-.grip { margin-left: auto; padding: 2px; cursor: pointer; }
+.stop-more { flex-shrink: 0; align-self: flex-start; padding: 2px; cursor: pointer; }
 .add {
   display: flex;
   align-items: center;
@@ -1357,6 +1386,8 @@ async function loadVersions() {
 .big { font-size: 20px; }
 .small { font-size: 12px; }
 
+.ed-tips { margin-bottom: 16px; }
+.m-tips { margin-bottom: 12px; }
 .tips { margin-top: 14px; background: var(--surface); border-radius: 14px; padding: 12px 14px; border: 1px solid var(--line); }
 .tips-title { font-size: 13px; color: var(--muted); margin-bottom: 4px; }
 .body { padding: 16px 18px; }

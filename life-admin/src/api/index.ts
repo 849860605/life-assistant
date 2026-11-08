@@ -279,6 +279,19 @@ export interface MemberLogRow {
 
 /** 某个用户的会员状态、今天的对话次数和会员记录 */
 /** 积分价格表：各项价格、注册送、每天送、积分包；features 是各项中文名，packsText 是"元:积分"的原文 */
+/** 景点简介：intro 为空是资料太少没写出来；manual 是后台改过的（不再自动重写） */
+export interface SpotIntroRow {
+  id: number;
+  city: string;
+  name: string;
+  intro: string | null;
+  sources: string | null;
+  model: string | null;
+  manual: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface CreditPlan {
   plan: { prices: Record<string, number>; signup: number; daily: number; packs: { code: string; yuan: string | number; credits: number; bonusPercent: number }[] };
   features: Record<string, string>;
@@ -375,6 +388,9 @@ export const api = {
   memberStatus: (userId: number) => request<MemberStatus>("GET", `/pay/members/${userId}`),
   grantMember: (userId: number, days: number, note?: string) => request<MemberStatus>("POST", `/pay/members/${userId}/grant`, { days, note }),
   setChatQuota: (freeDaily: number, memberDaily: number) => request<MemberSetting>("PUT", "/pay/member/quota", { freeDaily, memberDaily }),
+  spotIntros: (keyword?: string) => request<SpotIntroRow[]>("GET", `/spot-intros${keyword ? `?keyword=${encodeURIComponent(keyword)}` : ""}`),
+  editSpotIntro: (id: number, intro: string) => request<SpotIntroRow>("PUT", `/spot-intros/${id}`, { intro }),
+  deleteSpotIntro: (id: number) => request<void>("DELETE", `/spot-intros/${id}`),
   creditPlan: () => request<CreditPlan>("GET", "/credits/plan"),
   setCreditPlan: (body: { prices: Record<string, number>; signup: number; daily: number; packs: string }) =>
     request<CreditPlan>("PUT", "/credits/plan", body),

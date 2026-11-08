@@ -73,6 +73,8 @@ export const ACTION_LABELS: Record<string, string> = {
   SET_CHAT_QUOTA: "修改每天对话次数",
   SET_CREDIT_PLAN: "修改积分价格",
   ADJUST_CREDIT: "调整用户积分",
+  EDIT_SPOT_INTRO: "修改景点简介",
+  DELETE_SPOT_INTRO: "重新生成景点简介",
   SET_QUICK_PRICE: "修改快速查价平台",
 };
 

@@ -621,6 +621,14 @@ export interface TicketSpot {
   url: string | null;
 }
 
+/** 景点详情：spot 是飞猪上对上的景点（对不上为空），intro 是两三句简介（写不出来为空），aiWritten 表示简介是 AI 根据资料整理的 */
+export interface SpotDetail {
+  name: string;
+  spot: TicketSpot | null;
+  intro: string | null;
+  aiWritten: boolean;
+}
+
 /** 票种：type 是成人、儿童、学生、老人、优待，看不出来为空 */
 export interface TicketSku {
   name: string;

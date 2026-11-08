@@ -4,7 +4,7 @@ import type {
   TodayAgenda,
   BriefSettings,
   UploadView,
-  BookingState, ChangeReason, ChatMessage, Conversation, DayPreview, FlightPick, FlightPreview, FlightRules, FlightSearch, FoodResult, DayTickets, HotelComparison, HotelSearchResult, SpotRules, TicketProduct, TuniuTicket, TicketSpot, TuniuCabin, StayPick, StayPreview, Meal, MealPreview, MemoryCategory, MemoryItem, OptimizeGoal, Place, PlacePick,
+  BookingState, ChangeReason, ChatMessage, Conversation, DayPreview, FlightPick, FlightPreview, FlightRules, FlightSearch, FoodResult, DayTickets, HotelComparison, HotelSearchResult, SpotDetail, SpotRules, TicketProduct, TuniuTicket, TicketSpot, TuniuCabin, StayPick, StayPreview, Meal, MealPreview, MemoryCategory, MemoryItem, OptimizeGoal, Place, PlacePick,
   ScheduleEvent, TokenView, PayOrder, PayQuery, MembershipView, MembershipLog,
   TripDetail, TripVersion, Trip, UserView, EmailCodePurpose,
   WeatherBoard, TripForecast, SwapPreview, TripBooking, TripExpense, BookingInput, ExpenseInput, Favorite, UserAddress, FlightStatusResult, FlightStatusInfo, CreditView, CreditEntry } from "./types";
@@ -147,6 +147,8 @@ export const api = {
     request<TripDetail>("POST", `/api/v1/trips/${id}/stays/apply` + qs({ stayId: stayId || undefined, replaces: replaces || undefined }), hotel),
   spots: (city: string, keyword?: string, category?: string, refresh?: boolean) =>
     request<TicketSpot[]>("GET", "/api/v1/search/spots" + qs({ city, keyword, category, refresh: refresh || undefined })),
+  spotDetail: (city: string, spot: string) =>
+    request<SpotDetail>("GET", "/api/v1/search/spots/detail" + qs({ city, spot })),
   spotTickets: (city: string, spot: string, refresh?: boolean) =>
     request<TicketProduct[]>("GET", "/api/v1/search/spots/tickets" + qs({ city, spot, refresh: refresh || undefined })),
   tuniuTickets: (spot: string, date?: string | null, refresh?: boolean) =>
