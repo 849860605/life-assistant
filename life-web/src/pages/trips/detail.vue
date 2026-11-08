@@ -66,7 +66,7 @@
               <view class="tl-card" :class="{ locked: item.locked }">
                 <view class="tl-main">
                   <image v-if="item.photo && !broken[item.id]" class="tl-img" @error="broken[item.id] = true" :src="item.photo" mode="aspectFill" />
-                  <view v-else class="tl-img ph" :class="item.type"><Icon :name="TYPE_ICON[item.type] || 'pin'" :size="24" color="#fff" /></view>
+                  <view v-else class="tl-img ph" :class="[item.type, { mini: MINI.includes(item.type) }]"><Icon :name="itemIcon(item)" :size="MINI.includes(item.type) ? 18 : 24" :color="MINI.includes(item.type) ? 'var(--accent)' : '#fff'" /></view>
                   <view class="tl-body">
                     <view class="tl-name">
                       <text :class="{ link: itemLink(item) || pendingFlight(item) }" @click="pendingFlight(item) ? changeFlight() : openUrl(itemLink(item))">{{ item.name }}</text>
@@ -77,7 +77,7 @@
                     </view>
                     <view class="tl-note">{{ item.note }}</view>
                     <view class="tl-facts">
-                      <text><Icon name="calendar" :size="12" color="var(--muted)" /> {{ duration(item) }}</text>
+                      <text v-if="duration(item)"><Icon name="calendar" :size="12" color="var(--muted)" /> {{ duration(item) }}</text>
                       <text v-if="item.rating" class="star">★ {{ item.rating }}</text>
                       <text v-if="item.address"><Icon name="pin" :size="12" color="var(--muted)" /> {{ item.address }}</text>
                       <text v-if="item.cost" class="cost">¥{{ item.cost }}/人</text>
@@ -286,11 +286,11 @@
           <view class="stop-card">
             <view class="stop-main">
               <image v-if="item.photo && !broken[item.id]" class="thumb" @error="broken[item.id] = true" :src="item.photo" mode="aspectFill" />
-              <view v-else class="thumb placeholder" :class="item.type"><Icon :name="TYPE_ICON[item.type] || 'pin'" :size="22" color="#fff" /></view>
+              <view v-else class="thumb placeholder" :class="[item.type, { mini: MINI.includes(item.type) }]"><Icon :name="itemIcon(item)" :size="MINI.includes(item.type) ? 18 : 22" :color="MINI.includes(item.type) ? 'var(--accent)' : '#fff'" /></view>
               <view class="stop-body">
                 <view class="stop-name" :class="{ link: item.url || pendingFlight(item) }" @click="pendingFlight(item) ? changeFlight() : openUrl(item.url)">{{ item.name }}<text v-if="isBooked(item.id)" class="booked-tag">已预约</text></view>
                 <text v-if="doneable(item.type)" class="done-btn" :class="{ on: isDone(item.id) }" @click.stop="toggleDone(item)">{{ isDone(item.id) ? "✓ " : "" }}{{ doneText(item.type, isDone(item.id)) }}</text>
-                <view class="stop-time">{{ item.start }}<text v-if="item.end"> - {{ item.end }}</text><text v-if="item.rating" class="star"> · ★{{ item.rating }}</text><text v-if="item.cost" class="cost"> · ¥{{ item.cost }}/人</text><text v-if="day && flightChecking(itinerary, item, day.date)" class="checking"> · 其他平台比价中…</text></view>
+                <view class="stop-time">{{ item.start }}<text v-if="item.end && item.end !== item.start"> - {{ item.end }}</text><text v-if="item.rating" class="star"> · ★{{ item.rating }}</text><text v-if="item.cost" class="cost"> · ¥{{ item.cost }}/人</text><text v-if="day && flightChecking(itinerary, item, day.date)" class="checking"> · 其他平台比价中…</text></view>
                 <view v-if="item.note" class="stop-note">{{ item.note }}</view>
                 <FlightStatusCard v-if="day && flightNoOf(item)" :flight-no="flightNoOf(item)!" :date="day.date" compact />
                 <view v-if="EDITABLE.includes(item.type)" class="amap-links">
@@ -432,6 +432,8 @@ type TripTab = (typeof TTABS)[number]["key"];
 /** 手机上日程标签里的快捷入口：地图、美食、机票、门票（各自是单独的页面） */
 const SHORTCUTS = ["地图路线", "美食推荐", "机票比价", "景点门票"];
 const TYPE_ICON: Record<string, string> = { SPOT: "pin", FOOD: "food", HOTEL: "bed", TRANSPORT: "car", FREE: "sparkle" };
+/** 这些类型没有照片时只放一个小圆图标，不占一大块 */
+const MINI = ["TRANSPORT", "FREE"];
 /** 这些类型能保留、换、删；交通和自由活动不能 */
 const EDITABLE = ["SPOT", "FOOD", "HOTEL"];
 /** 这些类型能标记已预约（交通是机票、火车票这类） */
@@ -693,9 +695,22 @@ function toMin(t: string) {
 }
 
 function duration(it: ItineraryItem) {
-  if (!it.start || !it.end) return "时长待定";
-  const hours = (toMin(it.end) - toMin(it.start)) / 60;
+  if (!it.start || !it.end) return it.type === "TRANSPORT" ? "" : "时长待定";
+  const minutes = toMin(it.end) - toMin(it.start);
+  // 到机场、车站这类只有一个时间点的不显示时长
+  if (minutes <= 0) return "";
+  if (minutes < 60) return `约 ${minutes} 分钟`;
+  const hours = minutes / 60;
   return `约 ${Number.isInteger(hours) ? hours : hours.toFixed(1)} 小时`;
+}
+
+/** 没有照片时的图标：交通按内容分飞机、火车、汽车 */
+function itemIcon(it: ItineraryItem): string {
+  if (it.type !== "TRANSPORT") return TYPE_ICON[it.type] || "pin";
+  const text = `${it.name} ${it.note || ""}`;
+  if (flightNoOf(it) || /机场|航班|航空|飞机|飞往|直飞|起飞/.test(text)) return "plane";
+  if (/高铁|动车|火车|车站|站$|地铁/.test(text) || /^[GDCKTZ]\d{1,4}/.test(it.name)) return "train";
+  return "car";
 }
 
 /** 对话页是底部标签页，只能用 reLaunch 打开；其他页面正常压栈 */
@@ -1156,7 +1171,7 @@ async function loadVersions() {
 .tl-img { width: 96px; height: 76px; border-radius: 10px; flex-shrink: 0; }
 .tl-img.ph { display: flex; align-items: center; justify-content: center; background: var(--accent); }
 .tl-img.ph.FOOD { background: var(--price); }
-.tl-img.ph.TRANSPORT, .tl-img.ph.FREE { background: #94a3b8; }
+.tl-img.ph.mini { width: 40px; height: 40px; border-radius: 50%; background: var(--accent-soft); }
 .tl-body { flex: 1; min-width: 0; }
 .tl-name { font-weight: 800; font-size: 16px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .must { font-size: 11px; font-weight: 600; color: #e11d48; background: #fde8ec; padding: 1px 6px; border-radius: 4px; }
@@ -1297,7 +1312,7 @@ async function loadVersions() {
 .thumb { width: 76px; height: 64px; border-radius: 10px; flex-shrink: 0; }
 .placeholder { display: flex; align-items: center; justify-content: center; background: var(--accent); }
 .placeholder.FOOD { background: var(--price); }
-.placeholder.TRANSPORT, .placeholder.FREE { background: #94a3b8; }
+.placeholder.mini { width: 36px; height: 36px; border-radius: 50%; background: var(--accent-soft); }
 .stop-body { flex: 1; min-width: 0; }
 .stop-name { font-weight: 700; }
 .stop-time { font-size: 12px; color: var(--muted); margin-top: 1px; font-variant-numeric: tabular-nums; }

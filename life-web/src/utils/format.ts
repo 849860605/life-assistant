@@ -95,11 +95,69 @@ export function openUrl(url?: string | null) {
   // 只开 http(s) 链接；链接可能来自模型输出，javascript: 之类的一律不开
   if (!url || !/^https?:\/\//i.test(url)) return;
   // #ifdef H5
+  if (openAmapOnHarmony(url)) return;
   window.open(url, "_blank", "noopener");
   // #endif
   // #ifndef H5
   uni.setClipboardData({ data: url, success: () => uni.showToast({ title: "链接已复制", icon: "none" }) });
   // #endif
+}
+
+/** 鸿蒙 5（HarmonyOS NEXT）的浏览器：不带 Android 标识，高德的跳转网页认不出来，只给网页版、调不起 App。 */
+function isHarmonyNext(): boolean {
+  const ua = navigator.userAgent;
+  return /OpenHarmony|ArkWeb/i.test(ua) && !/Android/i.test(ua);
+}
+
+/** 高德跳转链接里的"经度,纬度,名称"拆开；格式不对时为空。 */
+function amapPoint(v: string | null): { lng: string; lat: string; name: string } | null {
+  if (!v) return null;
+  const [lng, lat, ...rest] = v.split(",");
+  if (!lng || !lat || Number.isNaN(Number(lng)) || Number.isNaN(Number(lat))) return null;
+  return { lng, lat, name: rest.join(",") };
+}
+
+/**
+ * 鸿蒙 5 上把高德的路线、地点链接换成高德鸿蒙版的 amapuri://route/plan 直接调起 App（起点不填就是当前位置）；
+ * 2 秒内页面没切走、也没弹"是否打开"，说明没装高德或调不起来，退回高德网页版。不是这种情况时返回 false。
+ */
+function openAmapOnHarmony(url: string): boolean {
+  if (!isHarmonyNext()) return false;
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return false;
+  }
+  if (u.hostname !== "uri.amap.com") return false;
+  let to: { lng: string; lat: string; name: string } | null = null;
+  let from: { lng: string; lat: string; name: string } | null = null;
+  if (u.pathname === "/navigation") {
+    to = amapPoint(u.searchParams.get("to"));
+    from = amapPoint(u.searchParams.get("from"));
+  } else if (u.pathname === "/marker") {
+    to = amapPoint(`${u.searchParams.get("position") || ""},${u.searchParams.get("name") || ""}`);
+  }
+  if (!to) return false;
+  // 高德的出行方式：0 驾车、1 公交地铁、2 步行
+  const t = { bus: "1", walk: "2" }[u.searchParams.get("mode") || ""] || "0";
+  const q = new URLSearchParams({ sourceApplication: "xinglo", dlat: to.lat, dlon: to.lng, dname: to.name, dev: "0", t });
+  if (from) {
+    q.set("slat", from.lat);
+    q.set("slon", from.lng);
+    q.set("sname", from.name);
+  }
+  let left = false;
+  const away = () => (left = true);
+  window.addEventListener("blur", away, { once: true });
+  document.addEventListener("visibilitychange", away, { once: true });
+  window.location.href = `amapuri://route/plan?${q}`;
+  setTimeout(() => {
+    window.removeEventListener("blur", away);
+    document.removeEventListener("visibilitychange", away);
+    if (!left && !document.hidden) window.location.href = url;
+  }, 2000);
+  return true;
 }
 
 /** "2026-03-10" 显示成"3/10"。 */

@@ -15,7 +15,7 @@ onLaunch((opts) => {
 /*
  * 版式：工具型界面，白底浅灰、近黑正文、灰色辅助字；蓝色只用于主要操作和选中状态。
  * 8px 间距体系；圆角小、边框细、阴影轻；默认不用渐变、发光和彩色图标方块。价格用暗橙和蓝色主操作区分开。
- * 用户可以在外观设置里换成深色，或换"星光紫"背景（见下面 data-theme / data-bg）。
+ * 用户可以在外观设置里换成深色或"星光紫"（见下面 data-theme / data-bg）。
  */
 page {
   --bg: #f5f5f7;
@@ -81,8 +81,7 @@ html[data-theme="dark"] page {
 }
 
 /*
- * 星光紫背景：<html data-bg="aurora">。主色换成紫色，页面底是淡紫到淡粉的渐变，卡片仍是实色，保证字看得清。
- * 深色下是深靛蓝底和紫色光晕。
+ * 星光紫：<html data-bg="aurora">（只在浅色下）。主色换成紫色，页面底是淡紫到淡粉的渐变，卡片仍是实色，保证字看得清。
  */
 html[data-bg="aurora"] page {
   --bg: #f3f1fc;
@@ -99,28 +98,10 @@ html[data-bg="aurora"] page {
     radial-gradient(900px 420px at 60% 110%, #f7cfe2 0%, rgba(247, 207, 226, 0) 70%),
     linear-gradient(180deg, #ebe6ff 0%, #f2effd 50%, #f8eef6 100%) fixed;
 }
-html[data-theme="dark"][data-bg="aurora"] page {
-  --bg: #0e0c1d;
-  --surface: #18152c;
-  --surface-2: #221e3a;
-  --line: #2f2a4c;
-  --muted: #a19cbb;
-  --accent: #9d8bff;
-  --accent-soft: #2b2453;
-  --nav-bg: rgba(20, 17, 38, 0.7);
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
-  --side-bg: rgba(24, 21, 44, 0.55);
-  background: radial-gradient(1100px 560px at 70% -8%, #3a2b85 0%, rgba(58, 43, 133, 0) 70%),
-    radial-gradient(800px 520px at -5% 25%, #241d57 0%, rgba(36, 29, 87, 0) 70%),
-    radial-gradient(900px 420px at 60% 110%, #3a1838 0%, rgba(58, 24, 56, 0) 70%),
-    linear-gradient(180deg, #141029 0%, #0e0c1d 60%, #170f22 100%) fixed;
-}
-
 /* 内容不满一屏时，下面也是页面底色 */
 html, body { background: #f5f5f7; }
 html[data-theme="dark"], html[data-theme="dark"] body { background: #000; }
 html[data-bg="aurora"], html[data-bg="aurora"] body { background: #f3f1fc; }
-html[data-theme="dark"][data-bg="aurora"], html[data-theme="dark"][data-bg="aurora"] body { background: #0e0c1d; }
 
 /* 宽屏（电脑）：顶部导航代替底部标签栏和顶部标题栏，见 components/Shell.vue */
 @media (min-width: 1024px) {
