@@ -52,11 +52,15 @@ public class HotelPriceTools {
     private final com.lifeassistant.core.conversation.TurnFlags turnFlags;
     /** 快速选酒店的参考价用哪家（后台设置） */
     private final QuickPriceSettings quickPrice;
+    /** 对话里完整比价扣积分 */
+    private final com.lifeassistant.core.member.TurnBilling billing;
 
     public HotelPriceTools(List<HotelPriceSource> sources, McpServerRegistry mcpServers, ObjectMapper objectMapper,
                            CallRecorder recorder, CardHub cards, HotelQuoteBook quoteBook, HotelRanker ranker,
                            AmapPlaceService places, QuickPriceSettings quickPrice,
-                           com.lifeassistant.core.conversation.TurnFlags turnFlags) {
+                           com.lifeassistant.core.conversation.TurnFlags turnFlags,
+                           com.lifeassistant.core.member.TurnBilling billing) {
+        this.billing = billing;
         this.quickPrice = quickPrice;
         this.turnFlags = turnFlags;
         this.sources = sources;
@@ -91,6 +95,10 @@ public class HotelPriceTools {
             @ToolParam(description = "用户对住宿提过的要求，用顿号分开，例如：安静、房间有窗、早餐好、适合带娃；没提过就不填",
                     required = false) String needs) {        if (turnFlags.planningOnly()) {
             return Map.of("skipped", "规划完整行程时不做多平台比价：用 quickHotels 的结果挑一家写进行程，其他平台的价格保存后后台补。");
+        }
+        String noCredit = billing.compare();
+        if (noCredit != null) {
+            return Map.of("error", noCredit);
         }
 
         CardHub.Tracker progress = cards.track("查询酒店并比价");

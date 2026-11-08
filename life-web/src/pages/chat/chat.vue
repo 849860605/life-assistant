@@ -100,7 +100,7 @@
               <view v-if="m.status === 'streaming'" class="caret" />
               <view v-if="m.status === 'stopped'" class="status">已停止</view>
               <view v-if="m.status === 'error'" class="error">
-                {{ m.error }}<text v-if="m.quota" class="quota-link" @click="openMember">开通会员 ›</text>
+                {{ m.error }}<text v-if="m.quota" class="quota-link" @click="openMember">购买积分 ›</text>
                 <text v-else-if="m === messages[messages.length - 1] && !sending" class="quota-link" @click="retry(m)">重试</text>
               </view>
               <view v-if="m.text && (m.status === 'done' || m.status === 'stopped')" class="answer-actions">
@@ -108,6 +108,7 @@
                   <Icon :name="copiedKey === m.key ? 'check' : 'copy'" :size="14" color="currentColor" />
                   <text>{{ copiedKey === m.key ? "已复制" : "复制" }}</text>
                 </view>
+                <text v-if="m.spent" class="spent">本次用了 {{ m.spent }} 积分</text>
               </view>
               <view v-if="refinable(m)" class="chips refine">
                 <text v-for="r in REFINES" :key="r.label" class="chip-btn" @click="prefill(r.text)">{{ r.label }}</text>
@@ -201,6 +202,7 @@ import VoiceButton from "../../components/VoiceButton.vue";
 import { useWide } from "../../utils/screen";
 import { savePlans } from "../../utils/plans";
 import { currentCity, setCurrentCity } from "../../utils/place";
+import { creditTotal, refreshCredits } from "../../utils/credits";
 import { flightNoIn } from "../../utils/priceCheck";
 import { dayLabel, hm, markdownToPlain, relativeTime, SKILL_NAMES, ymd } from "../../utils/format";
 import { ensureMediaTicket } from "../../utils/media";
@@ -219,8 +221,10 @@ interface UiMessage {
   skillName?: string;
   status?: "waiting" | "streaming" | "done" | "stopped" | "error";
   error?: string;
-  /** 今天的对话次数用完了：错误下面给个开通会员的入口 */
+  /** 积分不够：错误下面给个购买积分的入口 */
   quota?: boolean;
+  /** 这一轮用了多少积分（回答结束后按前后余额算） */
+  spent?: number;
   /** 用户消息带的附件 */
   files?: Attached[];
   /** 回答下面的快捷回复，只在最新一条回答下显示 */
@@ -633,6 +637,8 @@ async function send(raw: string, files: Attached[] = [], chip = false) {
   scrollToBottom();
 
   controller = new AbortController();
+  // 记下发之前的积分，回答结束后算这一轮用了多少
+  const before = creditTotal.value ?? (await refreshCredits());
   try {
     if (!currentId.value) {
       currentId.value = (await api.createConversation()).id;
@@ -684,6 +690,9 @@ async function send(raw: string, files: Attached[] = [], chip = false) {
     controller = null;
     scrollToBottom();
     loadConversations();
+    refreshCredits().then((after) => {
+      if (before != null && after != null && before > after) answer.spent = before - after;
+    });
     // 星络这一轮没来得及看到的补充：从原位置拿掉，合成一条正常发出去
     const left = messages.value.filter((x) => x.addState === "waiting");
     for (const x of messages.value) if (x.addState === "seen") x.addState = undefined;
@@ -892,6 +901,7 @@ function openMember() {
   border-radius: 8px;
   font-size: 14px;
 }
+.spent { font-size: 12px; color: var(--muted); margin-left: 4px; }
 .quota-link { margin-left: 8px; color: var(--accent); font-weight: 600; cursor: pointer; }
 .caret {
   display: inline-block;
@@ -977,7 +987,7 @@ function openMember() {
 .msg.user { gap: 8px; align-items: flex-start; }
 .composer-box { max-width: 880px; box-sizing: border-box; margin: 0 auto; border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px 8px; background: var(--surface); }
 .composer-box .composer-input { border: none; background: transparent; padding: 2px 0; width: 100%; }
-.answer-actions { display: flex; gap: 6px; margin-top: -2px; }
+.answer-actions { display: flex; align-items: center; gap: 6px; margin-top: -2px; }
 .act-btn { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); padding: 4px 8px; border-radius: 8px; cursor: pointer; }
 .act-btn:hover { background: var(--surface-2); color: var(--ink); }
 .act-btn.ok { color: var(--ok); }

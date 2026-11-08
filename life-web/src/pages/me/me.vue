@@ -10,20 +10,17 @@
       <button class="btn ghost small" @click="logout">退出登录</button>
     </view>
 
-    <!-- 会员：状态、有效期、今天的次数和开通/续费，放在第一屏 -->
+    <!-- 积分：可用多少、今天赠送、购买入口，放在第一屏 -->
     <view class="card member-card">
       <view class="mc-top">
         <view>
-          <view class="mc-title">{{ member?.active ? "星络会员" : "免费用户" }}</view>
-          <view class="muted small">{{ member ? (member.active ? `有效期至 ${memberDate}` : member.expiresAt ? `会员已于 ${memberDate} 到期` : `开通后每天可对话 ${member.memberDaily} 次`) : "加载中…" }}</view>
+          <view class="muted small">可用积分</view>
+          <view class="mc-title">{{ creditTotal ?? "—" }}<text class="muted small"> 积分</text></view>
+          <view class="muted small">{{ cv ? `今天赠送剩 ${cv.dailyLeft} / ${cv.daily}${cv.member && cv.memberExpiresAt ? ` · 会员 ${memberDate} 前不扣积分` : ""}` : "加载中…" }}</view>
         </view>
-        <button class="btn mc-btn" @click="go('/pages/member/member')">{{ member?.active ? "续费" : `开通会员 ¥${member?.price || "9.90"}` }}</button>
+        <button class="btn mc-btn" @click="go('/pages/member/member')">购买积分</button>
       </view>
-      <view v-if="member" class="mc-usage">
-        <view class="mc-usage-text"><text>今日额度</text><text class="muted">已用 {{ member.todayUsed }} / {{ member.dailyLimit }} 次</text></view>
-        <view class="bar"><view class="bar-in" :class="{ full: member.todayUsed >= member.dailyLimit }" :style="{ width: Math.min(100, Math.round(member.todayUsed / Math.max(1, member.dailyLimit) * 100)) + '%' }" /></view>
-      </view>
-      <text class="link small" @click="go('/pages/member/member')">会员权益和记录 ›</text>
+      <text class="link small" @click="go('/pages/member/member')">价格和积分明细 ›</text>
     </view>
 
     <view class="card links">
@@ -169,7 +166,8 @@ import { showError, toLogin } from "../../api/http";
 import ThemePicker from "../../components/ThemePicker.vue";
 import UserAvatar from "../../components/UserAvatar.vue";
 import { looksLikeEmail, passwordProblem } from "../../utils/password";
-import type { Brief, BriefSettings, MembershipView, MemoryCategory, MemoryItem, TokenView, UserView } from "../../api/types";
+import type { Brief, BriefSettings, MemoryCategory, MemoryItem, TokenView, UserView } from "../../api/types";
+import { creditTotal, credits, refreshCredits } from "../../utils/credits";
 
 const CATEGORY: Record<MemoryCategory, string> = {
   PROFILE: "基本信息",
@@ -182,10 +180,10 @@ const categories = Object.keys(CATEGORY) as MemoryCategory[];
 const categoryLabels = categories.map((c) => CATEGORY[c]);
 
 const user = ref<UserView | null>(null);
-/** 会员状态，第一屏显示 */
-const member = ref<MembershipView | null>(null);
+/** 积分，第一屏显示；老会员到期前不扣积分 */
+const cv = computed(() => credits.data?.view || null);
 const memberDate = computed(() => {
-  const d = member.value?.expiresAt ? new Date(member.value.expiresAt) : null;
+  const d = cv.value?.memberExpiresAt ? new Date(cv.value.memberExpiresAt) : null;
   return d ? `${d.getFullYear()} 年 ${d.getMonth() + 1} 月 ${d.getDate()} 日` : "";
 });
 
@@ -326,7 +324,7 @@ onShow(async () => {
     showError(e);
   }
   loadBrief();
-  api.membership().then((m) => (member.value = m)).catch(() => {});
+  refreshCredits();
 });
 
 /** 日程页现在是底部标签页：手机用 switchTab，电脑上整页切换 */

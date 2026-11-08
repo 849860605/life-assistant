@@ -135,7 +135,13 @@ public class LifeProperties {
     public static class QWeather {
         /** 和风天气控制台里分配给你的 API Host，例如 abcxyz.re.qweatherapi.com */
         private String apiHost;
+        /** API KEY 认证（2027-01-01 起和风限制每天的请求数，建议改用 JWT） */
         private String apiKey;
+        /** JWT 认证（和风推荐）：开发者 ID（Q 开头，控制台 → 设置）、项目 ID、凭据 ID（控制台 → 项目管理）、Ed25519 私钥 */
+        private String developerId;
+        private String projectId;
+        private String keyId;
+        private String privateKey;
     }
 
     /** 编排图配置。 */

@@ -172,6 +172,12 @@ public class AdminIntegrationController {
         if (p.code().equals("amap-mcp")) {
             return settings.value("amap", "key") != null;
         }
+        // 和风：Host 加上 JWT 四项或 API Key 其中一种
+        if (p.code().equals("qweather")) {
+            boolean jwt = java.util.stream.Stream.of("developer-id", "project-id", "key-id", "private-key")
+                    .allMatch(f -> settings.rawValue("qweather", f) != null);
+            return settings.rawValue("qweather", "api-host") != null && (jwt || settings.rawValue("qweather", "api-key") != null);
+        }
         return p.fields().stream()
                 .filter(f -> f.kind() != IntegrationCatalog.Kind.READONLY)
                 .filter(f -> f.kind() != IntegrationCatalog.Kind.SECRET || !p.keyOptional())

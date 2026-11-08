@@ -18,4 +18,12 @@ class RepairJsonTest {
         String ok = "{\"note\": \"时间: , 待定\", \"n\": 2}";
         assertThat(ParallelToolCallingManager.repairJson(ok)).isEqualTo(ok);
     }
+
+    @Test
+    void missingPrimitiveArgumentCountsAsBadArguments() {
+        RuntimeException e = new IllegalStateException("工具调用失败", new IllegalArgumentException(new NullPointerException(
+                "Cannot invoke \"java.lang.Number.intValue()\" because the return value of \"sun.invoke.util.ValueConversions.primitiveConversion(...)\" is null")));
+        org.assertj.core.api.Assertions.assertThat(ParallelToolCallingManager.badArguments(e)).isTrue();
+        org.assertj.core.api.Assertions.assertThat(ParallelToolCallingManager.badArguments(new IllegalStateException("别的错"))).isFalse();
+    }
 }

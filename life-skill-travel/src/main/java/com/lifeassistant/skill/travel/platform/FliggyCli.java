@@ -24,9 +24,18 @@ import java.util.concurrent.TimeUnit;
 public class FliggyCli {
 
     private static final long TIMEOUT_SECONDS = 30;
-    /** 同时跑太多飞猪命令会被限流（返回"搜索…失败"或空结果），全局最多同时 2 个 */
+    /**
+     * 飞猪的限制（官方文档没写，来自 GitHub alibaba-flyai/flyai-skill 的 issue 和实测）：
+     * 调用太频繁会被风控（HTTP 451/403），社区实测 QPS 上限约 2；每次调用都扣额度（首赠 5000 次，用完每天 100 次）。
+     * "搜索机票低价行业失败"（status=1）是飞猪机票后端的已知问题：部分航线、日期会持续失败（国际/跨境更多），
+     * 官方 2026-11-02 已确认复现、说下个版本修（issue #69、#74）。我们这边只能少调、错开、失败了等一会儿再试一次。
+     * 按记录，每分钟 5 次以内失败约 4%，20 次以上约 36%，所以全局最多同时 2 个、两次开始之间至少隔 0.5 秒。
+     */
     private static final int MAX_PARALLEL = 2;
-    private static final long RETRY_DELAY_MILLIS = 600;
+    private static final long MIN_GAP_MILLIS = 500;
+    private static final long RETRY_DELAY_MILLIS = 2000;
+    /** 上一次开始调用的时间，用来拉开间隔 */
+    private long lastStart;
 
     private final java.util.concurrent.Semaphore gate = new java.util.concurrent.Semaphore(MAX_PARALLEL, true);
 
@@ -80,9 +89,28 @@ public class FliggyCli {
             throw new IllegalStateException("飞猪查询被中断", e);
         }
         try {
+            pace();
             return recorder.platform("飞猪", String.join(" ", args), () -> doRun(args));
         } finally {
             gate.release();
+        }
+    }
+
+    /** 和上一次开始调用至少隔 MIN_GAP_MILLIS，同一时刻挤进来的排队错开。 */
+    private void pace() {
+        long wait;
+        synchronized (this) {
+            long now = System.currentTimeMillis();
+            long start = Math.max(now, lastStart + MIN_GAP_MILLIS);
+            lastStart = start;
+            wait = start - now;
+        }
+        if (wait > 0) {
+            try {
+                Thread.sleep(wait);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 

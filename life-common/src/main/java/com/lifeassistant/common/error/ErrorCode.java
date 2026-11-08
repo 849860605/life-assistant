@@ -13,6 +13,8 @@ public enum ErrorCode implements ApiResponse.ErrorCodeView {
     CONFLICT(409, "数据已存在"),
     /** 今天的免费次数用完了，开通会员可以继续用 */
     QUOTA_EXCEEDED(402, "今天的次数用完了"),
+    /** 积分不够了，买积分后继续 */
+    CREDIT_NOT_ENOUGH(402, "积分不够了"),
     TOO_MANY_REQUESTS(429, "请求太频繁，请稍后再试"),
     EXTERNAL_SERVICE(502, "外部服务调用失败"),
     INTERNAL(500, "服务内部错误");

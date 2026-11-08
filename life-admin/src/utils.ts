@@ -71,7 +71,8 @@ export const ACTION_LABELS: Record<string, string> = {
   SET_MEMBER_PRICE: "修改会员价格",
   GRANT_MEMBER: "调整会员天数",
   SET_CHAT_QUOTA: "修改每天对话次数",
-  SET_FEATURE_TRIAL: "修改免费试查次数",
+  SET_CREDIT_PLAN: "修改积分价格",
+  ADJUST_CREDIT: "调整用户积分",
   SET_QUICK_PRICE: "修改快速查价平台",
 };
 

@@ -50,6 +50,16 @@ public class TripService {
     public record TripDetail(Trip trip, TripVersion version) {
     }
 
+    /** 记下行程的出发城市（规划时用户说了从哪出发）；空的不改。 */
+    public void setOrigin(long tripId, String origin) {
+        if (origin == null || origin.isBlank()) {
+            return;
+        }
+        String city = origin.trim();
+        tripMapper.update(new LambdaUpdateWrapper<Trip>().eq(Trip::getId, tripId)
+                .set(Trip::getOrigin, city.length() > 32 ? city.substring(0, 32) : city));
+    }
+
     /**
      * 保存一个新版本：tripId 为空时新建行程（版本从 1 开始），否则合并元信息并把版本号加 1。
      * 新行程是草稿（draft）还是已确认看 draft；已有行程的状态不变。

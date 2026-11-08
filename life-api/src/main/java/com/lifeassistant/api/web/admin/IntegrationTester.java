@@ -92,7 +92,7 @@ class IntegrationTester {
                 yield "两项都填了，页面上会显示可拖动地图（Key 是否有效要打开行程地图看）";
             }
             case "qweather" -> {
-                require(qweather.available(), "API Host 和 API Key 要都填");
+                require(qweather.available(), "要填 API Host，再加上 JWT 四项或 API Key");
                 yield "查到 " + qweather.resolve("北京").name();
             }
             case "bocha" -> {

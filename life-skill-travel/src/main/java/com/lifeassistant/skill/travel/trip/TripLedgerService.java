@@ -47,8 +47,8 @@ public class TripLedgerService {
     private final TripExpenseMapper expenseMapper;
     private final UploadService uploadService;
 
-    /** 改行程名称、人数和总预算的请求；人数、预算可空（表示不填）。 */
-    public record InfoRequest(String title, Integer people, BigDecimal budget, String budgetCurrency) {
+    /** 改行程名称、出发城市、人数和总预算的请求；人数、预算可空（表示不填），origin 为 null 表示不改、空串表示清空。 */
+    public record InfoRequest(String title, Integer people, BigDecimal budget, String budgetCurrency, String origin) {
     }
 
     /** 新增或修改预订的请求；fileIds 是已上传的凭证文件 id。 */
@@ -72,7 +72,7 @@ public class TripLedgerService {
 
     // ========== 行程信息 ==========
 
-    /** 改行程名称、人数和总预算。 */
+    /** 改行程名称、出发城市、人数和总预算。 */
     public Trip updateInfo(UserCtx ctx, long tripId, InfoRequest request) {
         owned(ctx, tripId);
         String title = text(request.title(), "行程名称", 60, true);
@@ -82,8 +82,11 @@ public class TripLedgerService {
         }
         BigDecimal budget = request.budget() == null ? null : amount(request.budget(), "预算");
         String currency = currency(request.budgetCurrency());
-        tripMapper.update(new LambdaUpdateWrapper<Trip>()
-                .eq(Trip::getId, tripId)
+        LambdaUpdateWrapper<Trip> update = new LambdaUpdateWrapper<Trip>().eq(Trip::getId, tripId);
+        if (request.origin() != null) {
+            update.set(Trip::getOrigin, text(request.origin(), "出发城市", 32, false));
+        }
+        tripMapper.update(update
                 .set(Trip::getTitle, title)
                 .set(Trip::getPeople, people)
                 .set(Trip::getBudget, budget)

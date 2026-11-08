@@ -9,6 +9,16 @@
       <text v-if="trip" class="unlink" @click="unlink">不关联行程</text>
     </view>
 
+    <!-- 从别处进来、有即将出发的行程：问一句要不要按行程填好 -->
+    <view v-if="suggestTrip && !trip" class="suggest">
+      <Icon name="trip" :size="16" color="var(--accent)" />
+      <text class="suggest-text">你有行程「{{ suggestTrip.title }}」{{ suggestTrip.when }}，按它填好出发地、目的地和日期？</text>
+      <view class="suggest-acts">
+        <text class="suggest-btn" @click="useSuggested">按行程填</text>
+        <text class="suggest-no" @click="suggestTrip = null">不用</text>
+      </view>
+    </view>
+
     <!-- 搜索 -->
     <view class="panel search">
       <view class="modes">
@@ -294,7 +304,8 @@ import { SLOTS, airportName, applyFilter, durationText, minutesOf, recommend, tr
 /**
  * 机票智能比价：单程或往返，三个平台按航班号合并；上面是前后 7 天每天的最低价（飞猪）和走势，筛选做成下拉，
  * 左边航班列表、右边推荐理由、同航班多平台价格、退改行李（携程问道按需查）和写进行程。
- * 带 trip 参数时日期取行程首尾两天，推荐看能不能衔接上当天的安排。只跳到平台预订，不下单、不付款。
+ * 带 trip 参数时日期取行程首尾两天、出发城市取行程里记的，推荐看能不能衔接上当天的安排；
+ * 什么都没带时，如果有即将出发的行程，顶部问一句要不要按它填。只跳到平台预订，不下单、不付款。
  * query：origin、destination、date、back、trip
  */
 const props = defineProps<{ query: Record<string, string | undefined> }>();
@@ -482,9 +493,34 @@ async function init() {
   }
   if (q.trip) await linkTrip(Number(q.trip));
   if (form.origin && form.destination && (q.trip || (q.origin && q.destination && q.date))) search();
+  else if (!q.trip && !q.destination && !q.date) findUpcomingTrip();
 }
 
-/** 关联行程：日期取首尾两天（往返），到达城市取目的地，出发城市从行程里现在的航班猜 */
+/** 顶部建议用的行程：最近一个还没出发、有日期、而且要坐飞机的行程（本地游、目的地就是出发城市的不算） */
+const suggestTrip = ref<{ id: number; title: string; when: string } | null>(null);
+
+async function findUpcomingTrip() {
+  try {
+    const today = ymd(new Date());
+    const next = (await api.trips())
+      .filter((t) => t.status !== "FINISHED" && t.startDate && t.startDate >= today
+        && !!cityOf(t.destination) && cityOf(t.destination) !== (t.origin || currentCity()))
+      .sort((a, b) => a.startDate!.localeCompare(b.startDate!))[0];
+    if (next) suggestTrip.value = { id: next.id, title: next.title, when: `${Number(next.startDate!.slice(5, 7))}月${Number(next.startDate!.slice(8, 10))}日出发` };
+  } catch {
+    // 拿不到行程就不提示，不影响手动查
+  }
+}
+
+async function useSuggested() {
+  const t = suggestTrip.value;
+  suggestTrip.value = null;
+  if (!t) return;
+  await linkTrip(t.id);
+  if (form.origin && form.destination) search();
+}
+
+/** 关联行程：日期取首尾两天（往返），到达城市取目的地；出发城市优先用行程里记的，没有再从行程里的航班猜，还没有就用当前城市 */
 async function linkTrip(id: number) {
   try {
     const detail: TripDetail = await api.trip(id);
@@ -497,7 +533,14 @@ async function linkTrip(id: number) {
     form.destination = cityOf(detail.trip.destination) || form.destination;
     const flight = days[0].items.find((i) => i.type === "TRANSPORT" && /[A-Z0-9]{2}\d{3,4}/.test(i.name) && i.name.includes("→"));
     const from = flight?.name.split("→")[0].replace(/[A-Z0-9]{2}\d{3,4}/g, "").replace(/[A-Za-z0-9\s]/g, "").trim();
-    if (from) form.origin = from.slice(0, 2);
+    // 出发城市：行程里记的 → 行程里航班的出发地 → 当前城市 → 上次查的；和目的地一样的跳过（本地游就空着让用户填，也不自动搜）
+    // 还没选航班的（"航班待定"）说明里常写着"深圳直飞北京"，从这句里取出发城市
+    const pending = days[0].items.find((i) => i.type === "TRANSPORT" && /(直飞|飞往)/.test(`${i.name} ${i.note || ""}`));
+    const said = `${pending?.name || ""} ${pending?.note || ""}`.match(/([\u4e00-\u9fa5]{2,4}?)(?:直飞|飞往)/)?.[1];
+    const candidates = [detail.trip.origin, from?.slice(0, 2), said, currentCity(), form.origin];
+    form.origin = candidates.find((c) => !!c && c !== form.destination) || "";
+    // 行程填了人数就按人数算成人票（儿童、婴儿让用户自己调）
+    if (detail.trip.people && detail.trip.people <= 9) pax.adult = detail.trip.people;
   } catch (e) {
     showError(e);
   }
@@ -876,6 +919,11 @@ async function confirmSave() {
 .hero-title { font-size: 22px; font-weight: 800; }
 .hero-sub { font-size: 13px; color: var(--muted); margin-top: 4px; line-height: 1.5; }
 .unlink { font-size: 12px; color: var(--muted); cursor: pointer; white-space: nowrap; }
+.suggest { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 16px; border-radius: 12px; background: var(--accent-soft); font-size: 14px; }
+.suggest-text { flex: 1; min-width: 200px; }
+.suggest-acts { display: flex; align-items: center; gap: 14px; }
+.suggest-btn { padding: 5px 14px; border-radius: 999px; background: var(--accent); color: #fff; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.suggest-no { color: var(--muted); cursor: pointer; white-space: nowrap; }
 
 .modes { display: flex; gap: 20px; }
 .mode { display: flex; align-items: center; gap: 6px; font-size: 14px; cursor: pointer; }

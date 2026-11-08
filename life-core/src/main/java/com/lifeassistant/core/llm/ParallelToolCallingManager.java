@@ -169,8 +169,9 @@ public class ParallelToolCallingManager implements ToolCallingManager {
         } catch (RuntimeException e) {
             error = e.getMessage();
             if (badArguments(e)) {
-                // 模型给的参数不是合法 JSON：告诉它改好再调，不让整轮对话失败
-                result = "{\"error\":\"参数不是合法的 JSON（" + jsonSafe(e.getMessage()) + "），检查后重新调用；没有值的参数直接省略，不要留空\"}";
+                // 模型给的参数不对（不是合法 JSON、必填的没给、类型不对）：告诉它改好再调，不让整轮对话失败
+                result = "{\"error\":\"参数不对（" + jsonSafe(e.getMessage()) + "），按工具说明补齐必填参数、类型写对后重新调用；"
+                        + "没有值的可选参数直接省略，不要留空\"}";
                 return result;
             }
             throw e;
@@ -193,11 +194,16 @@ public class ParallelToolCallingManager implements ToolCallingManager {
         }
     }
 
-    /** 异常是不是参数 JSON 解析失败（Spring AI 把它包成运行时异常）。 */
-    private static boolean badArguments(Throwable e) {
+    /**
+     * 异常是不是模型给的参数有问题（Spring AI 把它包成运行时异常）：JSON 解析失败；
+     * 必填的基本类型参数（int、boolean 等）没给，反射调用时拆箱 null 报空指针；参数类型对不上。
+     */
+    static boolean badArguments(Throwable e) {
         for (Throwable t = e; t != null; t = t.getCause()) {
-            if (t instanceof com.fasterxml.jackson.core.JsonProcessingException
-                    || t.getMessage() != null && t.getMessage().startsWith("Conversion from JSON")) {
+            String m = t.getMessage() == null ? "" : t.getMessage();
+            if (t instanceof com.fasterxml.jackson.core.JsonProcessingException || m.startsWith("Conversion from JSON")
+                    || t instanceof NullPointerException && m.contains("primitiveConversion")
+                    || t instanceof IllegalArgumentException && m.contains("argument type mismatch")) {
                 return true;
             }
         }

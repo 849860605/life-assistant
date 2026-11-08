@@ -11,7 +11,7 @@ import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** 对话里查航班实时动态：和页面上一样，免费用户扣试查次数，用完提示开通会员。 */
+/** 对话里查航班实时动态：和页面上一样扣积分，积分不够时把提示转告用户。 */
 @Component
 @RequiredArgsConstructor
 public class FlightStatusTools {
@@ -21,7 +21,7 @@ public class FlightStatusTools {
     @Tool(description = """
             查某个航班的实时动态（飞常准）：状态（计划、起飞、到达、延误、取消）、计划/预计/实际起降时间、航站楼、
             值机柜台、登机口、行李转盘、准点率、延误原因。用户问"CZ3101 现在什么情况""登机口在哪""延误了吗"时用。
-            登机口一般起飞前一两个小时才定，提前查不到是正常的。免费用户次数有限，返回 error 时把原话告诉用户。""")
+            登机口一般起飞前一两个小时才定，提前查不到是正常的。查一次要扣积分，返回 error（比如积分不够）时把原话告诉用户。""")
     public Map<String, Object> flightStatus(
             @ToolParam(description = "航班号，例如 CZ3101") String flightNo,
             @ToolParam(description = "日期 yyyy-MM-dd，不填是今天", required = false) String date) {
@@ -34,9 +34,8 @@ public class FlightStatusTools {
             FlightStatusService.Result r = statusService.query(scope.userId(), flightNo, day);
             Map<String, Object> out = new LinkedHashMap<>();
             out.put("status", r.status());
-            if (!r.usage().member()) {
-                out.put("trialLeft", r.usage().left());
-                out.put("hint", "免费用户还能试查 " + r.usage().left() + " 次，开通会员可以随时查看，出发当天自动提醒延误和登机口变化");
+            if (r.spent() > 0) {
+                out.put("hint", "这次查询用了 " + r.spent() + " 积分；5 分钟内再看这个航班不扣");
             }
             return out;
         } catch (BizException e) {

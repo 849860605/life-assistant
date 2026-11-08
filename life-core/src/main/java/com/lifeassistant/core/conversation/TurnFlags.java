@@ -77,6 +77,23 @@ public class TurnFlags {
         return same > MAX_SAME_TOOL || total > MAX_TOOLS;
     }
 
+    /** 这一轮里第一次走到这里返回 true（之后都返回 false），用来"同一件事一轮只扣一次积分"；不在会话里调用时返回 false。 */
+    public boolean once(String key) {
+        Turn t = current();
+        return t != null && t.flags().add("once:" + key);
+    }
+
+    /** 这一轮里 once(key) 是不是已经走过。 */
+    public boolean done(String key) {
+        Turn t = current();
+        return t != null && t.flags().contains("once:" + key);
+    }
+
+    /** 现在是不是在某个会话的一轮对话里（工具调用期间）。 */
+    public boolean inTurn() {
+        return current() != null;
+    }
+
     /** 用户这一轮说的话里有没有其中某个词。 */
     public boolean userSaid(String... words) {
         Turn t = current();

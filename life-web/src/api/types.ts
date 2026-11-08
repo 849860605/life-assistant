@@ -85,6 +85,8 @@ export interface Trip {
   title: string;
   tripType: "CITY" | "HIKING" | "MIXED";
   destination: string | null;
+  /** 出发城市（规划时记下，查机票时预填），可空 */
+  origin?: string | null;
   startDate: string | null;
   endDate: string | null;
   currentVer: number;
@@ -938,17 +940,51 @@ export interface FlightStatus {
   queriedAt?: string | null;
 }
 
-/** 航班动态的免费试查情况：available 为 false 表示服务端没配飞常准 */
-export interface FlightTrial {
+/** 航班动态能不能查、查一次多少积分、是不是会员（会员到期前不扣） */
+export interface FlightStatusInfo {
   available: boolean;
+  price: number;
   member: boolean;
-  total: number;
-  left: number;
 }
 
-/** 查一次航班动态的结果：cached 为 true 表示 5 分钟内查过、没扣次数 */
+/** 查一次航班动态的结果：cached 为 true 表示 5 分钟内查过、没扣积分；spent 是这次扣了多少积分 */
 export interface FlightStatusResult {
   status: FlightStatus;
   cached: boolean;
-  usage: { member: boolean; total: number; left: number };
+  spent: number;
+}
+
+/** 一个积分包：code 下单用，yuan 是两位小数的金额，bonusPercent 是比最小包多送几成 */
+export interface CreditPack {
+  code: string;
+  yuan: string | number;
+  credits: number;
+  bonusPercent: number;
+}
+
+/** 我的积分：balance 余额（可为负，表示透支）；dailyLeft 今天赠送还剩多少；member 为 true 时老会员到期前不扣 */
+export interface CreditView {
+  view: {
+    balance: number;
+    dailyLeft: number;
+    daily: number;
+    member: boolean;
+    memberExpiresAt?: string | null;
+    plan: { prices: Record<string, number>; signup: number; daily: number; packs: CreditPack[] };
+  };
+  /** 计费项的中文名 */
+  features: Record<string, string>;
+}
+
+/** 一条积分明细：kind 为 SIGNUP / PURCHASE / SPEND / RETURN / ADMIN / REFUND，amount 正加负扣 */
+export interface CreditEntry {
+  id: number;
+  kind: "SIGNUP" | "PURCHASE" | "SPEND" | "RETURN" | "ADMIN" | "REFUND";
+  feature?: string | null;
+  amount: number;
+  fromDaily: number;
+  balanceAfter: number;
+  ref?: string | null;
+  note?: string | null;
+  createdAt: string;
 }

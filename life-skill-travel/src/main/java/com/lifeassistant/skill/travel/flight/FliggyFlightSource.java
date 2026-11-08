@@ -30,8 +30,17 @@ public class FliggyFlightSource implements FlightPriceSource {
         return cli.available();
     }
 
-    /** 飞猪一次只给 10 班：按价格从低到高、直飞优先、起飞从早到晚各查一次再合并，覆盖面大一些 */
-    private static final List<String> SORTS = List.of("3", "8", "6");
+    /**
+     * 飞猪一次只给 10 班：按价格从低到高、起飞从早到晚各查一次再合并。以前还查"直飞优先"，和这两种重叠多，
+     * 多一次调用就更容易被限流，去掉了。
+     */
+    private static final List<String> SORTS = List.of("3", "6");
+    /** 某条航线某天的最低价记 6 小时（价格日历左右翻、和主搜索查过的同一天都不用再查飞猪） */
+    private static final long LOWEST_TTL_MILLIS = 6 * 3600 * 1000L;
+    private final java.util.Map<String, Lowest> lowestCache = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private record Lowest(Offer offer, long at) {
+    }
 
     @Override
     public Result search(String origin, String destination, LocalDate date) {
@@ -49,7 +58,8 @@ public class FliggyFlightSource implements FlightPriceSource {
         String error = null;
         try (var executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
             List<java.util.concurrent.Future<Result>> futures = SORTS.stream().map(sort -> executor.submit(() ->
-                    parse(cli.run(args(origin, destination, date, sort, seat)), seat))).toList();
+                    remember(origin, destination, date, sort, seat,
+                            parse(cli.run(args(origin, destination, date, sort, seat)), seat)))).toList();
             for (var future : futures) {
                 try {
                     Result r = future.get();
@@ -78,9 +88,31 @@ public class FliggyFlightSource implements FlightPriceSource {
 
     /** 某天飞猪上最便宜的一班（按价格从低到高查一次，取第一班），查不到返回空。 */
     public Offer lowest(String origin, String destination, LocalDate date) {
+        String key = origin + "|" + destination + "|" + date;
+        Lowest hit = lowestCache.get(key);
+        if (hit != null && System.currentTimeMillis() - hit.at() < LOWEST_TTL_MILLIS) {
+            return hit.offer();
+        }
         // 空结果的重试由 FliggyCli 统一做
-        return parse(cli.run(args(origin, destination, date, "3", null))).offers().stream()
-                .filter(o -> o.price() != null).min(java.util.Comparator.comparing(Offer::price)).orElse(null);
+        Result r = parse(cli.run(args(origin, destination, date, "3", null)));
+        Offer low = cheapest(r);
+        if (low != null) {
+            lowestCache.put(key, new Lowest(low, System.currentTimeMillis()));
+        }
+        return low;
+    }
+
+    /** 主搜索里按价格排序（经济舱）那次查到的最便宜一班顺手记下，价格日历这一天就不用再查。 */
+    private Result remember(String origin, String destination, LocalDate date, String sort, String seat, Result r) {
+        Offer low = "3".equals(sort) && seat == null ? cheapest(r) : null;
+        if (low != null) {
+            lowestCache.put(origin + "|" + destination + "|" + date, new Lowest(low, System.currentTimeMillis()));
+        }
+        return r;
+    }
+
+    private static Offer cheapest(Result r) {
+        return r.offers().stream().filter(o -> o.price() != null).min(java.util.Comparator.comparing(Offer::price)).orElse(null);
     }
 
     private static List<String> args(String origin, String destination, LocalDate date, String sort, String seat) {
@@ -100,7 +132,10 @@ public class FliggyFlightSource implements FlightPriceSource {
     static Result parse(JsonNode root, String seat) {
         // 飞猪自己出错时 data 是 null，message 里是原因（如"搜索机票低价行业失败"）
         if ((root.path("data").isNull() || root.path("data").isMissingNode()) && root.hasNonNull("message")) {
-            return Result.failed("飞猪", "飞猪这天的查询出错了（" + root.path("message").asText() + "），换个日期或稍后再试");
+            // "搜索机票低价行业失败"基本是查得太频繁被飞猪限流，不是这天没航班
+            String msg = root.path("message").asText();
+            return Result.failed("飞猪", msg.contains("失败") ? "飞猪这会儿查询太频繁，暂时没返回，过一会儿点刷新再试"
+                    : "飞猪这天的查询出错了（" + msg + "），稍后再试");
         }
         List<Offer> offers = new ArrayList<>();
         for (JsonNode item : root.path("data").path("itemList")) {

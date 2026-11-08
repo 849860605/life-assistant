@@ -11,6 +11,8 @@ import com.lifeassistant.core.conversation.Conversation;
 import com.lifeassistant.core.conversation.ConversationService;
 import com.lifeassistant.core.file.UploadService;
 import com.lifeassistant.core.member.ChatQuota;
+import com.lifeassistant.core.member.CreditService;
+import com.lifeassistant.core.member.MembershipService;
 import com.lifeassistant.core.orchestrator.ChatEvent;
 import com.lifeassistant.core.orchestrator.ChatOrchestrator;
 import jakarta.validation.Valid;
@@ -51,6 +53,8 @@ public class ConversationController {
     private final ObjectMapper objectMapper;
     private final CardHub cardHub;
     private final ChatQuota chatQuota;
+    private final CreditService credits;
+    private final MembershipService membership;
 
     /**
      * 发消息请求体：内容最长 4000 字；files 是这条消息带的上传文件 id，最多 5 个；
@@ -108,8 +112,11 @@ public class ConversationController {
     public Flux<ServerSentEvent<ChatEvent>> send(@PathVariable String id, @Valid @RequestBody SendMessageRequest request) {
         // 身份必须在请求线程里取，后面的图和工具都在其他线程执行
         UserCtx ctx = authFacade.current();
-        // 每天的对话次数：免费用户和会员上限不同，超了直接报错，不进模型
-        chatQuota.consume(ctx.userId());
+        // 发一条扣一次对话的积分，不够直接报 402、不进模型；老会员到期前不扣积分，但仍有每天的次数上限防刷
+        if (membership.status(ctx.userId()).active()) {
+            chatQuota.consume(ctx.userId());
+        }
+        CreditService.Charge charge = credits.spend(ctx.userId(), CreditService.CHAT, id, false);
         String input = uploadService.compose(ctx, request.content(), request.files());
         // 新的一轮：清掉上一轮工具打的标记（比如"正在规划"）
         turnFlags.start(id, request.content());
@@ -123,7 +130,20 @@ public class ConversationController {
                 // 统计失败不影响发消息
             }
         }
+        // 这一轮出错了（模型或网络问题，不是用户主动停）就把对话的积分退回
+        java.util.concurrent.atomic.AtomicBoolean refunded = new java.util.concurrent.atomic.AtomicBoolean();
+        Runnable refund = () -> {
+            if (refunded.compareAndSet(false, true)) {
+                credits.refund(charge);
+            }
+        };
         return chatOrchestrator.chat(ctx, id, input, request.content(), chip)
+                .doOnNext(event -> {
+                    if ("error".equals(event.type())) {
+                        refund.run();
+                    }
+                })
+                .doOnError(e -> refund.run())
                 .map(event -> ServerSentEvent.builder(event).event(event.type()).build());
     }
 

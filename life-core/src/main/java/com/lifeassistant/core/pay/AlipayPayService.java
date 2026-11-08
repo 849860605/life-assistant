@@ -6,6 +6,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lifeassistant.common.error.BizException;
 import com.lifeassistant.common.error.ErrorCode;
+import com.lifeassistant.core.member.CreditService;
 import com.lifeassistant.core.member.MembershipService;
 import com.lifeassistant.core.pay.alipay.AlipayAppConfig;
 import com.lifeassistant.core.pay.alipay.AlipayGateway;
@@ -56,6 +57,7 @@ public class AlipayPayService {
     private final TransactionTemplate transactionTemplate;
     private final ObjectMapper objectMapper;
     private final MembershipService membership;
+    private final CreditService credits;
 
     /** 下单结果：商户订单号和要在浏览器里渲染并自动提交的支付表单。 */
     public record CreatedOrder(String outTradeNo, String formHtml) {
@@ -96,9 +98,15 @@ public class AlipayPayService {
         }
     }
 
-    /** 买一个月会员：标题和金额都由服务端定。 */
+    /** 按月的会员已经改成积分，不再卖；老会员到期前照常用。 */
     public CreatedOrder createMemberOrder(long userId) {
-        return createOrder(userId, MembershipService.MEMBER_MONTH, MembershipService.MONTH_SUBJECT, membership.monthPrice());
+        throw new BizException(ErrorCode.BAD_REQUEST, "会员已经改成积分了，按用多少扣多少，去买积分吧");
+    }
+
+    /** 买一个积分包：金额和积分数都按服务端现在的积分包定，商品编码里带着积分数（到账按它算）。 */
+    public CreatedOrder createCreditOrder(long userId, String packCode) {
+        CreditService.Pack pack = credits.pack(packCode);
+        return createOrder(userId, pack.code(), "星络积分 · " + pack.credits() + " 积分", pack.yuan());
     }
 
     /** 先落库一笔待支付订单，再调 alipay.trade.page.pay 拿支付表单；调用失败时订单留在待支付，可以查询或关闭。 */
@@ -276,6 +284,7 @@ public class AlipayPayService {
         if (result.call().success()) {
             if ("Y".equals(result.fundChange())) {
                 refundMapper.updateStatus(refund.getOutRequestNo(), REFUND_SUCCESS, null);
+                revokeCredits(refund);
             } else {
                 refundMapper.updateStatus(refund.getOutRequestNo(), REFUND_PENDING, "支付宝已受理，请 10 秒后查询退款结果");
             }
@@ -285,6 +294,20 @@ public class AlipayPayService {
             refundMapper.updateStatus(refund.getOutRequestNo(), REFUND_PENDING, "退款结果未知，请稍后查询或重试");
         }
         return refundView(refundMapper.findByOutRequestNo(refund.getOutRequestNo()));
+    }
+
+    /** 积分包退款成功：按退款金额占订单的比例扣回积分（已经用掉的扣成负数）；同一笔退款只扣一次。 */
+    private void revokeCredits(PayRefund refund) {
+        PayOrder order = orderMapper.findByOutTradeNo(refund.getOutTradeNo());
+        int bought = order == null ? 0 : CreditService.creditsOf(order.getProductCode());
+        if (bought <= 0 || order.getTotalAmount().signum() <= 0) {
+            return;
+        }
+        int back = refund.getRefundAmount().multiply(BigDecimal.valueOf(bought))
+                .divide(order.getTotalAmount(), 0, java.math.RoundingMode.HALF_UP).intValue();
+        if (back > 0) {
+            credits.revokePurchase(order.getUserId(), back, refund.getOutRequestNo());
+        }
     }
 
     /** 退款查询：只有 refund_status=REFUND_SUCCESS 才记成功，其他情况保持原状态。 */
@@ -302,6 +325,7 @@ public class AlipayPayService {
         }
         if (query.call().success() && "REFUND_SUCCESS".equals(query.refundStatus())) {
             refundMapper.updateStatus(outRequestNo, REFUND_SUCCESS, null);
+            revokeCredits(refund);
         } else if (REFUND_PENDING.equals(refund.getStatus())) {
             String message = query.call().success() ? "支付宝还没确认退款成功，请稍后再查"
                     : "支付宝返回：" + safeMsg(query.call().subMsg());
@@ -409,6 +433,10 @@ public class AlipayPayService {
         if (MembershipService.MEMBER_MONTH.equals(order.getProductCode())) {
             membership.extendByOrder(order.getUserId(), MembershipService.MONTH_DAYS, outTradeNo);
             log.info("会员已开通 userId={} outTradeNo={}", order.getUserId(), outTradeNo);
+        }
+        int bought = CreditService.creditsOf(order.getProductCode());
+        if (bought > 0) {
+            credits.grantPurchase(order.getUserId(), bought, outTradeNo);
         }
     }
 

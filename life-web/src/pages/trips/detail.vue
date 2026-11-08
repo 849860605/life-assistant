@@ -69,7 +69,7 @@
                   <view v-else class="tl-img ph" :class="item.type"><Icon :name="TYPE_ICON[item.type] || 'pin'" :size="24" color="#fff" /></view>
                   <view class="tl-body">
                     <view class="tl-name">
-                      <text :class="{ link: itemLink(item) }" @click="openUrl(itemLink(item))">{{ item.name }}</text>
+                      <text :class="{ link: itemLink(item) || pendingFlight(item) }" @click="pendingFlight(item) ? changeFlight() : openUrl(itemLink(item))">{{ item.name }}</text>
                       <text v-if="item.type === 'SPOT' && (item.rating || 0) >= 4.8" class="must">高分景点</text>
                       <text v-if="item.locked" class="kept-tag">已保留</text>
                       <text v-if="isBooked(item.id)" class="booked-tag">已预约</text>
@@ -99,6 +99,7 @@
                     <view class="a" @click="openReplace(item, 'DISLIKE')"><Icon name="close" :size="13" color="var(--muted)" />不感兴趣</view>
                   </template>
                   <view v-if="flightNoOf(item) && !isBooked(item.id)" class="a swap" @click="changeFlight"><Icon name="refresh" :size="13" color="var(--accent)" />比价换航班</view>
+                  <view v-if="pendingFlight(item)" class="a swap" @click="changeFlight"><Icon name="plane" :size="13" color="var(--accent)" />去选航班</view>
                   <view v-if="BOOKABLE.includes(item.type)" class="a book" :class="{ on: isBooked(item.id) }" @click="toggleBooked(item.id, item.name)"><Icon name="checkCircle" :size="13" color="var(--ok)" />{{ isBooked(item.id) ? "已预约" : "标记已预约" }}</view>
                   <view v-if="doneable(item.type)" class="a book" :class="{ on: isDone(item.id) }" @click="toggleDone(item)"><Icon name="check" :size="13" color="var(--ok)" />{{ doneText(item.type, isDone(item.id)) }}</view>
                 </view>
@@ -287,7 +288,7 @@
               <image v-if="item.photo && !broken[item.id]" class="thumb" @error="broken[item.id] = true" :src="item.photo" mode="aspectFill" />
               <view v-else class="thumb placeholder" :class="item.type"><Icon :name="TYPE_ICON[item.type] || 'pin'" :size="22" color="#fff" /></view>
               <view class="stop-body">
-                <view class="stop-name" :class="{ link: item.url }" @click="openUrl(item.url)">{{ item.name }}<text v-if="isBooked(item.id)" class="booked-tag">已预约</text></view>
+                <view class="stop-name" :class="{ link: item.url || pendingFlight(item) }" @click="pendingFlight(item) ? changeFlight() : openUrl(item.url)">{{ item.name }}<text v-if="isBooked(item.id)" class="booked-tag">已预约</text></view>
                 <text v-if="doneable(item.type)" class="done-btn" :class="{ on: isDone(item.id) }" @click.stop="toggleDone(item)">{{ isDone(item.id) ? "✓ " : "" }}{{ doneText(item.type, isDone(item.id)) }}</text>
                 <view class="stop-time">{{ item.start }}<text v-if="item.end"> - {{ item.end }}</text><text v-if="item.rating" class="star"> · ★{{ item.rating }}</text><text v-if="item.cost" class="cost"> · ¥{{ item.cost }}/人</text><text v-if="day && flightChecking(itinerary, item, day.date)" class="checking"> · 其他平台比价中…</text></view>
                 <view v-if="item.note" class="stop-note">{{ item.note }}</view>
@@ -306,6 +307,10 @@
               <view v-if="flightNoOf(item) && !isBooked(item.id)" class="act" @click="changeFlight">
                 <Icon name="refresh" :size="13" color="var(--ink)" />
                 <text>比价换航班</text>
+              </view>
+              <view v-if="pendingFlight(item)" class="act" @click="changeFlight">
+                <Icon name="plane" :size="13" color="var(--accent)" />
+                <text>去选航班</text>
               </view>
             </view>
             <view v-if="isCurrent && EDITABLE.includes(item.type)" class="stop-actions">
@@ -369,6 +374,7 @@
     <view class="info-sheet" role="dialog" aria-label="编辑行程信息">
       <view class="info-title">编辑行程信息</view>
       <view class="info-field"><text class="info-label">名称</text><input id="trip-title" v-model="info.title" class="input" maxlength="60" /></view>
+      <view class="info-field"><text class="info-label">出发城市</text><input id="trip-origin" v-model="info.origin" class="input" maxlength="32" placeholder="例如：深圳，查机票时自动填上" /></view>
       <view class="info-row">
         <view class="info-field"><text class="info-label">人数</text><input id="trip-people" v-model="info.people" class="input" type="number" maxlength="2" placeholder="可不填" /></view>
         <view class="info-field grow"><text class="info-label">总预算</text><input id="trip-budget" v-model="info.budget" class="input" type="digit" placeholder="可不填" /></view>
@@ -440,7 +446,7 @@ const events = ref<ScheduleEvent[]>([]);
 const tab = ref("行程总览");
 const ttab = ref<TripTab>("schedule");
 /** 编辑行程信息（名称、人数、预算）的表单 */
-const info = ref<{ title: string; people: string; budget: string; currency: string } | null>(null);
+const info = ref<{ title: string; origin: string; people: string; budget: string; currency: string } | null>(null);
 const infoError = ref("");
 const infoSaving = ref(false);
 const dayIndex = ref(0);
@@ -525,8 +531,15 @@ watch(
 onUnmounted(() => stopPolling?.());
 
 /** 换航班：去机票比价页（带上行程，比完可以直接写进对应那天） */
+/** 去机票比价：带上行程，出发地、目的地、去回日期和人数都由那边按行程填好并直接查 */
 function changeFlight() {
   go(`/pages/search/flight?tab=flight&trip=${tripId.value}`);
+}
+
+/** 还没选具体航班的飞行（"航班待定"这类：交通项、没有航班号、名称或说明里提到航班/飞） */
+function pendingFlight(item: ItineraryItem): boolean {
+  return item.type === "TRANSPORT" && !flightNoOf(item) && !isBooked(item.id)
+    && /航班|直飞|飞机|飞往|起飞|航空/.test(`${item.name} ${item.note || ""}`);
 }
 /** 当天晚上住的那段住宿；最后一天（离店日）显示离店的那家 */
 const dayStay = computed(() => {
@@ -710,7 +723,7 @@ function openInfo() {
   const t = trip.value;
   if (!t) return;
   infoError.value = "";
-  info.value = { title: t.title, people: t.people ? String(t.people) : "", budget: t.budget != null ? String(t.budget) : "", currency: t.budgetCurrency || "CNY" };
+  info.value = { title: t.title, origin: t.origin || "", people: t.people ? String(t.people) : "", budget: t.budget != null ? String(t.budget) : "", currency: t.budgetCurrency || "CNY" };
 }
 
 async function saveInfo() {
@@ -722,7 +735,7 @@ async function saveInfo() {
   infoSaving.value = true;
   try {
     detail.value!.trip = await api.updateTripInfo(tripId.value, {
-      title: f.title.trim(), people: f.people.trim() ? Number(f.people) : null, budget: f.budget.trim() || null, budgetCurrency: f.currency,
+      title: f.title.trim(), origin: f.origin.trim(), people: f.people.trim() ? Number(f.people) : null, budget: f.budget.trim() || null, budgetCurrency: f.currency,
     });
     info.value = null;
     uni.showToast({ title: "已保存", icon: "none" });

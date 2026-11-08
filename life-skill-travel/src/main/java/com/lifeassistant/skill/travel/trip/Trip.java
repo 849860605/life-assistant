@@ -23,6 +23,8 @@ public class Trip {
     /** CITY / HIKING / MIXED */
     private String tripType;
     private String destination;
+    /** 出发城市，例如"深圳"；可空，查机票时预填 */
+    private String origin;
     private LocalDate startDate;
     private LocalDate endDate;
     /** 当前版本号，对应 t_trip_version.version；新建时为 0，首次保存后为 1 */

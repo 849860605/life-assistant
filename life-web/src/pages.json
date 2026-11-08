@@ -86,7 +86,7 @@
 		},
 		{
 			"path": "pages/member/member",
-			"style": { "navigationBarTitleText": "星络会员" }
+			"style": { "navigationBarTitleText": "我的积分" }
 		}
 	],
 	"tabBar": {

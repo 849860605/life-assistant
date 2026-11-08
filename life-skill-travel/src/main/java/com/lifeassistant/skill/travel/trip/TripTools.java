@@ -47,6 +47,8 @@ public class TripTools {
     private final ObjectMapper objectMapper;
     private final TripPriceCheck priceCheck;
     private final com.lifeassistant.core.conversation.TurnFlags turnFlags;
+    /** 规划、修改行程扣积分 */
+    private final com.lifeassistant.core.member.TurnBilling billing;
     private final com.lifeassistant.core.place.AmapPlaceService places;
 
     /** 模型填的一项安排。 */
@@ -156,6 +158,10 @@ public class TripTools {
         };
     }
 
+    /** 占位的车次、航班号：Gxxxx、D××××、MUxxxx、XX1234 这类 */
+    static final java.util.regex.Pattern PLACEHOLDER_NO =
+            java.util.regex.Pattern.compile("(?<![A-Za-z])([GDCKTZ]|[A-Z]{2}|[Xx]{2})[xX×*？?]{2,4}(?![A-Za-z])|(?<![A-Za-z])XX\\d{3,4}");
+
     /** 发需求卡，把已知的信息预先填上，等用户确认或补充后再规划。 */
     @Tool(description = """
             给用户弹一张需求卡（目的地、日期、出发地、同行人、预算、偏好、去过的地方、交通方式、节奏），用户在卡片上确认或修改后提交。
@@ -177,6 +183,12 @@ public class TripTools {
             @ToolParam(description = "坐飞机时：尽量直飞 / 中转也行 / 只要直飞，用户说过才填", required = false) String transfer) {
         if (turnFlags.userSaid("直接", "跳过", "不用确认")) {
             return Map.of("skipped", "用户要直接出行程，不弹需求卡：缺的信息按常识和记忆补，直接查价并调用 saveTripPlan 展开成完整行程。");
+        }
+        // 目的地、日期、人数、预算都说了（日期可以是"下周末"这种换算出来的），再弹卡就是让用户再确认一遍，跳过
+        boolean people = adults != null || children != null || elders != null;
+        if (destination != null && !destination.isBlank() && startDate != null && endDate != null && people && budgetPerPerson != null) {
+            return Map.of("skipped", "目的地、日期、人数、预算用户都说了，不弹需求卡：出发地没说就用记忆里的常住城市，"
+                    + "直接进入下一步（出两三套方案让用户选；用户说了直接出行程就查价并 saveTripPlan）。");
         }
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("destination", destination);
@@ -228,6 +240,7 @@ public class TripTools {
             @ToolParam(description = "这次改了什么，例如：第二天下雨改成室内", required = false) String changeNote,
             @ToolParam(description = "市内主要怎么走：TRANSIT 地铁公交（默认）/ DRIVE 打车、包车或自驾；方案是包车、自驾或用户说要打车时填 DRIVE",
                     required = false) String transport,
+            @ToolParam(description = "出发城市，例如：深圳；用户说了从哪出发就填，查机票时会用", required = false) String origin,
             ToolContext toolContext) {
         LocalDate start;
         LocalDate end;
@@ -265,6 +278,21 @@ public class TripTools {
         if (itinerary.days().size() > 1 && itinerary.stays().isEmpty()) {
             problems.add("过夜行程要填 stays（住哪家酒店、入住和离店日期），酒店名用比价结果里的");
         }
+        // 新的过夜行程这一轮还没快速查过价（模型偶尔会跳过查询直接编）：退回去先查
+        if (tripId == null && itinerary.days().size() > 1 && turnFlags.inTurn()
+                && !turnFlags.has(com.lifeassistant.core.conversation.TurnFlags.PLANNING)) {
+            problems.add("还没查价就保存了：先并行调用 quickHotels、大交通的快速查价（quickTrains / quickFlights / quickDrive，"
+                    + "地铁公交不用查）和 dailyWeather，从结果里挑一家、一班写进行程，再保存");
+        }
+        // 交通项里写了占位的车次、航班号（Gxxxx、MUxxxx）：要写查到的真实班次，查不到写"车次待定""航班待定"
+        for (Itinerary.Day d : itinerary.days()) {
+            for (Itinerary.Item it : d.items()) {
+                String text = it.name() + " " + (it.note() == null ? "" : it.note());
+                if (PLACEHOLDER_NO.matcher(text).find()) {
+                    problems.add("「" + it.name() + "」里的车次或航班号是占位的，用快速查价查到的真实班次；查不到就写\"车次待定\"或\"航班待定\"");
+                }
+            }
+        }
         if (!problems.isEmpty()) {
             return Map.of("error", "行程有问题，没有保存", "problems", problems);
         }
@@ -273,6 +301,8 @@ public class TripTools {
                         changeNote == null ? (tripId == null ? "首次生成" : "修改") : changeNote, json(itinerary), true),
                 "AI");
         Trip trip = detail.trip();
+        tripService.setOrigin(trip.getId(), origin);
+        billing.tripSaved(trip.getId(), tripId == null);
         tripEditor.ensureGeoLater(trip.getId(), detail.version().getVersion());
         priceCheck.start(ToolContexts.user(toolContext), trip.getId(), prepared.targets());
         Map<String, Object> out = new LinkedHashMap<>();

@@ -1,6 +1,6 @@
 <template>
   <view v-if="show" class="fs" :class="{ compact }" @click.stop>
-    <!-- 还没查：一行说明 + 查看按钮；试查用完给开通会员入口 -->
+    <!-- 还没查：一行说明 + 查看按钮（写明多少积分）；积分不够给购买入口 -->
     <view v-if="!result" class="fs-idle">
       <view class="fs-lead">
         <Icon name="plane" :size="14" color="var(--accent)" />
@@ -9,13 +9,9 @@
       </view>
       <view v-if="!tooEarly" class="fs-act">
         <text v-if="error" class="fs-err">{{ error }}</text>
-        <template v-if="exhausted">
-          <text class="fs-hint">{{ trial.total }} 次免费试查已用完</text>
-          <text class="fs-btn primary" @click="toMember">开通会员随时查看</text>
-        </template>
+        <text v-if="noCredit" class="fs-btn primary" @click="toCredits">买积分</text>
         <template v-else>
-          <text v-if="trial.loaded && !trial.member" class="fs-hint">还可以免费查 {{ trial.left }} 次</text>
-          <text v-if="trial.loaded && trial.member" class="fs-hint">会员不限次数</text>
+          <text v-if="info.loaded" class="fs-hint">{{ info.member ? "会员不扣积分" : `查一次 ${info.price} 积分` }}</text>
           <text class="fs-btn" :class="{ busy: loading }" @click="query">{{ loading ? "查询中…" : "查看动态" }}</text>
         </template>
       </view>
@@ -49,7 +45,7 @@
       <view v-if="s.delayReason" class="fs-note">延误原因：{{ s.delayReason }}</view>
       <view class="fs-foot">
         <text>{{ s.queriedAt ? `${hhmm(s.queriedAt)} 更新` : "" }}{{ s.onTimeRate ? ` · 近期准点率 ${s.onTimeRate}` : "" }}</text>
-        <text v-if="!trial.member && trial.loaded">{{ trial.left > 0 ? `还可以免费查 ${trial.left} 次` : "免费试查已用完" }}<text v-if="trial.left <= 0" class="fs-link" @click="toMember"> · 开通会员</text></text>
+        <text>{{ result.cached ? "5 分钟内查过，这次不扣积分" : result.spent ? `这次用了 ${result.spent} 积分` : "" }}</text>
       </view>
       <text v-if="error" class="fs-err">{{ error }}</text>
     </view>
@@ -61,12 +57,12 @@ import { computed, onMounted, ref } from "vue";
 import { api } from "../api";
 import { ApiError, getToken } from "../api/http";
 import type { FlightStatus, FlightStatusResult } from "../api/types";
-import { flightTrial, loadFlightTrial } from "../utils/flightTrial";
+import { flightInfo, loadFlightInfo, refreshCredits } from "../utils/credits";
 import { ymd } from "../utils/format";
 import Icon from "./Icon.vue";
 
 /**
- * 航班实时动态卡片（行程里的航班、首页出发当天用）：先显示"查看动态"，点了才查（免费用户扣一次试查，会员不限）；
+ * 航班实时动态卡片（行程里的航班、首页出发当天用）：先显示"查看动态"，点了才查（扣航班动态的积分，老会员到期前不扣；5 分钟内重复看不扣）；
  * 查到后显示状态、计划/预计/实际时间、值机柜台、登机口、行李转盘。起飞前 3 天以外只提示，过了起飞日一天不显示。
  * 服务端没配飞常准时整个卡片不显示。
  */
@@ -74,8 +70,9 @@ const WINDOW_DAYS = 3;
 
 const props = withDefaults(defineProps<{ flightNo: string; date: string; compact?: boolean }>(), { compact: false });
 
-/** 试查次数各卡片共用，查一次后所有卡片一起更新 */
-const trial = flightTrial;
+/** 能不能查、多少积分，各卡片共用一份 */
+const info = flightInfo;
+const noCredit = ref(false);
 const loading = ref(false);
 const error = ref("");
 const result = ref<FlightStatusResult | null>(null);
@@ -84,8 +81,7 @@ const s = computed<FlightStatus>(() => result.value!.status);
 const today = ymd(new Date());
 const daysAhead = computed(() => Math.round((Date.parse(props.date) - Date.parse(today)) / 86400000));
 const tooEarly = computed(() => daysAhead.value > WINDOW_DAYS);
-const show = computed(() => !!getToken() && trial.available && daysAhead.value >= -1);
-const exhausted = computed(() => trial.loaded && !trial.member && trial.left <= 0);
+const show = computed(() => !!getToken() && info.available && daysAhead.value >= -1);
 
 const stateKind = computed(() => {
   const st = s.value.state || "";
@@ -105,7 +101,7 @@ const facts = computed(() => [
 ]);
 
 onMounted(() => {
-  if (getToken()) loadFlightTrial();
+  if (getToken()) loadFlightInfo();
 });
 
 async function query() {
@@ -115,16 +111,16 @@ async function query() {
   try {
     const r = await api.flightStatus(props.flightNo, props.date);
     result.value = r;
-    Object.assign(trial, r.usage, { loaded: true });
+    if (r.spent) refreshCredits();
   } catch (e) {
     error.value = e instanceof Error ? e.message : "没查到";
-    if (e instanceof ApiError && e.code === 402) Object.assign(trial, { left: 0, loaded: true });
+    noCredit.value = e instanceof ApiError && e.code === 402;
   } finally {
     loading.value = false;
   }
 }
 
-function toMember() {
+function toCredits() {
   uni.navigateTo({ url: "/pages/member/member" });
 }
 

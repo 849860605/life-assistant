@@ -54,15 +54,15 @@
         </view>
         <view class="pop-card pop-plan">
           <view class="pop-col">
-            <text class="pop-k">套餐</text>
-            <text class="pop-v">{{ member?.active ? "会员" : "免费版" }}</text>
-            <text v-if="member?.active && member.expiresAt" class="pop-s">{{ shortDay(member.expiresAt) }} 到期</text>
+            <text class="pop-k">可用积分</text>
+            <text class="pop-v">{{ creditTotal ?? "—" }}</text>
+            <text v-if="cv?.member && cv.memberExpiresAt" class="pop-s">会员 {{ shortDay(cv.memberExpiresAt) }} 前不扣</text>
           </view>
           <view class="pop-col">
-            <text class="pop-k">今天还能对话</text>
-            <text class="pop-v">{{ member ? Math.max(0, member.dailyLimit - member.todayUsed) : "—" }}<text class="pop-unit"> 次</text></text>
+            <text class="pop-k">今天赠送</text>
+            <text class="pop-v">{{ cv ? cv.dailyLeft : "—" }}<text v-if="cv" class="pop-unit"> / {{ cv.daily }}</text></text>
           </view>
-          <button class="pop-btn" @click="go('/pages/member/member', false)">{{ member?.active ? "续费会员" : "开通会员" }}</button>
+          <button class="pop-btn" @click="go('/pages/member/member', false)">购买积分</button>
         </view>
         <view class="pop-card pop-list">
           <view class="pop-row" @click="go('/pages/me/me', true)"><Icon name="user" :size="16" color="var(--ink)" /><text>我的</text></view>
@@ -75,7 +75,7 @@
       <view class="cs-me" :class="{ on: menuOpen }" @click="toggleMenu">
         <UserAvatar :size="28" />
         <text class="cs-name">{{ nickname || "我的" }}</text>
-        <text v-if="member?.active" class="cs-badge">会员</text>
+        <text v-if="creditTotal != null" class="cs-badge">{{ creditTotal }} 积分</text>
         <view class="cs-bell" title="今天的提醒" aria-label="今天的提醒" @click.stop="go('/pages/schedule/schedule', true)">
           <Icon name="bell" :size="17" color="var(--ink)" />
           <text v-if="reminders" class="cs-dot">{{ reminders > 9 ? "9+" : reminders }}</text>
@@ -89,7 +89,8 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { api } from "../api";
 import { showError, toLogin } from "../api/http";
-import type { Conversation, MembershipView } from "../api/types";
+import type { Conversation } from "../api/types";
+import { creditTotal, credits, refreshCredits } from "../utils/credits";
 import ConvMenu from "./ConvMenu.vue";
 import ThemePicker from "./ThemePicker.vue";
 import UserAvatar from "./UserAvatar.vue";
@@ -99,7 +100,7 @@ import Icon from "./Icon.vue";
  * 对话左边栏（首页和对话页共用，版式参考 WorkBuddy）：新对话、搜索按钮（点开才出搜索框，搜标题和聊天内容）、
  * 我的行程 / 我的收藏 / 更多（展开旅行服务），最近对话（置顶的在前，右边是日期，默认 8 条，其余"查看更多"展开），
  * 每条有"…"菜单（重命名、置顶、分享、导出、删除）。底部是头像和铃铛（今天还没到的提醒数）；
- * 点头像弹出账号菜单：套餐和今天剩余次数、开通/续费、我的、收藏、退出登录。
+ * 点头像弹出账号菜单：可用积分和今天赠送、购买积分、我的、收藏、外观、退出登录。
  */
 const FOLD = 8;
 const MORE = [
@@ -127,7 +128,8 @@ const renamingId = ref("");
 const renameText = ref("");
 const expanded = ref(false);
 const menuOpen = ref(false);
-const member = ref<MembershipView | null>(null);
+/** 积分（账号菜单和头像旁显示） */
+const cv = computed(() => credits.data?.view || null);
 const searching = ref(false);
 const moreOpen = ref(false);
 const reminders = ref(0);
@@ -136,7 +138,7 @@ let timer: ReturnType<typeof setTimeout> | null = null;
 onMounted(() => {
   load();
   api.me().then((u) => (nickname.value = u.nickname || u.username)).catch(() => {});
-  api.membership().then((m) => (member.value = m)).catch(() => {});
+  refreshCredits();
   loadReminders();
 });
 // 搜索停顿 300 毫秒再查
@@ -229,10 +231,10 @@ function toggleSearch() {
   if (!searching.value) keyword.value = "";
 }
 
-/** 打开菜单时再取会员信息，保证次数是最新的 */
+/** 打开菜单时再取一次积分，保证是最新的 */
 function toggleMenu() {
   menuOpen.value = !menuOpen.value;
-  if (menuOpen.value) api.membership().then((m) => (member.value = m)).catch(() => {});
+  if (menuOpen.value) refreshCredits();
 }
 
 function go(url: string, tab: boolean) {

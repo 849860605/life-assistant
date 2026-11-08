@@ -121,7 +121,26 @@
           <div class="sum"><div class="sum-v num">{{ detail.summary.events }}</div><div class="muted small">日程</div></div>
           <div class="sum"><div class="sum-v num">{{ detail.summary.memories }}</div><div class="muted small">记忆</div></div>
         </div>
-        <div class="sum-title">会员</div>
+        <div class="sum-title">积分</div>
+        <div v-if="credit" class="member">
+          <div class="row-between">
+            <span><b class="num">{{ Math.max(0, credit.view.balance) + credit.view.dailyLeft }}</b> <span class="small">可用</span>
+              <span class="muted small">（余额 {{ credit.view.balance }}，今天赠送剩 {{ credit.view.dailyLeft }}）</span></span>
+            <el-tag v-if="credit.view.member" size="small" type="warning">会员期内不扣</el-tag>
+          </div>
+          <div class="grant">
+            <el-button v-for="d in [100, 500, 1000]" :key="d" size="small" @click="adjustCredit(d)">+{{ d }}</el-button>
+            <el-button size="small" @click="adjustCredit(0)">自定义</el-button>
+          </div>
+          <div v-for="l in credit.ledger.slice(0, 8)" :key="l.id" class="mlog small">
+            <span class="num">{{ fmtTime(l.createdAt) }}</span>
+            <span>{{ CREDIT_KIND[l.kind] || l.kind }}{{ l.feature ? ` · ${l.feature}` : "" }}</span>
+            <span :class="l.amount > 0 ? 'plus' : 'muted'">{{ l.amount > 0 ? "+" : "" }}{{ l.amount }}</span>
+            <span v-if="l.note" class="muted">{{ l.note }}</span>
+          </div>
+        </div>
+        <div v-else class="muted small">加载中…</div>
+        <div class="sum-title">会员（已停售，老会员到期前不扣积分）</div>
         <div v-if="member" class="member">
           <div class="row-between">
             <span>
@@ -158,7 +177,7 @@
 import { onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from "element-plus";
 import { Plus, Search } from "@element-plus/icons-vue";
-import { api, type MemberStatus, type UserDetail, type UserRow } from "../api";
+import { api, type MemberStatus, type UserCredits, type UserDetail, type UserRow } from "../api";
 import { fmtDate, fmtTime, fromNow, money, narrow, num, passwordRules, randomPassword, usernameRules } from "../utils";
 
 /** App 用户管理：注册开关、搜索分页、新建、详情（只有统计）、重置密码、启用停用 */
@@ -294,12 +313,37 @@ async function toggle(row: UserRow) {
 const detailOpen = ref(false);
 const detail = ref<UserDetail | null>(null);
 const member = ref<MemberStatus | null>(null);
+const credit = ref<UserCredits | null>(null);
+const CREDIT_KIND: Record<string, string> = { SIGNUP: "注册赠送", PURCHASE: "购买", SPEND: "使用", RETURN: "退回", ADMIN: "后台调整", REFUND: "退款扣回" };
 async function openDetail(row: UserRow) {
   detail.value = null;
   member.value = null;
+  credit.value = null;
   detailOpen.value = true;
   detail.value = await api.user(row.id);
-  member.value = await api.memberStatus(row.id);
+  [member.value, credit.value] = await Promise.all([api.memberStatus(row.id), api.userCredits(row.id)]);
+}
+
+/** 给当前打开的用户加减积分：delta 为 0 时让管理员自己填数（负数是扣）；原因必填，记进积分流水 */
+async function adjustCredit(delta: number) {
+  if (!detail.value) return;
+  const who = detail.value.nickname || detail.value.username;
+  const { value } = await ElMessageBox.prompt(delta ? `给 ${who} 加 ${delta} 积分，原因：` : "积分（负数是扣，例如 -300）和原因，用空格隔开：",
+    delta ? "加积分" : "调整积分", {
+      inputPlaceholder: delta ? "例如：送朋友、补偿" : "例如：-300 退款扣回",
+      inputPattern: delta ? /\S/ : /^-?\d{1,7}\s+\S.*$/,
+      inputErrorMessage: delta ? "请写一下原因" : "先写积分再写原因，例如 -300 退款扣回",
+    });
+  let n = delta;
+  let note = value.trim();
+  if (!delta) {
+    const [first, ...rest] = note.split(/\s+/);
+    n = Number(first);
+    note = rest.join(" ");
+  }
+  if (!n) return;
+  credit.value = await api.adjustCredits(detail.value.id, n, note);
+  ElMessage.success(n > 0 ? `已加 ${n} 积分` : `已扣 ${-n} 积分`);
 }
 
 /** 给当前打开的用户加会员天数，要填个原因（比如"送朋友"），记进会员账单 */

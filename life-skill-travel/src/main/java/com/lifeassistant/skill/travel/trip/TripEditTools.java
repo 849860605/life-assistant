@@ -39,6 +39,8 @@ public class TripEditTools {
     private final CardHub cards;
     private final ObjectMapper objectMapper;
     private final TripPriceCheck priceCheck;
+    /** AI 改行程扣积分 */
+    private final com.lifeassistant.core.member.TurnBilling billing;
 
     /** 换掉的一项：按 id 定位，新地点和可选的新时间、说明。 */
     public record ItemChange(
@@ -390,6 +392,7 @@ public class TripEditTools {
         }
         Trip trip = patched.after().trip();
         int version = patched.after().version().getVersion();
+        billing.tripSaved(tripId, false);
         Map<String, Object> card = new LinkedHashMap<>();
         card.put("tripId", tripId);
         card.put("title", trip.getTitle());

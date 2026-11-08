@@ -254,8 +254,6 @@ export interface MemberSetting {
   payReady: boolean;
   freeDaily: number;
   memberDaily: number;
-  /** 免费用户总共能试查几次航班实时动态 */
-  flightTrial: number;
 }
 
 /** 一条会员变动记录：source 为 PAY 付费开通 / ADMIN 后台调整，days 为负是扣减 */
@@ -280,6 +278,25 @@ export interface MemberLogRow {
 }
 
 /** 某个用户的会员状态、今天的对话次数和会员记录 */
+/** 积分价格表：各项价格、注册送、每天送、积分包；features 是各项中文名，packsText 是"元:积分"的原文 */
+export interface CreditPlan {
+  plan: { prices: Record<string, number>; signup: number; daily: number; packs: { code: string; yuan: string | number; credits: number; bonusPercent: number }[] };
+  features: Record<string, string>;
+  packsText: string;
+}
+
+/** 本月积分：卖出多少、各项用了多少次多少积分（paid_credits 不含每天赠送抵掉的） */
+export interface CreditStats {
+  sold: number;
+  spent: { feature: string; times: number; credits: number; paid_credits: number }[];
+}
+
+/** 某个用户的积分和流水 */
+export interface UserCredits {
+  view: { balance: number; dailyLeft: number; daily: number; member: boolean };
+  ledger: { id: number; kind: string; feature?: string | null; amount: number; fromDaily: number; balanceAfter: number; ref?: string | null; note?: string | null; createdAt: string }[];
+}
+
 export interface MemberStatus {
   active: boolean;
   expiresAt?: string | null;
@@ -358,7 +375,12 @@ export const api = {
   memberStatus: (userId: number) => request<MemberStatus>("GET", `/pay/members/${userId}`),
   grantMember: (userId: number, days: number, note?: string) => request<MemberStatus>("POST", `/pay/members/${userId}/grant`, { days, note }),
   setChatQuota: (freeDaily: number, memberDaily: number) => request<MemberSetting>("PUT", "/pay/member/quota", { freeDaily, memberDaily }),
-  setFlightTrial: (flightTrial: number) => request<MemberSetting>("PUT", "/pay/member/trial", { flightTrial }),
+  creditPlan: () => request<CreditPlan>("GET", "/credits/plan"),
+  setCreditPlan: (body: { prices: Record<string, number>; signup: number; daily: number; packs: string }) =>
+    request<CreditPlan>("PUT", "/credits/plan", body),
+  creditStats: () => request<CreditStats>("GET", "/credits/stats"),
+  userCredits: (userId: number) => request<UserCredits>("GET", `/credits/users/${userId}`),
+  adjustCredits: (userId: number, delta: number, note: string) => request<UserCredits>("POST", `/credits/users/${userId}/adjust`, { delta, note }),
   billingStats: () => request<BillingStats>("GET", "/pay/stats"),
   memberLogs: (limit = 100) => request<MemberLogRow[]>("GET", `/pay/member-logs?limit=${limit}`),
 };

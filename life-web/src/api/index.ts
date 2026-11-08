@@ -7,7 +7,7 @@ import type {
   BookingState, ChangeReason, ChatMessage, Conversation, DayPreview, FlightPick, FlightPreview, FlightRules, FlightSearch, FoodResult, DayTickets, HotelComparison, HotelSearchResult, SpotRules, TicketProduct, TuniuTicket, TicketSpot, TuniuCabin, StayPick, StayPreview, Meal, MealPreview, MemoryCategory, MemoryItem, OptimizeGoal, Place, PlacePick,
   ScheduleEvent, TokenView, PayOrder, PayQuery, MembershipView, MembershipLog,
   TripDetail, TripVersion, Trip, UserView, EmailCodePurpose,
-  WeatherBoard, TripForecast, SwapPreview, TripBooking, TripExpense, BookingInput, ExpenseInput, Favorite, UserAddress, FlightStatusResult, FlightTrial } from "./types";
+  WeatherBoard, TripForecast, SwapPreview, TripBooking, TripExpense, BookingInput, ExpenseInput, Favorite, UserAddress, FlightStatusResult, FlightStatusInfo, CreditView, CreditEntry } from "./types";
 
 /** 拼查询串，跳过空值。 */
 function qs(params: Record<string, string | number | boolean | null | undefined>): string {
@@ -68,7 +68,7 @@ export const api = {
   tripEvents: (id: number) => request<ScheduleEvent[]>("GET", `/api/v1/trips/${id}/events`),
   confirmTrip: (id: number) => request<Trip>("POST", `/api/v1/trips/${id}/confirm`),
   deleteTrip: (id: number) => request<void>("DELETE", `/api/v1/trips/${id}`),
-  updateTripInfo: (id: number, body: { title: string; people: number | null; budget: string | null; budgetCurrency: string }) =>
+  updateTripInfo: (id: number, body: { title: string; people: number | null; budget: string | null; budgetCurrency: string; origin?: string }) =>
     request<Trip>("PUT", `/api/v1/trips/${id}/info`, body),
   tripBookings: (id: number) => request<TripBooking[]>("GET", `/api/v1/trips/${id}/bookings`),
   createBooking: (id: number, body: BookingInput) => request<TripBooking>("POST", `/api/v1/trips/${id}/bookings`, body),
@@ -208,7 +208,12 @@ export const api = {
   membership: () => request<MembershipView>("GET", "/api/v1/membership"),
   /** 航班实时动态：免费用户扣试查次数，会员不限；date 不填是今天 */
   flightStatus: (no: string, date?: string) => request<FlightStatusResult>("GET", "/api/v1/flights/status" + qs({ no, date })),
-  flightTrial: () => request<FlightTrial>("GET", "/api/v1/flights/status/trial"),
+  flightStatusInfo: () => request<FlightStatusInfo>("GET", "/api/v1/flights/status/info"),
+  /** 我的积分、价格表和积分包 */
+  credits: () => request<CreditView>("GET", "/api/v1/credits"),
+  creditLedger: (limit = 50) => request<CreditEntry[]>("GET", "/api/v1/credits/ledger" + qs({ limit })),
+  /** 买积分包：返回订单号和支付表单 HTML（要渲染后自动提交，不能当链接跳转） */
+  createCreditOrder: (pack: string) => request<{ outTradeNo: string; formHtml: string }>("POST", "/api/v1/pay/alipay/orders", { pack }),
   /** 我的会员记录：付费开通、星络赠送或调整 */
   membershipLogs: () => request<MembershipLog[]>("GET", "/api/v1/membership/logs"),
   /** 买一个月会员：返回订单号和支付表单 HTML（要渲染后自动提交，不能当链接跳转） */

@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lifeassistant.common.error.BizException;
 import com.lifeassistant.common.error.ErrorCode;
-import com.lifeassistant.core.member.FeatureTrial;
+import com.lifeassistant.core.member.CreditService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -19,8 +19,8 @@ import java.util.regex.Pattern;
 
 /**
  * 航班实时动态（飞常准）：状态、计划/预计/实际起降、值机柜台、登机口、行李转盘、准点率等。
- * 同一航班同一天 5 分钟内的结果走缓存（所有用户共用），走缓存不扣试用次数；
- * 免费用户总共能试查几次（后台可改），会员不限；查询失败或没查到时退回这次试用。
+ * 同一航班同一天 5 分钟内的结果走缓存（所有用户共用），走缓存不扣积分；
+ * 查一次扣航班动态的积分（后台可改），查询失败或没查到时退回。
  */
 @Slf4j
 @Service
@@ -32,7 +32,7 @@ public class FlightStatusService {
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
 
     private final VariflightClient client;
-    private final FeatureTrial trial;
+    private final CreditService credits;
     private final StringRedisTemplate redis;
     private final ObjectMapper objectMapper;
 
@@ -49,8 +49,8 @@ public class FlightStatusService {
                                String exitMinutes, String queriedAt) {
     }
 
-    /** 查询结果：动态、这次用了缓存没有、试用情况（会员时 member 为 true）。 */
-    public record Result(FlightStatus status, boolean cached, FeatureTrial.Usage usage) {
+    /** 查询结果：动态、这次用了缓存没有（缓存不扣积分）、这次扣了多少积分。 */
+    public record Result(FlightStatus status, boolean cached, int spent) {
     }
 
     public boolean available() {
@@ -72,9 +72,9 @@ public class FlightStatusService {
         String key = "flightstatus:" + no + ":" + date;
         FlightStatus cached = read(key);
         if (cached != null) {
-            return new Result(cached, true, trial.usage(userId, FeatureTrial.FLIGHT_STATUS));
+            return new Result(cached, true, 0);
         }
-        FeatureTrial.Usage usage = trial.consume(userId, FeatureTrial.FLIGHT_STATUS, "航班实时动态");
+        CreditService.Charge charge = credits.spend(userId, CreditService.FLIGHT, no + " " + date, false);
         FlightStatus status;
         try {
             JsonNode data = client.call("searchFlightsByNumber", Map.of("fnum", no, "date", date.toString()));
@@ -84,15 +84,15 @@ public class FlightStatusService {
             }
             status = parse(f);
         } catch (RuntimeException e) {
-            trial.refund(userId, FeatureTrial.FLIGHT_STATUS);
+            credits.refund(charge);
             if (e instanceof BizException biz) {
                 throw biz;
             }
             log.warn("查航班动态失败 {} {}：{}", no, date, e.getMessage());
-            throw new BizException(ErrorCode.EXTERNAL_SERVICE, "航班动态这会儿查不到，稍后再试（这次不算次数）");
+            throw new BizException(ErrorCode.EXTERNAL_SERVICE, "航班动态这会儿查不到，稍后再试（这次的积分已退回）");
         }
         write(key, status);
-        return new Result(status, false, usage.member() ? usage : trial.usage(userId, FeatureTrial.FLIGHT_STATUS));
+        return new Result(status, false, charge.amount());
     }
 
     /** 飞常准的字段转成 FlightStatus。 */

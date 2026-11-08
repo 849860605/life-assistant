@@ -6,6 +6,7 @@ import com.lifeassistant.common.auth.UserCtx;
 import com.lifeassistant.core.conversation.ConversationService;
 import com.lifeassistant.core.mail.EmailSender;
 import com.lifeassistant.core.member.ChatQuota;
+import com.lifeassistant.core.member.CreditService;
 import com.lifeassistant.core.orchestrator.ChatEvent;
 import com.lifeassistant.core.orchestrator.ChatOrchestrator;
 import com.lifeassistant.core.orchestrator.RouterService;
@@ -116,6 +117,13 @@ class LifeApiIntegrationTest {
     ObjectMapper objectMapper;
     @Autowired
     ChatQuota chatQuota;
+    @Autowired
+    CreditService creditService;
+
+    /** 默认的积分价格表（测试改完要还原） */
+    static final Map<String, Object> DEFAULT_PLAN = Map.of(
+            "prices", Map.of("chat", 5, "plan", 60, "edit", 20, "compare", 15, "flight", 100),
+            "signup", 300, "daily", 10, "packs", "6:600,30:3300,68:8000");
 
     String token;
 
@@ -194,15 +202,16 @@ class LifeApiIntegrationTest {
         String dave = loginAs("dave", "dave-pass-1234");
         assertThat(body(call(dave, HttpMethod.GET, "/api/v1/membership", null)).path("data").path("active").asBoolean()).isFalse();
 
-        // 免费 1 次、会员 2 次：免费用户第二次就被挡住，发消息接口返回 402
+        // 免费用户按积分扣：对话价格调到比余额还高，发消息接口返回 402、提示买积分
         body(call(admin, HttpMethod.PUT, "/admin/api/v1/pay/member/quota", Map.of("freeDaily", 1, "memberDaily", 2)));
+        body(call(admin, HttpMethod.PUT, "/admin/api/v1/credits/plan", Map.of("prices", Map.of("chat", 10000),
+                "signup", 300, "daily", 10, "packs", "6:600,30:3300,68:8000")));
         try {
-            chatQuota.consume(daveId);
             String conversationId = body(call(dave, HttpMethod.POST, "/api/v1/conversations", Map.of())).path("data").path("id").asText();
             ResponseEntity<String> blocked = call(dave, HttpMethod.POST, "/api/v1/conversations/" + conversationId + "/messages",
                     Map.of("content", "你好"));
             assertThat(blocked.getStatusCode()).isEqualTo(HttpStatus.PAYMENT_REQUIRED);
-            assertThat(blocked.getBody()).contains("开通会员");
+            assertThat(blocked.getBody()).contains("积分不够");
 
             // 后台送 30 天：变成会员，次数上限换成会员的，再加 30 天从原到期日往后顺延
             JsonNode first = body(call(admin, HttpMethod.POST, "/admin/api/v1/pay/members/" + daveId + "/grant",
@@ -225,9 +234,86 @@ class LifeApiIntegrationTest {
             assertThat(mine.get(0).has("note")).isFalse();
             assertThat(body(call(admin, HttpMethod.GET, "/admin/api/v1/pay/stats", null)).path("data").path("activeMembers").asLong())
                     .isGreaterThanOrEqualTo(1);
+            // 会员有效期内不扣积分
+            assertThat(creditService.spend(daveId, CreditService.CHAT, "t", false).amount()).isZero();
         } finally {
             body(call(admin, HttpMethod.PUT, "/admin/api/v1/pay/member/quota", Map.of("freeDaily", 20, "memberDaily", 200)));
+            body(call(admin, HttpMethod.PUT, "/admin/api/v1/credits/plan", DEFAULT_PLAN));
         }
+    }
+
+    @Test
+    void creditsChargeDailyFirstRefundOnceAndGrantOrderOnce() throws Exception {
+        String admin = adminLogin("admin", "admin-pass-123");
+        long erinId = body(call(admin, HttpMethod.POST, "/admin/api/v1/users",
+                Map.of("username", "erin", "password", "erin-pass-1234"))).path("data").path("id").asLong();
+        String erin = loginAs("erin", "erin-pass-1234");
+
+        // 第一次看就开户：注册送 300，今天送 10，流水里有一条注册赠送
+        JsonNode view = body(call(erin, HttpMethod.GET, "/api/v1/credits", null)).path("data").path("view");
+        assertThat(view.path("balance").asLong()).isEqualTo(300);
+        assertThat(view.path("dailyLeft").asInt()).isEqualTo(10);
+        assertThat(view.path("plan").path("packs")).hasSize(3);
+        assertThat(body(call(erin, HttpMethod.GET, "/api/v1/credits/ledger", null)).path("data").get(0).path("kind").asText())
+                .isEqualTo("SIGNUP");
+
+        // 先扣每天送的：对话 5 全从今天的 10 里扣；规划 60 先扣剩下的 5，再扣余额 55
+        CreditService.Charge chat = creditService.spend(erinId, CreditService.CHAT, "c1", false);
+        assertThat(chat.fromDaily()).isEqualTo(5);
+        assertThat(chat.balanceAfter()).isEqualTo(300);
+        CreditService.Charge plan = creditService.spend(erinId, CreditService.PLAN, "trip:1", false);
+        assertThat(plan.fromDaily()).isEqualTo(5);
+        assertThat(plan.balanceAfter()).isEqualTo(245);
+        assertThat(plan.dailyLeft()).isZero();
+
+        // 退回：当天的退回当天、其余退回余额；同一笔只退一次
+        creditService.refund(plan);
+        creditService.refund(plan);
+        CreditService.View after = creditService.view(erinId);
+        assertThat(after.balance()).isEqualTo(300);
+        assertThat(after.dailyLeft()).isEqualTo(5);
+
+        // 同一个订单到账只算一次；退款扣回也只扣一次
+        assertThat(creditService.grantPurchase(erinId, 600, "LA-TEST-1")).isTrue();
+        assertThat(creditService.grantPurchase(erinId, 600, "LA-TEST-1")).isFalse();
+        assertThat(creditService.view(erinId).balance()).isEqualTo(900);
+        creditService.revokePurchase(erinId, 600, "RF-TEST-1");
+        creditService.revokePurchase(erinId, 600, "RF-TEST-1");
+        assertThat(creditService.view(erinId).balance()).isEqualTo(300);
+
+        // 后台扣到 0（今天送的 5 被下一条对话用掉）；AI 做完行程才扣的可以透支，透支后发消息被挡（402），提示里带透支多少
+        body(call(admin, HttpMethod.POST, "/admin/api/v1/credits/users/" + erinId + "/adjust",
+                Map.of("delta", -300, "note", "测试")));
+        creditService.spend(erinId, CreditService.CHAT, "c2", false);
+        CreditService.Charge overdraft = creditService.spend(erinId, CreditService.PLAN, "trip:2", true);
+        assertThat(overdraft.balanceAfter()).isEqualTo(-60);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> creditService.spend(erinId, CreditService.CHAT, "c3", false))
+                .hasMessageContaining("透支了 60");
+        String conversationId = body(call(erin, HttpMethod.POST, "/api/v1/conversations", Map.of())).path("data").path("id").asText();
+        assertThat(call(erin, HttpMethod.POST, "/api/v1/conversations/" + conversationId + "/messages",
+                Map.of("content", "你好")).getStatusCode()).isEqualTo(HttpStatus.PAYMENT_REQUIRED);
+
+        // 并发扣：20 次对话同时扣，余额和流水对得上
+        creditService.adjustByAdmin(erinId, 160, 1L, "补足 100");
+        List<Throwable> errors = IntStream.range(0, 20).parallel().mapToObj(i -> {
+            try {
+                creditService.spend(erinId, CreditService.CHAT, "p" + i, false);
+                return null;
+            } catch (Throwable e) {
+                return e;
+            }
+        }).filter(java.util.Objects::nonNull).toList();
+        assertThat(errors).isEmpty();
+        assertThat(creditService.view(erinId).balance()).isZero();
+        // 流水算出来的余额（扣费里每天送的部分不动余额）和账户余额一致
+        Long fromLedger = jdbc.queryForObject("""
+                SELECT sum(CASE kind WHEN 'SPEND' THEN amount + from_daily WHEN 'RETURN' THEN amount - from_daily ELSE amount END)
+                FROM t_credit_ledger WHERE user_id = ?""", Long.class, erinId);
+        assertThat(fromLedger).isZero();
+
+        // 积分包编码里带着积分数；后台改价格普通管理员不行
+        assertThat(CreditService.creditsOf("CREDIT_3300")).isEqualTo(3300);
+        assertThat(CreditService.creditsOf("MEMBER_MONTH")).isZero();
     }
 
     @Test

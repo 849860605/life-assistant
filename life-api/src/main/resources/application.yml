@@ -145,6 +145,11 @@ life:
   qweather:
     api-host: ${QWEATHER_API_HOST:}
     api-key: ${QWEATHER_API_KEY:}
+    # JWT 认证（和风推荐，填了就不用 API KEY）：开发者 ID、项目 ID、凭据 ID、Ed25519 私钥（PEM 或只填中间那段 Base64）
+    developer-id: ${QWEATHER_DEVELOPER_ID:}
+    project-id: ${QWEATHER_PROJECT_ID:}
+    key-id: ${QWEATHER_KEY_ID:}
+    private-key: ${QWEATHER_PRIVATE_KEY:}
   # 没配和风时天气用高德兜底（没有逐小时和预警，日出日落按经纬度计算）
   # 途牛开放平台 MCP（机票、酒店、门票等）：API Key 放 apiKey 请求头；每分钟 5 次、每天 50 次，所有 Key 共用
   tuniu:

@@ -37,11 +37,15 @@ public class FlightTools {
     private final com.lifeassistant.core.conversation.TurnFlags turnFlags;
     /** 快速查价用哪家（后台设置） */
     private final com.lifeassistant.skill.travel.trip.QuickPriceSettings quickPrice;
+    /** 对话里完整比价扣积分 */
+    private final com.lifeassistant.core.member.TurnBilling billing;
 
     public FlightTools(List<FlightPriceSource> sources, CardHub cards, com.lifeassistant.core.cache.QueryCache queryCache,
                        FlightBook flightBook, com.lifeassistant.skill.travel.trip.QuickPriceSettings quickPrice,
                        com.lifeassistant.core.conversation.TurnFlags turnFlags,
-                       com.lifeassistant.core.place.AmapPlaceService places) {
+                       com.lifeassistant.core.place.AmapPlaceService places,
+                       com.lifeassistant.core.member.TurnBilling billing) {
+        this.billing = billing;
         this.places = places;
         this.quickPrice = quickPrice;
         this.turnFlags = turnFlags;
@@ -82,6 +86,10 @@ public class FlightTools {
             @ToolParam(description = "出发日期 yyyy-MM-dd") String date) {
         if (turnFlags.planningOnly()) {
             return Map.of("skipped", "规划完整行程时不做多平台比价：用 quickFlights 的结果挑一班写进行程，其他平台的价格保存后后台补。");
+        }
+        String noCredit = billing.compare();
+        if (noCredit != null) {
+            return Map.of("error", noCredit);
         }
         CardHub.Tracker progress = cards.track("机票比价 " + origin + " → " + destination);
         Map<String, Object> out = compare(origin, destination, date, MAX_FLIGHTS, null, progress);

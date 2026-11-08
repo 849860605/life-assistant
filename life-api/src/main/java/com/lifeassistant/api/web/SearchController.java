@@ -1,6 +1,8 @@
 package com.lifeassistant.api.web;
 
 import com.lifeassistant.common.api.ApiResponse;
+import com.lifeassistant.core.auth.AuthFacade;
+import com.lifeassistant.core.member.CreditService;
 import com.lifeassistant.core.food.FoodTools;
 import com.lifeassistant.skill.travel.flight.FlightRules;
 import com.lifeassistant.skill.travel.flight.FlightTools;
@@ -12,15 +14,19 @@ import com.lifeassistant.skill.travel.ticket.TicketRules;
 import com.lifeassistant.skill.travel.ticket.TicketSearch;
 import com.lifeassistant.skill.travel.ticket.TuniuTickets;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.Duration;
 import java.util.Map;
 
 /**
  * 比价查询接口：机票、酒店、餐厅页面上直接查，不经过对话。和助手用的是同一套多平台查询，查一次十几秒到一分钟。
+ * 机票（每段航线每天）和酒店候选查询扣一次比价的积分；同样的查询 10 分钟内再查（换筛选、刷新）不重复扣。
+ * 价格日历、退改规则、单家酒店报价不扣。
  */
 @RestController
 @RequestMapping("/api/v1/search")
@@ -33,6 +39,12 @@ public class SearchController {
     private final HotelPriceTools hotelPriceTools;
     private final HotelSearch hotelSearch;
     private final TicketSearch ticketSearch;
+    private final AuthFacade authFacade;
+    private final CreditService credits;
+    private final StringRedisTemplate redis;
+
+    /** 同样的查询多久内不重复扣积分 */
+    private static final Duration SAME_QUERY = Duration.ofMinutes(10);
     private final TicketRules ticketRules;
     private final TuniuTickets tuniuTickets;
     private final com.lifeassistant.core.cache.QueryCache queryCache;
@@ -45,6 +57,7 @@ public class SearchController {
                                                     @RequestParam(required = false) String cabin,
                                                     @RequestParam(defaultValue = "false") boolean refresh) {
         String c = cabin == null || !cabin.matches("(?i)ECONOMY|BUSINESS|FIRST") ? null : cabin.toUpperCase();
+        charge("flight", origin.trim(), destination.trim(), date.trim());
         return ApiResponse.ok(flightTools.search(origin, destination, date, c, refresh));
     }
 
@@ -102,6 +115,7 @@ public class SearchController {
                                                    @RequestParam String checkIn, @RequestParam String checkOut,
                                                    @RequestParam(required = false) Double maxPrice) {
         boolean wholeCity = place == null || place.isBlank() || place.equals(city);
+        charge("hotel", city.trim(), wholeCity ? "" : place.trim(), checkIn.trim(), checkOut.trim());
         return ApiResponse.ok(hotelPriceTools.findAndCompareHotels(wholeCity ? city : place + " " + city,
                 wholeCity ? "城市" : "景点", city, checkIn, checkOut, maxPrice, null, 5, null));
     }
@@ -120,6 +134,7 @@ public class SearchController {
                                                            @RequestParam(required = false) Integer maxPrice,
                                                            @RequestParam(required = false) Integer radius,
                                                            @RequestParam(defaultValue = "false") boolean refresh) {
+        charge("hotel", city.trim(), near == null ? "" : near.trim(), checkIn.toString(), checkOut.toString());
         return ApiResponse.ok(hotelSearch.search(city, near, checkIn, checkOut, type, stars, maxPrice, radius, refresh));
     }
 
@@ -184,5 +199,30 @@ public class SearchController {
                                                         @RequestParam(required = false) String cuisine,
                                                         @RequestParam(required = false) Integer maxPrice) {
         return ApiResponse.ok(foodTools.findRestaurants(city, near, cuisine, maxPrice, null));
+    }
+
+    /** 扣一次比价的积分：同一个人同样的查询 10 分钟内只扣一次；积分不够报 402（不去查）。 */
+    private void charge(String kind, String... parts) {
+        long userId = authFacade.current().userId();
+        String key = "credit:search:" + userId + ":" + kind + ":" + Integer.toHexString(String.join("|", parts).hashCode());
+        Boolean first;
+        try {
+            first = redis.opsForValue().setIfAbsent(key, "1", SAME_QUERY);
+        } catch (Exception e) {
+            first = true;
+        }
+        if (!Boolean.TRUE.equals(first)) {
+            return;
+        }
+        try {
+            credits.spend(userId, CreditService.COMPARE, kind + ":" + String.join(" ", parts), false);
+        } catch (RuntimeException e) {
+            try {
+                redis.delete(key);
+            } catch (Exception ignored) {
+                // 删不掉最多 10 分钟内这条查询不扣
+            }
+            throw e;
+        }
     }
 }
