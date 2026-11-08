@@ -685,8 +685,10 @@ function duration(it: ItineraryItem) {
   return `约 ${Number.isInteger(hours) ? hours : hours.toFixed(1)} 小时`;
 }
 
+/** 对话页是底部标签页，只能用 reLaunch 打开；其他页面正常压栈 */
 function go(url: string) {
-  uni.navigateTo({ url });
+  if (url.startsWith("/pages/chat/chat")) uni.reLaunch({ url });
+  else uni.navigateTo({ url });
 }
 
 function goBack() {

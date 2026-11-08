@@ -321,7 +321,7 @@ function finishLogin(result: { token: string; user: { id: number } }) {
   forgetOtherUser(result.user.id);
   const back = uni.getStorageSync(BACK_KEY) as string;
   uni.removeStorageSync(BACK_KEY);
-  uni.reLaunch({ url: sameUser && back && back.startsWith("/pages/") ? back : "/pages/home/home" });
+  uni.reLaunch({ url: sameUser && back && back.startsWith("/pages/") ? back : "/pages/chat/chat" });
 }
 
 const LAST_USER_KEY = "life_last_user";

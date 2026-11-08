@@ -288,7 +288,7 @@ function statusText(o: PayOrder): string {
 }
 
 function startChat() {
-  uni.reLaunch({ url: "/pages/home/home" });
+  uni.reLaunch({ url: "/pages/chat/chat" });
 }
 
 function dateText(iso?: string | null): string {

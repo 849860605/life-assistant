@@ -69,11 +69,11 @@ function open(city: string) {
 
 function useCity(city: string) {
   setCurrentCity(city);
-  uni.reLaunch({ url: "/pages/home/home" });
+  uni.reLaunch({ url: "/pages/chat/chat" });
 }
 
 function ask(q: string) {
-  uni.navigateTo({ url: "/pages/chat/chat?q=" + encodeURIComponent(q) });
+  uni.reLaunch({ url: "/pages/chat/chat?q=" + encodeURIComponent(q) });
 }
 </script>
 

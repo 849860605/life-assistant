@@ -168,7 +168,7 @@ function remove(item: ItineraryItem) {
 }
 
 function add() {
-  uni.navigateTo({ url: "/pages/chat/chat?q=" + encodeURIComponent(`行程「${detail.value?.trip.title}」（tripId=${tripId.value}）第${dayNo.value}天再加一个景点`) });
+  uni.reLaunch({ url: "/pages/chat/chat?q=" + encodeURIComponent(`行程「${detail.value?.trip.title}」（tripId=${tripId.value}）第${dayNo.value}天再加一个景点`) });
 }
 
 function toChat() {

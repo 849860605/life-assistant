@@ -22,13 +22,13 @@
 
     <view class="cs-title">{{ keyword ? "搜索结果" : "最近" }}</view>
     <scroll-view scroll-y class="cs-list">
-      <view v-for="c in shown" :key="c.id" class="cs-item" :class="{ on: c.id === currentId }" @click="renamingId !== c.id && emit('open', c)">
+      <view v-for="c in shown" :key="c.id" class="cs-item" :class="{ on: c.id === currentId }" @click="renamingId !== c.id && (hoverOut(), emit('open', c))" :data-cid="c.id" @mouseenter="hoverIn(c)" @mouseleave="hoverOut">
         <view v-if="renamingId === c.id" class="cs-rename" @click.stop>
           <input :id="`conv-rename-${c.id}`" v-model="renameText" class="input cs-input" maxlength="60" :focus="true" @confirm="saveRename(c)" @blur="saveRename(c)" />
         </view>
         <template v-else>
           <Icon v-if="c.pinnedAt" name="flag" :size="12" color="var(--accent)" />
-          <text class="cs-text">{{ c.title || "新对话" }}</text>
+          <text class="cs-text">{{ oneLine(c.title) }}</text>
           <text class="cs-date">{{ when(c.updatedAt) }}</text>
           <ConvMenu class="cs-menu" :conv="c" @rename="startRename(c)" @pinned="load" @deleted="onDeleted(c)" />
         </template>
@@ -37,6 +37,13 @@
       <view v-else-if="expanded && !keyword && list.length > FOLD" class="cs-more" @click="expanded = false">收起</view>
       <view v-if="loaded && !list.length" class="cs-empty">{{ keyword ? `没找到含"${keyword}"的对话` : "还没有对话" }}</view>
     </scroll-view>
+    <!-- 鼠标停在一条对话上：右边浮出完整标题和更新时间 -->
+    <view v-if="peek" class="cs-peek" :style="{ top: peek.top + 'px', left: peek.left + 'px' }">
+      <text class="peek-title">{{ peek.title }}</text>
+      <view class="peek-row"><Icon name="clock" :size="14" color="var(--muted)" /><text>更新于 {{ fullTime(peek.updatedAt) }}</text></view>
+      <view v-if="peek.pinned" class="peek-row"><Icon name="flag" :size="14" color="var(--accent)" /><text>已置顶</text></view>
+    </view>
+
     <view class="cs-foot">
       <!-- 点头像弹出账号菜单：套餐、开通续费、我的、收藏、退出 -->
       <view v-if="menuOpen" class="cs-pop-mask" @click="menuOpen = false" />
@@ -147,6 +154,47 @@ const shown = computed(() => {
   return cur ? [...head, cur] : head;
 });
 const hiddenCount = computed(() => list.value.length - shown.value.length);
+
+/** 标题里可能有换行（比如粘贴的攻略），列表里只显示成一行 */
+function oneLine(t?: string | null) {
+  return (t || "新对话").replace(/\s+/g, " ").trim() || "新对话";
+}
+
+const peek = ref<{ title: string; updatedAt: string; pinned: boolean; top: number; left: number } | null>(null);
+let peekTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * 停留 0.4 秒再浮出，划过列表时不闪；手机上没有鼠标不会触发。
+ * uni-app 包装过的事件拿不到真实元素，按 data-cid 到页面上找这一行的位置。
+ */
+function hoverIn(c: Conversation) {
+  if (peekTimer) clearTimeout(peekTimer);
+  peekTimer = setTimeout(() => {
+    if (renamingId.value === c.id || menuOpen.value || typeof document === "undefined") return;
+    const row = document.querySelector(`.cs-item[data-cid="${c.id}"]`);
+    if (!row) return;
+    const rect = row.getBoundingClientRect();
+    const side = row.closest(".cs")?.getBoundingClientRect();
+    peek.value = {
+      title: (c.title || "新对话").trim(),
+      updatedAt: c.updatedAt,
+      pinned: !!c.pinnedAt,
+      top: Math.min(rect.top, window.innerHeight - 160),
+      left: (side?.right ?? rect.right) + 8,
+    };
+  }, 400);
+}
+
+function hoverOut() {
+  if (peekTimer) clearTimeout(peekTimer);
+  peek.value = null;
+}
+
+function fullTime(iso: string) {
+  const d = new Date(iso);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}/${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
 
 /** 列表右边的日期：今天显示时间，昨天，一周内"N天前"，今年"M月D日"，更早带年份 */
 function when(iso: string) {
@@ -275,6 +323,9 @@ watch(() => props.currentId, () => load());
 .cs-rename { flex: 1; }
 .cs-input { height: 30px; font-size: 14px; width: 100%; }
 .cs-empty { padding: 8px 10px; font-size: 13px; color: var(--muted); }
+.cs-peek { position: fixed; z-index: 60; width: 300px; max-width: calc(100vw - 280px); padding: 14px 16px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.14); display: flex; flex-direction: column; gap: 8px; pointer-events: none; box-sizing: border-box; }
+.peek-title { font-size: 15px; font-weight: 600; line-height: 1.45; white-space: pre-line; word-break: break-all; display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
+.peek-row { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
 .cs-foot { position: relative; border-top: 1px solid var(--line); margin: 8px -10px -12px; padding: 8px 10px 12px; }
 .cs-me { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; cursor: pointer; }
 .cs-me.on { background: rgba(0, 0, 0, 0.05); }

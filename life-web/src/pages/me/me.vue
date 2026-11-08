@@ -426,8 +426,10 @@ function confirm(title: string, content: string, action: () => Promise<void>) {
 }
 
 /** 打开日程、对话等二级页面。 */
+/** 对话页是底部标签页，只能用 reLaunch 打开；其他页面正常压栈 */
 function go(url: string) {
-  uni.navigateTo({ url });
+  if (url.startsWith("/pages/chat/chat")) uni.reLaunch({ url });
+  else uni.navigateTo({ url });
 }
 </script>
 

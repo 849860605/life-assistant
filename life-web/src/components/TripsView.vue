@@ -122,7 +122,7 @@ function open(id: number) {
 }
 
 function toChat() {
-  uni.reLaunch({ url: "/pages/home/home" });
+  uni.reLaunch({ url: "/pages/chat/chat" });
 }
 
 function startRename(r: Row) {

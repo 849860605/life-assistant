@@ -260,7 +260,7 @@ function add(f: Place) {
 
 function ask() {
   const where = nearName.value ? `${nearName.value}附近` : city.value;
-  uni.navigateTo({ url: "/pages/chat/chat?q=" + encodeURIComponent(`${where}有什么好吃的？`) });
+  uni.reLaunch({ url: "/pages/chat/chat?q=" + encodeURIComponent(`${where}有什么好吃的？`) });
 }
 </script>
 

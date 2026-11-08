@@ -1,12 +1,12 @@
 {
 	"pages": [
 		{
-			"path": "pages/home/home",
+			"path": "pages/chat/chat",
 			"style": { "navigationStyle": "custom" }
 		},
 		{
-			"path": "pages/chat/chat",
-			"style": { "navigationBarTitleText": "星络" }
+			"path": "pages/home/home",
+			"style": { "navigationStyle": "custom" }
 		},
 		{
 			"path": "pages/login/login",
@@ -98,7 +98,7 @@
 		"iconWidth": "22px",
 		"height": "56px",
 		"list": [
-			{ "pagePath": "pages/home/home", "text": "问星络", "iconPath": "static/tab/home.png", "selectedIconPath": "static/tab/home-on.png" },
+			{ "pagePath": "pages/chat/chat", "text": "问星络", "iconPath": "static/tab/home.png", "selectedIconPath": "static/tab/home-on.png" },
 			{ "pagePath": "pages/schedule/schedule", "text": "我的安排", "iconPath": "static/tab/schedule.png", "selectedIconPath": "static/tab/schedule-on.png" },
 			{ "pagePath": "pages/travel/travel", "text": "旅行服务", "iconPath": "static/tab/trip.png", "selectedIconPath": "static/tab/trip-on.png" },
 			{ "pagePath": "pages/me/me", "text": "我的", "iconPath": "static/tab/me.png", "selectedIconPath": "static/tab/me-on.png" }

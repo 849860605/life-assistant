@@ -7,7 +7,7 @@
     </view>
     <view v-if="showList && !wide" class="mask" @click="showList = false" />
 
-    <view class="main">
+    <view class="main" :class="{ hero }">
       <!-- 电脑上没有标题栏：左边栏收起时左上角给个展开按钮，右侧面板收起时右上角给个显示按钮 -->
       <view v-if="wide" class="float-bar">
         <view v-if="!showList" class="float-btn" title="展开对话列表" @click="toggleList"><Icon name="right" :size="16" color="var(--ink)" /></view>
@@ -20,7 +20,24 @@
         <view class="tb-icon" aria-label="新对话" @click="startNew"><Icon name="plus" :size="18" color="var(--ink)" /></view>
       </view>
 
-      <scroll-view scroll-y class="messages" :scroll-top="scrollTop" :scroll-with-animation="false">
+      <!-- 新对话就是首页（电脑和手机都是）：标题、提醒、输入框、三个起步入口；发出第一句后原地变成对话，输入框固定在底部 -->
+      <view v-if="hero" class="hero-head">
+        <view class="eyebrow">
+          <BrandMark :size="18" /><text>星络 · 旅行规划与日常安排</text>
+          <view v-if="!wide" class="m-city" @click="picking = true"><Icon name="pin" :size="13" color="var(--muted)" /><text>{{ city }}</text></view>
+        </view>
+        <text class="hero-title">你的 AI 旅行与日程助手</text>
+        <text class="hero-sub">告诉我目的地和预算，帮你规划路线、比较机票酒店，把安排保存下来。</text>
+        <view v-if="nextEvent" class="next" @click="goTab('/pages/schedule/schedule')">
+          <Icon name="bell" :size="15" color="var(--accent)" />
+          <text class="next-when">{{ nextEvent.when }}</text>
+          <text class="next-title">{{ nextEvent.title }}</text>
+          <text v-if="nextEvent.location" class="next-loc">· {{ nextEvent.location }}</text>
+          <Icon name="right" :size="14" color="var(--muted)" />
+        </view>
+      </view>
+
+      <scroll-view v-else scroll-y class="messages" :scroll-top="scrollTop" :scroll-with-animation="false">
         <view class="thread">
           <view v-if="!messages.length" class="welcome">
             <view class="greet">
@@ -123,20 +140,41 @@
             :maxlength="4000"
             :show-confirm-bar="false"
             confirm-type="send"
-            :placeholder="sending ? '可以随时补充，星络下一步就会看到' : '你可以继续补充需求，例如：更换航班、增加景点…'"
+            :placeholder="hero ? `从${city}出发，周末玩两天，预算1500元，帮我安排一下…` : sending ? '可以随时补充，星络下一步就会看到' : '你可以继续补充需求，例如：更换航班、增加景点…'"
             @confirm="sendInput"
           />
           <view class="composer-tools">
             <view class="tool" @click="pickFiles"><Icon name="plus" :size="14" color="var(--muted)" /><text>上传文件</text></view>
-            <ModelPicker class="model" :wide="wide" />
+            <template v-if="hero">
+              <view class="tool" @click="goPage('/pages/search/flight')"><Icon name="depart" :size="14" color="var(--muted)" /><text>{{ wide ? "机票比价" : "机票" }}</text></view>
+              <view class="tool" @click="goPage('/pages/search/hotel')"><Icon name="bed" :size="14" color="var(--muted)" /><text>{{ wide ? "酒店比价" : "酒店" }}</text></view>
+            </template>
             <VoiceButton @text="addVoice" />
             <view v-if="sending && !input.trim()" class="send stop-btn" title="停止" @click="stop"><Icon name="stop" :size="14" color="#fff" fill /></view>
             <view v-else class="send" :class="{ off: !canSend }" @click="sendInput"><Icon name="send" :size="18" color="#fff" /></view>
           </view>
         </view>
       </view>
+
+      <!-- 今天有航班：直接放动态卡片（免费试查 / 会员不限） -->
+      <view v-if="hero && todayFlight" class="today-flight">
+        <view class="tf-title">今天的航班 · {{ todayFlight.time }} {{ todayFlight.title }}</view>
+        <FlightStatusCard :flight-no="todayFlight.no" :date="ymd(new Date())" />
+      </view>
+
+      <view v-if="hero" class="hero-starts">
+        <view v-for="c in STARTS" :key="c.title" class="start" @click="c.go()">
+          <view class="start-ic"><Icon :name="c.icon" :size="18" color="var(--accent)" /></view>
+          <view class="start-body">
+            <text class="start-title">{{ c.title }}</text>
+            <text class="start-desc">{{ c.desc }}</text>
+          </view>
+          <Icon name="right" :size="14" color="var(--muted)" />
+        </view>
+      </view>
     </view>
 
+    <CityPicker v-if="picking" :current="city" @close="picking = false" @pick="changeCity" />
     <PlanPanel v-if="showPanel" class="side-panel" :trip="latestTrip" :plans="latestPlans" @send="send" @close="panelClosed = true" />
   </view>
   </Shell>
@@ -154,19 +192,21 @@ import ChatCard from "../../components/cards/ChatCard.vue";
 import Icon from "../../components/Icon.vue";
 import BrandMark from "../../components/BrandMark.vue";
 import PlanPanel from "../../components/PlanPanel.vue";
-import ModelPicker from "../../components/ModelPicker.vue";
+import CityPicker from "../../components/CityPicker.vue";
+import FlightStatusCard from "../../components/FlightStatusCard.vue";
 import Shell from "../../components/Shell.vue";
 import ConvSidebar from "../../components/ConvSidebar.vue";
 import UserAvatar from "../../components/UserAvatar.vue";
 import VoiceButton from "../../components/VoiceButton.vue";
 import { useWide } from "../../utils/screen";
 import { savePlans } from "../../utils/plans";
-import { currentCity } from "../../utils/place";
-import { markdownToPlain, relativeTime, SKILL_NAMES } from "../../utils/format";
+import { currentCity, setCurrentCity } from "../../utils/place";
+import { flightNoIn } from "../../utils/priceCheck";
+import { dayLabel, hm, markdownToPlain, relativeTime, SKILL_NAMES, ymd } from "../../utils/format";
 import { ensureMediaTicket } from "../../utils/media";
 import { fileIcon, fileUrl, splitAttachments, UPLOAD_EXTS, type Attached } from "../../utils/attach";
 import { loadDraft, saveDraft, takeHandoff } from "../../utils/handoff";
-import type { UploadView } from "../../api/types";
+import type { ScheduleEvent, TodayAgenda, UploadView } from "../../api/types";
 
 /** 页面上的一条消息；assistant 消息的 status 跟着流式事件变化。 */
 interface UiMessage {
@@ -352,18 +392,17 @@ watch(latestPlans, (plans) => {
 });
 const input = ref(loadDraft("chat"));
 const sending = ref(false);
-/** 刷新后接着看的会话 id 存在这里 */
-const LAST_KEY = "chat:last";
 /** 历史对话：手机上是抽屉；电脑上是左边一栏，可以收起，记住上次的选择 */
 const showList = ref(false);
 const sidebar = ref<InstanceType<typeof ConvSidebar> | null>(null);
 
 // 输入框的字存成草稿，刷新、出错都不丢
 watch(input, (v) => saveDraft("chat", v));
-// 记住当前会话，刷新页面后接着看
+// 当前会话写进地址栏：刷新还在这个会话；点"问星络"或 Logo 打开的是不带 id 的首页
 watch(currentId, (id) => {
-  if (id) uni.setStorageSync(LAST_KEY, id);
-  else uni.removeStorageSync(LAST_KEY);
+  // #ifdef H5
+  history.replaceState(history.state, "", id ? `#/pages/chat/chat?id=${id}` : "#/pages/chat/chat");
+  // #endif
 });
 
 /** 方案或行程出来后，回答下面固定给的几种调整，点了放进输入框补充后再发 */
@@ -387,22 +426,19 @@ onShow(() => {
   // 电脑上默认展开对话列表，收起过就记住
   if (wide.value) showList.value = uni.getStorageSync("chat:list") !== "0";
   loadConversations();
+  loadHome();
 });
 
 /** 从首页等处跳过来：q 是要直接发的问题，id 是要打开的会话。 */
 onLoad(async (query) => {
   if (query?.id) {
-    await open({ id: query.id } as Conversation);
+    await open({ id: query.id } as Conversation, true);
   }
   if (query?.q) {
     send(decodeURIComponent(query.q));
   } else if (query?.handoff) {
     const h = takeHandoff();
     if (h) send(h.text, h.files);
-  } else if (!query?.id && !query?.new) {
-    // 直接打开或刷新：接着看上次的会话
-    const last = uni.getStorageSync(LAST_KEY) as string;
-    if (last) await open({ id: last } as Conversation, true);
   }
 });
 
@@ -478,6 +514,59 @@ function addVoice(text: string) {
 /** 把一句话放进输入框，补充完再发 */
 function prefill(text: string) {
   input.value = text;
+}
+
+/** 没打开任何对话、也没有消息时，整页就是首页的样子 */
+const hero = computed(() => !currentId.value && !messages.value.length);
+
+const picking = ref(false);
+const events = ref<ScheduleEvent[]>([]);
+const agenda = ref<TodayAgenda | null>(null);
+
+/** 最近一条还没到时间的日程（全天的当天也算），首页上显示一行 */
+const nextEvent = computed(() => {
+  const now = Date.now();
+  const today = ymd(new Date());
+  const e = events.value
+    .filter((x) => (x.allDay ? ymd(new Date(x.startAt)) >= today : Date.parse(x.startAt) > now))
+    .sort((a, b) => a.startAt.localeCompare(b.startAt))[0];
+  if (!e) return null;
+  const d = new Date(e.startAt);
+  return { title: e.title, location: e.location, when: `${dayLabel(d)} ${e.allDay ? "全天" : hm(d)}` };
+});
+
+/** 今天安排里第一个还没过的航班（标题里带航班号），出发当天在首页直接看动态 */
+const todayFlight = computed(() => {
+  const e = agenda.value?.entries.find((x) => x.kind === "TRIP" && !x.past && flightNoIn(x.title));
+  return e ? { no: flightNoIn(e.title)!, time: e.time, title: e.title } : null;
+});
+
+/** 首页用到的提醒和今日安排；每次回到这页都刷新，取不到就不显示 */
+function loadHome() {
+  if (!getToken()) return;
+  const today = ymd(new Date());
+  api.events(today, ymd(new Date(Date.now() + 30 * 86400000))).then((list) => (events.value = list)).catch(() => {});
+  api.today(city).then((a) => (agenda.value = a)).catch(() => {});
+}
+
+function changeCity(c: string) {
+  picking.value = false;
+  setCurrentCity(c);
+  uni.reLaunch({ url: "/pages/chat/chat" });
+}
+
+function goTab(url: string) {
+  uni.reLaunch({ url });
+}
+
+const STARTS = [
+  { title: "周末不知道去哪", desc: "按出发地和预算推荐去处", icon: "compass", go: () => prefill(`从${city}出发，周末玩两天，预算1500元，推荐几个地方`) },
+  { title: "已有目的地，帮我规划", desc: "路线、交通、住宿一次排好", icon: "route", go: () => prefill(`从${city}出发去`) },
+  { title: "已有行程，帮我调整", desc: "改日期、换景点、调整节奏", icon: "refresh", go: () => uni.reLaunch({ url: "/pages/schedule/schedule?tab=trips" }) },
+];
+
+function goPage(url: string) {
+  uni.navigateTo({ url });
 }
 
 /** 出错的回答重新发一次：去掉这一问一答，用原来的文字和附件重发 */
@@ -862,7 +951,7 @@ function openMember() {
 
 /* 电脑：历史对话是左边可收起的一栏；平时对话居中占满导航下面的空间；有行程或方案时左边对话、右边面板 */
 .chat.wide { height: auto; flex: 1; min-height: 0; }
-.chat.wide .aside { position: static; transform: none; width: 260px; transition: none; height: 100%; }
+.chat.wide .aside { position: relative; z-index: 20; background: transparent; transform: none; width: 260px; transition: none; height: 100%; }
 .chat.wide .thread { padding-top: 56px; }
 .chat.wide .main { background: var(--surface); }
 .chat.wide.split .main { flex: 0 0 min(560px, 42%); border-right: 1px solid var(--line); }
@@ -886,7 +975,7 @@ function openMember() {
 .bot-sub { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .greet-tip { margin-top: 6px; color: var(--muted); }
 .msg.user { gap: 8px; align-items: flex-start; }
-.composer-box { max-width: 880px; margin: 0 auto; border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px 8px; background: var(--surface); }
+.composer-box { max-width: 880px; box-sizing: border-box; margin: 0 auto; border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px 8px; background: var(--surface); }
 .composer-box .composer-input { border: none; background: transparent; padding: 2px 0; width: 100%; }
 .answer-actions { display: flex; gap: 6px; margin-top: -2px; }
 .act-btn { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); padding: 4px 8px; border-radius: 8px; cursor: pointer; }
@@ -912,12 +1001,53 @@ function openMember() {
 .b-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .b-file { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 3px 8px; border-radius: 8px; background: rgba(255, 255, 255, 0.18); cursor: pointer; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .composer-tools { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
-.tool { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+.tool { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
+.tool text { white-space: nowrap; }
 .model { margin-left: auto; }
-.composer-tools .send { margin-left: auto; }
+.composer-tools .send { margin-left: auto; flex-shrink: 0; }
+@media (max-width: 1023px) { .composer-tools { gap: 6px; } .tool { padding: 4px 6px; } }
 .composer-tools .model ~ .send { margin-left: 0; }
 .send { width: 38px; height: 38px; border-radius: 50%; background: var(--accent); display: flex; align-items: center; justify-content: center; cursor: pointer; }
 .send.off { opacity: 0.45; cursor: default; }
 .stop-btn { background: var(--danger); }
 @media (prefers-reduced-motion: reduce) { .aside { transition: none; } }
+
+/* 首页状态：电脑上输入框居中，手机上从上往下排；下面三个起步入口 */
+.main.hero { justify-content: center; gap: 20px; padding: 0 48px 10vh; box-sizing: border-box; overflow-y: auto; }
+.hero-head { display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; }
+.eyebrow { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.hero-title { font-size: 34px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; }
+.hero-sub { font-size: 16px; color: var(--muted); }
+.chat.wide .main.hero .composer { border-top: none; background: transparent; padding: 4px 0 0; }
+.chat.wide .main.hero .composer-box { border-radius: 24px; padding: 16px 16px 12px 20px; box-shadow: var(--shadow); }
+.chat.wide .main.hero .composer-input { min-height: 72px; font-size: 16px; }
+.hero-starts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; width: 100%; max-width: 880px; margin: 0 auto; }
+.m-city { display: flex; align-items: center; gap: 4px; margin-left: auto; font-size: 14px; color: var(--muted); cursor: pointer; }
+.next { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); font-size: 14px; cursor: pointer; max-width: 100%; box-sizing: border-box; margin-top: 4px; }
+.next-when { color: var(--accent); font-weight: 600; white-space: nowrap; }
+.next-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.next-loc { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.today-flight { width: 100%; max-width: 880px; margin: 0 auto; box-sizing: border-box; padding: 14px 16px 6px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+.tf-title { font-size: 13px; color: var(--muted); font-weight: 600; }
+@media (max-width: 1023px) {
+  /* 手机：内容在上面滚动，输入框和对话时一样贴在底部（标签栏上方），发出第一句后位置不变 */
+  .main.hero { justify-content: flex-start; padding: 16px 16px 0; gap: 16px; }
+  .main.hero .composer { order: 10; margin: auto -16px 0; position: sticky; bottom: 0; z-index: 2; }
+  .hero-head { align-items: stretch; text-align: left; gap: 8px; }
+  .eyebrow { width: 100%; }
+  .hero-title { font-size: 24px; }
+  .hero-sub { font-size: 14px; }
+  .next { border-radius: 10px; }
+  .hero-starts { grid-template-columns: 1fr; gap: 8px; }
+}
+.start { display: flex; align-items: center; gap: 12px; padding: 14px 14px 14px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); cursor: pointer; transition: border-color 0.15s; }
+.start:hover { border-color: var(--accent); }
+.start-ic { width: 36px; height: 36px; border-radius: 10px; background: var(--accent-soft); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.start-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.start-title { font-size: 15px; font-weight: 600; }
+.start-desc { font-size: 13px; color: var(--muted); }
+
+/* 电脑上对话时：输入框是浮在底部的圆角框，不是贴边的工具栏 */
+.chat.wide .main:not(.hero) .composer { border-top: none; background: transparent; padding: 4px 24px 16px; }
+.chat.wide .main:not(.hero) .composer-box { border-radius: 20px; padding: 12px 14px 10px 18px; box-shadow: var(--shadow); }
 </style>

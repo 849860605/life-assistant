@@ -2,14 +2,14 @@
   <view class="shell" :class="{ wide, fill: fill && wide }">
     <view v-if="wide && !hideTopbar" class="topnav">
       <view class="topnav-inner">
-        <view class="brand" @click="go('/pages/home/home')">
+        <view class="brand" @click="goAsk">
           <BrandMark :size="28" />
           <text class="brand-name">星络</text>
           <text class="brand-en">Xinglo</text>
         </view>
 
         <view class="nav">
-          <view class="nav-item" :class="{ on: group === 'ask' }" @click="go('/pages/home/home')">问星络</view>
+          <view class="nav-item" :class="{ on: group === 'ask' }" @click="goAsk">问星络</view>
           <view class="nav-item" :class="{ on: group === 'arrange' }" @click="go('/pages/schedule/schedule')">我的安排</view>
           <view class="nav-drop" @mouseenter="menu = true" @mouseleave="menu = false">
             <view class="nav-item" :class="{ on: group === 'travel' }" @click="go('/pages/travel/travel')">
@@ -101,6 +101,11 @@ const group = computed(() => GROUP[props.active] || "");
 const menu = ref(false);
 const picking = ref(false);
 
+/** "问星络"就是对话页（新对话时显示成首页的样子） */
+function goAsk() {
+  go("/pages/chat/chat");
+}
+
 /** 顶部导航跳转用 reLaunch，不在电脑上堆出很深的页面栈。 */
 function go(url: string) {
   menu.value = false;
@@ -114,7 +119,7 @@ function changeCity(c: string) {
   const pages = getCurrentPages();
   const page = pages[pages.length - 1] as any;
   const query = page?.options ? Object.entries(page.options).map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join("&") : "";
-  uni.reLaunch({ url: "/" + (page?.route || "pages/home/home") + (query ? "?" + query : "") });
+  uni.reLaunch({ url: "/" + (page?.route || "pages/chat/chat") + (query ? "?" + query : "") });
 }
 </script>
 
