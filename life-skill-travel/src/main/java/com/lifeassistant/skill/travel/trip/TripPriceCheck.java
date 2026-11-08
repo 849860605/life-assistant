@@ -36,6 +36,8 @@ public class TripPriceCheck {
 
     private final HotelQuoteBook quoteBook;
     private final FlightBook flightBook;
+    /** 这个会话查过的车次：保存时按名称里的车次号带上票价和购票链接 */
+    private final com.lifeassistant.skill.travel.train.TrainBook trainBook;
     private final HotelPriceTools hotelPriceTools;
     private final FlightTools flightTools;
     private final TripEditor tripEditor;
@@ -74,6 +76,11 @@ public class TripPriceCheck {
         for (Itinerary.Day day : itinerary.days()) {
             List<Itinerary.Item> items = new ArrayList<>();
             for (Itinerary.Item item : day.items()) {
+                Itinerary.Item withTrain = withTrain(item, day.date(), conversationId);
+                if (withTrain != null) {
+                    items.add(withTrain);
+                    continue;
+                }
                 FlightBook.Entry entry = flightOf(item, day.date(), conversationId);
                 if (entry == null) {
                     items.add(item);
@@ -106,6 +113,35 @@ public class TripPriceCheck {
             }
         }
         return new Prepared(itinerary.withDays(days), targets);
+    }
+
+    /**
+     * 这一项是火车（交通项、名称里有车次号）且这个会话查过它时，带上票价和购票链接后返回；不是返回 null。
+     * 火车只查了飞猪一家，不用后台补比价。
+     */
+    private Itinerary.Item withTrain(Itinerary.Item item, String date, String conversationId) {
+        if (!"TRANSPORT".equals(item.type()) || item.name() == null) {
+            return null;
+        }
+        // 车次号一般写在名称里，模型有时写进了说明，两处都找
+        Matcher m = com.lifeassistant.skill.travel.train.TrainTools.TRAIN_IN_NAME.matcher(
+                item.name() + " " + (item.note() == null ? "" : item.note()));
+        if (!m.find()) {
+            return null;
+        }
+        var entry = trainBook.find(conversationId, m.group(), date).orElse(null);
+        if (entry == null) {
+            // 中转车次记成"G1/G2"，名称里可能只写了第一段
+            return null;
+        }
+        var t = entry.train();
+        String note = item.note() != null && item.note().contains("¥") ? item.note()
+                : (t.price() == null ? "" : "飞猪 ¥" + t.price() + (t.seat() == null ? "" : "（" + t.seat() + "）") + "，")
+                + "价格以购票页为准；买好后回来标记已预约";
+        Integer cost = t.price() == null ? item.cost() : (int) Math.round(t.price());
+        return new Itinerary.Item(item.id(), item.start(), item.end(), item.type(), item.name(), item.address(), note,
+                cost, t.url() != null ? t.url() : item.url(), item.locked(), item.poiId(), item.lng(), item.lat(),
+                item.photo(), item.rating());
     }
 
     /** 这一项是航班（交通项、名称里有航班号）且这个会话查过它时，返回查到的记录。 */

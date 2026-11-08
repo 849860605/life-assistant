@@ -24,6 +24,37 @@ public class RouteTools {
     private final com.lifeassistant.core.conversation.TurnFlags turnFlags;
 
     @Tool(description = """
+            自驾去目的地：用高德查城市之间的驾车路线，返回公里、开车要多久、过路费，加上按油耗估的油费。
+            大交通选了自驾时用（去程查一次，回程一样就不用再查），可以和酒店、天气一起并行调用。
+            行程里写成 TRANSPORT 项，name 如"自驾 深圳 → 汕头"，cost 填过路费加油费的估算。""")
+    public Map<String, Object> quickDrive(
+            @ToolParam(description = "出发地，城市或具体地址，例如：深圳、深圳坂田") String origin,
+            @ToolParam(description = "目的地，城市或具体地址，例如：汕头") String destination) {
+        turnFlags.mark(com.lifeassistant.core.conversation.TurnFlags.PLANNING);
+        if (!places.available()) {
+            return Map.of("error", "还没有配置高德 Key，查不了自驾路线");
+        }
+        double[] from = places.center(origin.trim()).orElse(null);
+        double[] to = places.center(destination.trim()).orElse(null);
+        if (from == null || to == null) {
+            return Map.of("error", "高德上没找到" + (from == null ? "「" + origin + "」" : "「" + destination + "」") + "，写完整一点再试");
+        }
+        AmapPlaceService.Route route = places.driving(from, to).orElse(null);
+        if (route == null) {
+            return Map.of("error", "高德没查到驾车路线（可能要过海或跨境），换坐高铁、飞机或船");
+        }
+        // 油费按百公里 8 升、每升 8 元粗估
+        int fuel = (int) Math.round(route.km() * 0.08 * 8);
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("km", route.km());
+        out.put("minutes", route.minutes());
+        out.put("tolls", route.tolls() == null ? "高德没给出" : route.tolls());
+        out.put("fuelEstimate", fuel);
+        out.put("note", "时长按不堵车算；油费按百公里 8 升、每升 8 元粗估；跨境（如去香港澳门）要另办车牌和保险，一般不建议自驾");
+        return out;
+    }
+
+    @Tool(description = """
             查两地之间怎么走，同时返回地铁公交方案（坐哪几条线、分钟、每人票价、步行公里）和打车方案（分钟、公里、打车费估算），
             都来自高德。用户问"从 A 到 B 怎么去 / 坐地铁怎么走 / 打车多少钱"时优先用它；跨城的长途没有公交方案。""")
     public Map<String, Object> compareRoutes(

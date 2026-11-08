@@ -22,14 +22,19 @@ public class TurnFlags {
 
     private final Map<String, Turn> turns = new ConcurrentHashMap<>();
 
-    private record Turn(String input, Set<String> flags, long startedAt) {
+    /** 一轮里同一个工具最多调几次、所有工具加起来最多几次，防止模型在几个工具之间来回调停不下来 */
+    public static final int MAX_SAME_TOOL = 6;
+    public static final int MAX_TOOLS = 30;
+
+    private record Turn(String input, Set<String> flags, long startedAt, Map<String, Integer> calls) {
     }
 
     /** 用户发了一条新消息：开始新的一轮，记下这句话。 */
     public void start(String conversationId, String input) {
         long now = System.currentTimeMillis();
         turns.values().removeIf(t -> now - t.startedAt() > TURN_MS);
-        turns.put(conversationId, new Turn(input == null ? "" : input, ConcurrentHashMap.newKeySet(), now));
+        turns.put(conversationId, new Turn(input == null ? "" : input, ConcurrentHashMap.newKeySet(), now,
+                new ConcurrentHashMap<>()));
     }
 
     /** 在当前工具调用所属会话的这一轮打个标记。 */
@@ -56,6 +61,20 @@ public class TurnFlags {
             return false;
         }
         return !(t.input().contains("比价") || t.input().contains("比好价") || t.input().contains("比一下价"));
+    }
+
+    /**
+     * 记一次工具调用，返回这次该不该拦下：同一个工具这一轮已经调了 MAX_SAME_TOOL 次，或所有工具加起来到了 MAX_TOOLS 次。
+     * 不在会话里调用的（没有这一轮的记录）不拦。
+     */
+    public boolean tooMany(String conversationId, String tool) {
+        Turn t = conversationId == null ? null : turns.get(conversationId);
+        if (t == null) {
+            return false;
+        }
+        int same = t.calls().merge(tool, 1, Integer::sum);
+        int total = t.calls().values().stream().mapToInt(Integer::intValue).sum();
+        return same > MAX_SAME_TOOL || total > MAX_TOOLS;
     }
 
     /** 用户这一轮说的话里有没有其中某个词。 */

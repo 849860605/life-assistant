@@ -31,6 +31,8 @@ public class FlightTools {
     private final com.lifeassistant.core.cache.QueryCache queryCache;
     private final FlightBook flightBook;
 
+    /** 算两地距离，判断该不该坐飞机 */
+    private final com.lifeassistant.core.place.AmapPlaceService places;
     /** 这一轮的状态：规划时不做多平台比价 */
     private final com.lifeassistant.core.conversation.TurnFlags turnFlags;
     /** 快速查价用哪家（后台设置） */
@@ -38,7 +40,9 @@ public class FlightTools {
 
     public FlightTools(List<FlightPriceSource> sources, CardHub cards, com.lifeassistant.core.cache.QueryCache queryCache,
                        FlightBook flightBook, com.lifeassistant.skill.travel.trip.QuickPriceSettings quickPrice,
-                       com.lifeassistant.core.conversation.TurnFlags turnFlags) {
+                       com.lifeassistant.core.conversation.TurnFlags turnFlags,
+                       com.lifeassistant.core.place.AmapPlaceService places) {
+        this.places = places;
         this.quickPrice = quickPrice;
         this.turnFlags = turnFlags;
         this.sources = sources;
@@ -103,7 +107,8 @@ public class FlightTools {
      * 规划行程时用的快速查价：只查飞猪（一两秒），不发卡片；挑中的那班写进行程后，后台再去携程、美团补比价。
      */
     @Tool(description = """
-            规划完整行程时查大交通用这个：只查一家平台（后台设置，默认飞猪），一两秒出结果，不出比价卡片。按偏好返回几班（航班号、起降时间、机场、价格），
+            规划完整行程时查大交通用这个：只查一家平台（后台设置，默认飞猪），一两秒出结果，不出比价卡片。
+            出发城市附近有别的机场（深圳附近的香港、广州等）时会一起查，算上去机场的路费后更省的放在 alternatives 里。按偏好返回几班（航班号、起降时间、机场、价格），
             从里面挑一班写进行程（TRANSPORT 项的 name 里带航班号，如"南航 CZ3401 双流T2 → 萧山T3"），价格和链接后端会自动带上，
             其他平台的价格行程生成后后台补。往返就去程、回程各调一次，可以和酒店、天气一起并行调用。
             用户单独问机票价格、或者说要全部比好价时用 compareFlights。""")
@@ -122,6 +127,15 @@ public class FlightTools {
             return Map.of("error", day + " 已经过去了");
         }
         turnFlags.mark(com.lifeassistant.core.conversation.TurnFlags.PLANNING);
+        // 距离近、适合高铁或地铁，用户又没说要坐飞机时不查机票
+        if (!turnFlags.userSaid("飞机", "机票", "航班", "坐飞", "直飞")) {
+            var advice = com.lifeassistant.skill.travel.trip.TransportAdvice.of(places, origin, destination);
+            if (advice != null && !com.lifeassistant.skill.travel.trip.TransportAdvice.FLIGHT.equals(advice.mode())) {
+                return Map.of("skipped", origin + "到" + destination + advice.reason() + "，推荐" + advice.mode()
+                        + "，用户没说要坐飞机：" + (com.lifeassistant.skill.travel.trip.TransportAdvice.TRAIN.equals(advice.mode())
+                        ? "用 quickTrains 查高铁" : "不用查价，按常识写地铁公交或过口岸的路线") + "。");
+            }
+        }
         // 只查后台设置的那一家；它没配置时换一家能用的
         String want = quickPrice.flightPlatform();
         FlightPriceSource fliggy = sources.stream().filter(s -> want.equals(s.platform()) && s.available()).findFirst()
@@ -129,18 +143,59 @@ public class FlightTools {
         if (fliggy == null) {
             return Map.of("error", "机票平台都没有配置，改用 compareFlights 查");
         }
-        FlightPriceSource.Result result;
-        try {
-            result = fliggy.search(origin, destination, day);
-        } catch (RuntimeException e) {
-            result = FlightPriceSource.Result.failed(fliggy.platform(), e.getMessage());
+        // 原出发地和附近能坐飞机的城市（深圳附近的香港、广州等）一起查，比一下哪边更划算
+        List<NearbyAirports.Alt> alts = NearbyAirports.of(origin);
+        FlightPriceSource source = fliggy;
+        Map<String, FlightPriceSource.Result> results = new LinkedHashMap<>();
+        try (java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+            Map<String, Future<FlightPriceSource.Result>> futures = new LinkedHashMap<>();
+            futures.put(origin, executor.submit(() -> source.search(origin, destination, day)));
+            for (NearbyAirports.Alt alt : alts) {
+                futures.put(alt.city(), executor.submit(() -> source.search(alt.city(), destination, day)));
+            }
+            futures.forEach((city, f) -> {
+                try {
+                    results.put(city, f.get(30, TimeUnit.SECONDS));
+                } catch (Exception e) {
+                    results.put(city, FlightPriceSource.Result.failed(source.platform(), e.getMessage()));
+                }
+            });
         }
+        FlightPriceSource.Result result = results.get(origin);
         List<Flight> flights = pick(merge(List.of(result), PAGE_FLIGHTS), preference);
-        if (flights.isEmpty()) {
-            return Map.of("error", fliggy.platform() + "没查到这天的航班" + (result.note() == null ? "" : "（" + result.note() + "）")
-                    + "，改用 compareFlights 查各平台");
+        // 备选出发地：查到航班的都记下（用户选了它，保存行程时能带上价格），算上去机场的路费后明显更省、或原出发地查不到时才给模型看
+        Integer mainLowest = flights.stream().map(Flight::lowest).filter(java.util.Objects::nonNull).min(Integer::compare).orElse(null);
+        List<Map<String, Object>> alternatives = new ArrayList<>();
+        for (NearbyAirports.Alt alt : alts) {
+            List<Flight> altFlights = pick(merge(List.of(results.get(alt.city())), PAGE_FLIGHTS), preference);
+            Integer altLowest = altFlights.stream().map(Flight::lowest).filter(java.util.Objects::nonNull).min(Integer::compare).orElse(null);
+            if (altLowest == null) {
+                continue;
+            }
+            record(alt.city(), destination, day.toString(), altFlights);
+            int total = altLowest + alt.cost();
+            boolean cheaper = mainLowest != null && mainLowest - total >= 200 && mainLowest - total >= mainLowest * 0.1;
+            if (mainLowest == null || cheaper) {
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("from", alt.city());
+                m.put("lowest", altLowest);
+                m.put("transfer", alt.describe(origin));
+                if (cheaper) {
+                    m.put("savePerPerson", mainLowest - total);
+                }
+                m.put("flights", altFlights.stream().limit(3).map(f -> f.flightNo() + " " + f.depTime() + "-" + f.arrTime()
+                        + " " + f.depAirport() + " → " + f.arrAirport() + " ¥" + f.lowest()).toList());
+                alternatives.add(m);
+            }
         }
-        record(origin, destination, day.toString(), flights);
+        if (flights.isEmpty() && alternatives.isEmpty()) {
+            return Map.of("error", fliggy.platform() + "这次没查到" + origin + "到" + destination + "的航班"
+                    + (result.note() == null ? "" : "（" + result.note() + "）")
+                    + "。不要再调机票工具：行程里大交通写成「航班待定」，回答里告诉用户稍后在行程页点「选航班」再查。");
+        }
+        if (!flights.isEmpty()) {
+            record(origin, destination, day.toString(), flights);
+        }
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("date", day.toString());
         out.put("flights", flights.stream().map(f -> {
@@ -155,6 +210,13 @@ public class FlightTools {
             }
             return m;
         }).toList());
+        if (!alternatives.isEmpty()) {
+            out.put("alternatives", alternatives);
+            out.put("alternativesHint", flights.isEmpty()
+                    ? origin + "出发没查到航班，可以从下面的城市出发，写进行程时加上去机场的那段交通，并在回答里说明"
+                    : "从附近城市出发更省（已算上去机场的路费）。行程先按" + origin + "出发排，回答里用一句话告诉用户可以改从哪里出发、"
+                    + "每人省多少、要多花多久，让用户自己选");
+        }
         out.put("note", "价格只来自" + fliggy.platform() + "，是参考价；写进行程后后台会补其他平台的价格");
         return out;
     }

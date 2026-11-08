@@ -62,6 +62,10 @@
       <view class="row block">
         <view class="row-head"><Icon name="plane" :size="16" color="var(--accent)" /><text class="label">大交通</text></view>
         <view class="options">
+          <text v-for="t in TRANSPORTS" :key="t" class="option" :class="{ on: form.transport === t }" @click="!locked && (form.transport = t)">{{ t }}</text>
+        </view>
+        <view v-if="form.transport === SMART && suggest" class="hint">推荐{{ suggest }}：{{ props.data.suggestReason }}</view>
+        <view v-if="mode === '飞机'" class="options sub">
           <text v-for="t in TRANSFERS" :key="t" class="option" :class="{ on: form.transfer === t }" @click="!locked && (form.transfer = t)">{{ t }}</text>
         </view>
       </view>
@@ -106,8 +110,13 @@ const COUNTS: { key: CountKey; unit: string }[] = [
   { key: "elders", unit: " 老人" },
 ];
 const PACES = ["轻松", "适中", "紧凑"];
-/** 能不能接受中转；换城市进出、改高铁这类大改都要先问用户 */
+/** 交通方式："智能推荐"按两地距离选（后端给出推荐和理由），用户也可以自己选 */
+const SMART = "智能推荐";
+const TRANSPORTS = [SMART, "地铁公交", "高铁火车", "飞机", "自驾"];
+/** 坐飞机时能不能接受中转；换城市进出这类大改都要先问用户 */
 const TRANSFERS = ["尽量直飞", "中转也行", "只要直飞"];
+/** 后端按距离给的推荐（地铁公交 / 高铁火车 / 飞机），没有出发地或目的地时为空 */
+const suggest: string = props.data.suggestTransport || "";
 
 const submitted = ref(false);
 /** 提交过或过期后，用户点了"修改需求"，正在改 */
@@ -125,9 +134,12 @@ const form = reactive({
   interests: [...(props.data.interests || [])] as string[],
   pace: props.data.pace || "适中",
   transfer: TRANSFERS.includes(props.data.transfer) ? props.data.transfer : "尽量直飞",
+  transport: TRANSPORTS.includes(props.data.transport) ? props.data.transport : SMART,
   visited: [...(props.data.visited || [])] as string[],
 });
 const visitedInput = ref("");
+/** 实际按哪种交通规划：智能推荐时取推荐的那种 */
+const mode = computed(() => (form.transport === SMART ? suggest : form.transport));
 /** 用户只说了玩几天、没说日期时的天数 */
 const days = props.data.days || 0;
 
@@ -186,7 +198,9 @@ function fields(): Record<string, string> {
   if (form.budget) out["预算"] = `每人 ${form.budget} 元`;
   if (form.interests.length) out["偏好"] = form.interests.join("、");
   out["节奏"] = form.pace;
-  out["大交通"] = `${form.transfer}（要中转、换城市进出先给我选）`;
+  if (form.transport === SMART) out["大交通"] = suggest ? `智能推荐：${suggest}` : "智能推荐（按距离选）";
+  else out["大交通"] = form.transport;
+  if (mode.value === "飞机") out["大交通"] += `，${form.transfer}（要中转、换城市进出先给我选）`;
   if (form.visited.length) out["去过"] = `${form.visited.join("、")}（不要再安排）`;
   return out;
 }
@@ -259,4 +273,6 @@ function startEdit() {
 .skip { text-align: center; font-size: 14px; }
 .done { display: flex; justify-content: center; gap: 12px; font-size: 13px; padding: 12px; }
 .redo { cursor: pointer; }
+.hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+.options.sub { margin-top: 8px; }
 </style>

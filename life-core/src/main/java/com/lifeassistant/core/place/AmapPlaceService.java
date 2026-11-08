@@ -81,8 +81,8 @@ public class AmapPlaceService {
                         Integer distance, List<String> tags) {
     }
 
-    /** 一段驾车路线：分钟、公里、打车费估算（元，可能为空）、沿途坐标（经度,纬度）。 */
-    public record Route(int minutes, double km, Integer taxi, List<double[]> path) {
+    /** 一段驾车路线：分钟、公里、打车费估算（元，可能为空）、沿途坐标（经度,纬度）、过路费（元，可能为空）。 */
+    public record Route(int minutes, double km, Integer taxi, List<double[]> path, Integer tolls) {
     }
 
     private record Cached(long at, Object value) {
@@ -201,9 +201,10 @@ public class AmapPlaceService {
             }
             // 打车费只在 extensions=all 时返回
             Double taxi = number(body, "taxi_cost");
+            Double tolls = number(path, "tolls");
             return new Route((int) Math.round(path.path("duration").asDouble() / 60),
                     Math.round(path.path("distance").asDouble() / 100) / 10.0,
-                    taxi == null ? null : (int) Math.round(taxi), points);
+                    taxi == null ? null : (int) Math.round(taxi), points, tolls == null ? null : (int) Math.round(tolls));
         });
         return Optional.ofNullable(route);
     }

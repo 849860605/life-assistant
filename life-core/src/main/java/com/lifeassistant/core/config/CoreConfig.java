@@ -52,7 +52,8 @@ public class CoreConfig {
     @Bean
     public ToolCallingManager toolCallingManager(ObjectProvider<ToolCallbackResolver> toolCallbackResolver,
                                                  CallRecorder callRecorder, CardHub cardHub,
-                                                 ObjectProvider<ChatMemory> chatMemory) {
+                                                 ObjectProvider<ChatMemory> chatMemory,
+                                                 com.lifeassistant.core.conversation.TurnFlags turnFlags) {
         return new ParallelToolCallingManager(
                 toolCallbackResolver.getIfAvailable(() -> new DelegatingToolCallbackResolver(List.of())), callRecorder,
                 conversationId -> {
@@ -62,7 +63,7 @@ public class CoreConfig {
                                 added.stream().<Message>map(UserMessage::new).toList());
                     }
                     return added;
-                });
+                }, turnFlags::tooMany);
     }
 
     /**

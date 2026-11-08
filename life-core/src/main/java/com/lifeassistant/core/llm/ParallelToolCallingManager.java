@@ -42,6 +42,8 @@ public class ParallelToolCallingManager implements ToolCallingManager {
 
     private final ToolCallbackResolver toolCallbackResolver;
     private final ToolExecutionExceptionProcessor exceptionProcessor;
+    /** 这一轮工具调用太多时拦下 */
+    private final java.util.function.BiPredicate<String, String> limiter;
     /** 工具定义的解析逻辑不变，直接交给默认实现 */
     private final DefaultToolCallingManager definitions;
     private final CallRecorder recorder;
@@ -54,6 +56,14 @@ public class ParallelToolCallingManager implements ToolCallingManager {
 
     public ParallelToolCallingManager(ToolCallbackResolver toolCallbackResolver, CallRecorder recorder,
                                       Function<String, List<String>> interjections) {
+        this(toolCallbackResolver, recorder, interjections, (conversationId, tool) -> false);
+    }
+
+    /** limiter(会话 id, 工具名) 返回 true 时这次调用不执行，直接告诉模型停下（防止在几个工具之间来回调停不下来）。 */
+    public ParallelToolCallingManager(ToolCallbackResolver toolCallbackResolver, CallRecorder recorder,
+                                      Function<String, List<String>> interjections,
+                                      java.util.function.BiPredicate<String, String> limiter) {
+        this.limiter = limiter;
         this.toolCallbackResolver = toolCallbackResolver;
         this.recorder = recorder;
         this.interjections = interjections;
@@ -141,8 +151,11 @@ public class ParallelToolCallingManager implements ToolCallingManager {
      * 执行期间设置调用归属，工具内部的平台调用记录会带上用户和会话；结束后记一条工具调用日志。
      */
     private String invoke(ToolCallback callback, AssistantMessage.ToolCall call, ToolContext toolContext) {
-        String arguments = StringUtils.hasText(call.arguments()) ? call.arguments() : "{}";
+        String arguments = repairJson(StringUtils.hasText(call.arguments()) ? call.arguments() : "{}");
         CallRecorder.Scope scope = scope(toolContext);
+        if (limiter.test(scope.conversationId(), call.name())) {
+            return "{\"error\":\"这一轮工具已经调了太多次，不要再调用任何工具：用已经拿到的结果直接回答，查不到的如实告诉用户\"}";
+        }
         long start = System.nanoTime();
         String result = null;
         String error = null;
@@ -155,12 +168,45 @@ public class ParallelToolCallingManager implements ToolCallingManager {
             return result;
         } catch (RuntimeException e) {
             error = e.getMessage();
+            if (badArguments(e)) {
+                // 模型给的参数不是合法 JSON：告诉它改好再调，不让整轮对话失败
+                result = "{\"error\":\"参数不是合法的 JSON（" + jsonSafe(e.getMessage()) + "），检查后重新调用；没有值的参数直接省略，不要留空\"}";
+                return result;
+            }
             throw e;
         } finally {
             boolean success = error == null && (result == null || !result.startsWith("{\"error\""));
             recorder.tool(scope, call.name(), arguments, result, (System.nanoTime() - start) / 1_000_000, success,
                     error);
         }
+    }
+
+    private static final com.fasterxml.jackson.databind.ObjectMapper JSON = new com.fasterxml.jackson.databind.ObjectMapper();
+
+    /** 修掉模型常见的坏 JSON：键后面没写值（"a": , 或 "a": }），补成 null。本来就是合法 JSON 的原样返回。 */
+    static String repairJson(String json) {
+        try {
+            JSON.readTree(json);
+            return json;
+        } catch (Exception e) {
+            return json.replaceAll(":\\s*(?=[,}\\]])", ": null");
+        }
+    }
+
+    /** 异常是不是参数 JSON 解析失败（Spring AI 把它包成运行时异常）。 */
+    private static boolean badArguments(Throwable e) {
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t instanceof com.fasterxml.jackson.core.JsonProcessingException
+                    || t.getMessage() != null && t.getMessage().startsWith("Conversion from JSON")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String jsonSafe(String s) {
+        String text = s == null ? "" : s.length() > 120 ? s.substring(0, 120) : s;
+        return text.replace("\\", " ").replace("\"", "'").replace("\n", " ");
     }
 
     /** 从 ToolContext 取调用归属；取不到的字段为空。 */

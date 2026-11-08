@@ -38,12 +38,14 @@ public class TravelSkill implements LifeSkill {
     private final FlightTools flightTools;
     private final FoodTools foodTools;
     private final RouteTools routeTools;
+    private final com.lifeassistant.skill.travel.train.TrainTools trainTools;
     private final McpServerRegistry mcpServers;
 
     public TravelSkill(WeatherTools weatherTools, HikingTools hikingTools, TripTools tripTools,
                        TripEditTools tripEditTools, ScheduleTools scheduleTools, HotelLinkTools hotelLinkTools, WebSearchTools webSearchTools,
                        HotelPriceTools hotelPriceTools, FlightTools flightTools, FoodTools foodTools, RouteTools routeTools,
-                       McpServerRegistry mcpServers) {
+                       com.lifeassistant.skill.travel.train.TrainTools trainTools, McpServerRegistry mcpServers) {
+        this.trainTools = trainTools;
         this.weatherTools = weatherTools;
         this.hikingTools = hikingTools;
         this.tripTools = tripTools;
@@ -121,8 +123,14 @@ public class TravelSkill implements LifeSkill {
                 4. 爬山：用 estimateHikingTime 算用时，用 latestStartTime 算最晚出发时间，用 summitTemperature 估山顶温度，
                    最后必须调用 assessHikingRisk，风险结论以它为准。HIGH 时明确建议改期或换路线。
                 查价分轻重，别每次都把所有平台查一遍：
+                - 大交通按用户选的方式只查那一种（需求里写的"大交通"，或用户在对话里说的）：
+                  飞机用 quickFlights，高铁火车用 quickTrains，自驾用 quickDrive，地铁公交不查价、按常识写路线
+                  （深圳去香港写清从哪个口岸过关、坐哪条港铁线）。选的是"智能推荐"或没说时，按需求里给的推荐；
+                  也没有推荐时按距离：60 公里内地铁公交，60～800 公里高铁，更远或没有高铁坐飞机。
+                  深圳、广州、东莞这些地方去香港澳门不要查机票。只查定下来的那一种，不要机票高铁都查一遍。
+                  高铁写进行程时 TRANSPORT 项的 name 要带车次号，例如"高铁 G934 深圳北 → 长沙南"。
                 - 完整规划（展开成行程、加一段新目的地、改了日期或城市）时只用快速查价：住宿用 quickHotels（每个城市或片区一次），
-                  大交通用 quickFlights（去程、回程各一次），和天气、路线一起并行调用，几秒出结果、不出比价卡片。
+                  大交通用上面选定的那一个工具（去程、回程各一次），和天气一起并行调用，几秒出结果、不出比价卡片。
                   从结果里各挑一家、一班写进行程，价格和链接后端自动带上，其他平台的价格行程生成后后台补，不用等。
                   这时不要调用 findAndCompareHotels / compareFlights，也不要在回答里列各平台价格。
                 - 用户单独问价（"某天去北京的机票多少钱""春熙路附近的酒店"）、要换酒店或航班、嫌贵要便宜点的、
@@ -191,7 +199,7 @@ public class TravelSkill implements LifeSkill {
     @Override
     public List<Object> tools() {
         return List.of(weatherTools, hikingTools, tripTools, tripEditTools, scheduleTools, hotelLinkTools, hotelPriceTools,
-                flightTools, foodTools, webSearchTools, routeTools);
+                flightTools, foodTools, webSearchTools, routeTools, trainTools);
     }
 
     /** MCP 工具：高德地图和 RollingGo 酒店（都是用到才连，出错自动重连）；没配置的返回空。 */

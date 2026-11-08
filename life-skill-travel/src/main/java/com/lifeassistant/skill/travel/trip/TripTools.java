@@ -47,6 +47,7 @@ public class TripTools {
     private final ObjectMapper objectMapper;
     private final TripPriceCheck priceCheck;
     private final com.lifeassistant.core.conversation.TurnFlags turnFlags;
+    private final com.lifeassistant.core.place.AmapPlaceService places;
 
     /** 模型填的一项安排。 */
     public record PlanItem(
@@ -141,9 +142,23 @@ public class TripTools {
         return Map.of("card", "三套方案已作为卡片展示给用户。这一轮到此为止：用一两句说三套的区别和你推荐哪套，请用户选，不要开始完整规划。");
     }
 
+    /** 模型预填的交通方式，用户这轮话里确实提到了才算数；没提就留空，卡片上按距离智能推荐。 */
+    private boolean userChose(String transport) {
+        if (transport == null || transport.isBlank()) {
+            return false;
+        }
+        return switch (transport) {
+            case "地铁公交" -> turnFlags.userSaid("地铁", "公交", "口岸", "港铁");
+            case "高铁火车" -> turnFlags.userSaid("高铁", "火车", "动车");
+            case "飞机" -> turnFlags.userSaid("飞机", "机票", "航班", "坐飞");
+            case "自驾" -> turnFlags.userSaid("自驾", "开车");
+            default -> false;
+        };
+    }
+
     /** 发需求卡，把已知的信息预先填上，等用户确认或补充后再规划。 */
     @Tool(description = """
-            给用户弹一张需求卡（目的地、日期、出发地、同行人、预算、偏好、去过的地方、节奏），用户在卡片上确认或修改后提交。
+            给用户弹一张需求卡（目的地、日期、出发地、同行人、预算、偏好、去过的地方、交通方式、节奏），用户在卡片上确认或修改后提交。
             完整规划行程前、关键信息不全时调用，已知的信息都预先填上。调用后这一轮就结束，等用户提交。""")
     public Map<String, Object> askTripRequirements(
             @ToolParam(description = "目的地", required = false) String destination,
@@ -158,7 +173,8 @@ public class TripTools {
             @ToolParam(description = "已知的旅行偏好，例如：自然风光、美食体验", required = false) List<String> interests,
             @ToolParam(description = "已经去过、不想再去的地方", required = false) List<String> visited,
             @ToolParam(description = "节奏：轻松 / 适中 / 紧凑", required = false) String pace,
-            @ToolParam(description = "大交通：尽量直飞 / 中转也行 / 只要直飞，用户说过才填", required = false) String transfer) {
+            @ToolParam(description = "交通方式：地铁公交 / 高铁火车 / 飞机 / 自驾，用户说过才填，没说留空（卡片上按距离智能推荐）", required = false) String transport,
+            @ToolParam(description = "坐飞机时：尽量直飞 / 中转也行 / 只要直飞，用户说过才填", required = false) String transfer) {
         if (turnFlags.userSaid("直接", "跳过", "不用确认")) {
             return Map.of("skipped", "用户要直接出行程，不弹需求卡：缺的信息按常识和记忆补，直接查价并调用 saveTripPlan 展开成完整行程。");
         }
@@ -176,6 +192,12 @@ public class TripTools {
         data.put("visited", visited == null ? List.of() : visited);
         data.put("pace", pace);
         data.put("transfer", transfer);
+        data.put("transport", userChose(transport) ? transport : null);
+        TransportAdvice advice = TransportAdvice.of(places, origin, destination);
+        if (advice != null) {
+            data.put("suggestTransport", advice.mode());
+            data.put("suggestReason", advice.reason());
+        }
         data.put("interestOptions", INTERESTS);
         if (!cards.emit("requirement", data, "需求卡：" + (destination == null ? "目的地待填" : destination) + "，等用户确认")) {
             return Map.of("error", "当前界面不能显示需求卡，改成用文字一次问清缺的信息");
@@ -191,7 +213,7 @@ public class TripTools {
             整份重新生成已保存的行程时传 tripId，会生成新版本；只改其中几项、某一天、加减天时不要用它，
             用 replaceTripItems、removeTripItems、addTripItems、reorderTripDay、swapTripDays、rewriteTripDays、changeTripHotel。
             days 写完整的逐日安排；过夜行程在 stays 里写住哪家酒店（用 quickHotels 或比价结果里的酒店名，
-            价格和链接后端会自动带上）；坐飞机写成 TRANSPORT 项、name 带航班号（价格和链接按 quickFlights 结果自动带上）；注意事项、装备清单、天气提醒写进 tips（Markdown）。
+            价格和链接后端会自动带上）；坐飞机写成 TRANSPORT 项、name 带航班号（价格和链接按 quickFlights 结果自动带上），坐高铁火车 name 带车次号（按 quickTrains 结果自动带上）；注意事项、装备清单、天气提醒写进 tips（Markdown）。
             返回 error 时按 problems 改好再调用一次。""")
     public Map<String, Object> saveTripPlan(
             @ToolParam(description = "已有行程的 id；新行程不填", required = false) Long tripId,
