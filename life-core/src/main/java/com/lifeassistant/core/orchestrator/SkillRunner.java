@@ -42,17 +42,19 @@ public class SkillRunner {
     private final ChatMemory chatMemory;
     private final MemoryService memoryService;
     private final MemoryTools memoryTools;
+    private final com.lifeassistant.core.member.AccountTools accountTools;
     private final UserService userService;
     private final UsageRecorder usageRecorder;
     private final LlmConfigService llmConfig;
 
     public SkillRunner(ChatModelRegistry chatModels, ChatMemory chatMemory, MemoryService memoryService,
-                       MemoryTools memoryTools, UserService userService, UsageRecorder usageRecorder,
-                       LlmConfigService llmConfig) {
+                       MemoryTools memoryTools, com.lifeassistant.core.member.AccountTools accountTools,
+                       UserService userService, UsageRecorder usageRecorder, LlmConfigService llmConfig) {
         this.chatModels = chatModels;
         this.chatMemory = chatMemory;
         this.memoryService = memoryService;
         this.memoryTools = memoryTools;
+        this.accountTools = accountTools;
         this.userService = userService;
         this.usageRecorder = usageRecorder;
         this.llmConfig = llmConfig;
@@ -65,7 +67,7 @@ public class SkillRunner {
 
     /**
      * 按场景执行：分了场景的技能只带选中场景的提示词和工具（scenes 为空时全部带上）。
-     * 记忆工具总是带着。
+     * 记忆工具和查积分的工具总是带着（用户在哪个话题里都可能问"我还有多少积分"）。
      */
     public Flux<ChatResponse> stream(LifeSkill skill, UserCtx ctx, String conversationId, String input, Set<String> scenes) {
         ModelSpec model = chatModels.resolve(modelFor(skill, ctx));
@@ -76,7 +78,7 @@ public class SkillRunner {
                 callbacks.add(c);
             }
         }
-        callbacks.addAll(List.of(MethodToolCallbackProvider.builder().toolObjects(memoryTools).build().getToolCallbacks()));
+        callbacks.addAll(List.of(MethodToolCallbackProvider.builder().toolObjects(memoryTools, accountTools).build().getToolCallbacks()));
         callbacks.addAll(scenes == null || scenes.isEmpty() ? skill.toolCallbacks() : skill.toolCallbacks(scenes));
         AtomicReference<ChatResponse> last = new AtomicReference<>();
 
@@ -167,6 +169,8 @@ public class SkillRunner {
                   先简短说清这是什么文件、关键信息有哪些，再问要怎么处理。
                 - 用户认可你上一轮的方案（"可以""记录一下""保存"）时，用对应的工具把方案落下来（行程、日程），不要只记成记忆。
                 - 涉及户外安全（雷暴、大风、天黑前下不了山）时，结论以工具和规则计算的结果为准。
+                - 用户问自己的积分（还剩多少、花在哪、为什么扣、各项多少积分、怎么买、会员到期）时调用 myCredits，按返回的数字回答，
+                  不要说你看不到账户信息，也不要自己估算。退款、发票、充错了这类要人工处理的，如实说对话里办不了、需要联系星络团队，不要编造联系方式或承诺结果。
 
                 %s""".formatted(now, user.getTimezone(), relativeDates(current.toLocalDate()), user.getNickname(),
                 memoryService.promptSnippet(ctx),

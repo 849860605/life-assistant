@@ -89,6 +89,9 @@
                       <text class="amap" @click.stop="openUrl(amapUrl(item, city))"><Icon name="pin" :size="12" color="var(--accent)" /> 高德地图</text>
                       <text class="amap" @click.stop="openUrl(amapNavUrl(item, city))"><Icon name="nav" :size="12" color="var(--accent)" /> 导航</text>
                     </view>
+                    <view v-if="transportNav(item)" class="amap-links">
+                      <text class="amap" @click.stop="openUrl(transportNav(item)!.url)"><Icon name="nav" :size="12" color="var(--accent)" /> {{ transportNav(item)!.label }}</text>
+                    </view>
                   </view>
                   <view v-if="isCurrent" class="tl-more" @click="more(item)"><Icon name="more" :size="16" color="var(--muted)" /></view>
                 </view>
@@ -299,6 +302,9 @@
                 <view v-if="EDITABLE.includes(item.type)" class="amap-links">
                   <text class="amap" @click.stop="openUrl(amapUrl(item, city))"><Icon name="pin" :size="12" color="var(--accent)" /> 高德地图</text>
                   <text class="amap" @click.stop="openUrl(amapNavUrl(item, city))"><Icon name="nav" :size="12" color="var(--accent)" /> 导航</text>
+                </view>
+                <view v-if="transportNav(item)" class="amap-links">
+                  <text class="amap" @click.stop="openUrl(transportNav(item)!.url)"><Icon name="nav" :size="12" color="var(--accent)" /> {{ transportNav(item)!.label }}</text>
                 </view>
               </view>
               <view v-if="isCurrent" class="stop-more" @click="more(item)"><Icon name="more" :size="16" color="var(--muted)" /></view>
@@ -974,6 +980,50 @@ function more(item: ItineraryItem) {
     }
   })], ["调整这一天的顺序", edit]);
   uni.showActionSheet({ itemList: acts.map((a) => a[0]), success: (res) => acts[res.tapIndex]?.[1]() });
+}
+
+/**
+ * 机场、车站这类交通项在高德上的位置：行程里只存了名字，按名字在全国范围查一次（限定目的地城市反而会把
+ * "宝安国际机场"查成哈尔滨的机场），查到的名字要包含原名的主干才算。查不到为 null。
+ */
+const transportGeo = reactive<Record<string, { lng: number; lat: number } | null>>({});
+const PLACE_LIKE = /机场|航站楼|火车站|高铁站|[东西南北]站|站$|码头|客运站|港/;
+
+async function locateTransport(name: string) {
+  if (name in transportGeo) return;
+  transportGeo[name] = null;
+  const core = name.replace(/T\d|航站楼|[（(].*?[）)]|\s/g, "");
+  try {
+    const found = await api.places({ keyword: name, size: 3 });
+    const hit = found.find((p) => p.lng != null && p.lat != null && p.name.replace(/\s/g, "").includes(core));
+    if (hit) transportGeo[name] = { lng: hit.lng!, lat: hit.lat! };
+  } catch {
+    // 查不到就不显示导航
+  }
+}
+
+watch(
+  () => (day.value?.items || []).filter((x) => x.type === "TRANSPORT" && x.lng == null && PLACE_LIKE.test(x.name)).map((x) => x.name),
+  (names) => names.forEach(locateTransport),
+  { immediate: true },
+);
+
+/**
+ * 交通项的导航：出发的（去机场、车站）从当前位置导航到这里；落地的（抵达、到达）人已经在机场了，
+ * 导航去当天下一站（一般是酒店）。没有地点的（"乘坐 G123"）、查不到位置的不给。
+ */
+function transportNav(item: ItineraryItem): { label: string; url: string } | null {
+  if (item.type !== "TRANSPORT" || !isCurrent.value) return null;
+  if (/抵达|到达|落地/.test(`${item.name} ${item.note || ""}`)) {
+    const items = day.value?.items || [];
+    const next = items.slice(items.findIndex((x) => x.id === item.id) + 1).find((x) => x.type !== "TRANSPORT");
+    if (!next || next.lng == null) return null;
+    return { label: next.type === "HOTEL" ? "导航去酒店" : "导航去下一站", url: amapNavUrl(next, city.value) };
+  }
+  const geo = item.lng != null && item.lat != null ? { lng: item.lng, lat: item.lat } : transportGeo[item.name];
+  if (!geo) return null;
+  const label = /机场|航站楼/.test(item.name) ? "导航去机场" : /站/.test(item.name) ? "导航去车站" : "导航去这里";
+  return { label, url: amapNavUrl({ name: item.name, ...geo }) };
 }
 
 /** 正在看详情的景点（按 id 找，保留、预约后跟着变） */

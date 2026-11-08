@@ -33,12 +33,13 @@ public class GeneralSkill implements LifeSkill {
     @Override
     public String description() {
         return "闲聊和问候；记住或忘掉关于用户的信息（偏好、忌口、家人、伤病、体能）；单纯问天气（不涉及出行安排）；"
-                + "常识、汇率、换算等其他问题";
+                + "问自己的积分、价格、怎么买积分、会员；常识、汇率、换算等其他问题";
     }
 
     @Override
     public List<String> routingExamples() {
-        return List.of("你好", "我不吃辣，记一下", "你记得我哪些信息", "我膝盖不太好", "明天深圳会下雨吗", "你能做什么");
+        return List.of("你好", "我不吃辣，记一下", "你记得我哪些信息", "我膝盖不太好", "明天深圳会下雨吗", "你能做什么", "我还有多少积分",
+                "积分怎么扣的", "怎么充值");
     }
 
     @Override
@@ -47,6 +48,9 @@ public class GeneralSkill implements LifeSkill {
                 你现在负责通用对话。用户告诉你关于自己的长期信息时，调用 rememberFact 记下来；
                 用户说某条信息不对或让你忘掉时，调用 forgetFact。
                 问天气用 dailyWeather 或 hourlyWeather 查，不要凭印象回答；需要最新信息时可以用 searchGuides 搜。
+                用户问积分、价格、怎么买积分时用 myCredits 查，照返回的数字说，只答用户问的那部分：
+                问余额就说可用多少、今天赠送的还剩多少，两三句话；可用积分不够规划一次行程（少于规划的价格）时顺带一句怎么买；
+                问价格才列价格，问扣费才说最近的记录。不要每次都把价格表、积分包全列出来。
                 用户问你能做什么时，简单介绍：出游规划（含酒店和机票比价）、找餐厅（大众点评和携程的评分、人均）、日程提醒、记住个人信息。
                 不要编造价格、营业时间这类需要实时数据的内容。""";
     }

@@ -3,7 +3,7 @@
   <view class="page">
     <view class="intro">
       <view class="title">去哪儿玩</view>
-      <view class="sub">挑一个目的地：看看当地的景点美食，或者让 AI 帮你规划</view>
+      <view class="sub">点卡片看当地的景点美食，或者让 AI 帮你规划行程</view>
     </view>
     <view class="grid">
       <view v-for="c in CITIES" :key="c" class="dest" @click="open(c)">
@@ -14,9 +14,9 @@
         <view class="text">
           <view class="name">{{ c }}</view>
           <view class="tagline">{{ info[c]?.spots || "加载中…" }}</view>
+          <!-- 点整张卡片就是看这个城市，这里只放规划 -->
           <view class="dest-actions">
-            <text class="dest-btn" @click.stop="useCity(c)">看{{ c }}</text>
-            <text class="dest-btn solid" @click.stop="ask(`帮我规划去${c}玩3天`)">规划行程</text>
+            <text class="dest-btn solid" @click.stop="ask(`帮我规划去${c}玩3天`)">规划行程 ›</text>
           </view>
         </view>
       </view>
@@ -92,7 +92,8 @@ function ask(q: string) {
 .img.blank { background: linear-gradient(135deg, #93c5fd, #2563eb); }
 .here { position: absolute; top: 10px; left: 10px; font-size: 11px; padding: 2px 8px; border-radius: 999px; background: rgba(255, 255, 255, 0.9); color: var(--accent); font-weight: 600; }
 .dest-actions { display: flex; gap: 6px; margin-top: 8px; }
-.dest-btn { font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid rgba(255, 255, 255, 0.8); cursor: pointer; }
+/* 微信里字号会被调大，按钮不许折行 */
+.dest-btn { flex-shrink: 0; white-space: nowrap; font-size: 12px; line-height: 1.4; padding: 5px 12px; border-radius: 999px; border: 1px solid rgba(255, 255, 255, 0.8); cursor: pointer; }
 .dest-btn.solid { background: var(--accent); border-color: var(--accent); }
 .section { font-size: 16px; font-weight: 700; margin: 20px 2px 10px; }
 .ideas { background: var(--surface); border-radius: 16px; border: 1px solid var(--line); }
