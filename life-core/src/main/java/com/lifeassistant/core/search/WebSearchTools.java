@@ -22,6 +22,8 @@ public class WebSearchTools {
     private static final String XIAOHONGSHU = "xiaohongshu.com";
     /** 摘要截断长度，控制喂给模型的 Token */
     private static final int MAX_SUMMARY = 500;
+    /** 一轮对话里最多搜几次（每次会查两路） */
+    static final int MAX_PER_TURN = 4;
 
     private final WebSearchProvider searchProvider;
     private final com.lifeassistant.core.conversation.TurnFlags turnFlags;
@@ -38,7 +40,10 @@ public class WebSearchTools {
             return Map.of("skipped", "规划完整行程时先不搜攻略，按常识把行程写出来；用户问到玩法、避坑时再搜。");
         }
         if (!searchProvider.available()) {
-            return Map.of("error", "联网搜索没有配置，告诉用户在 .env 里填 BOCHA_API_KEY");
+            return Map.of("error", "联网搜索暂时不可用");
+        }
+        if (turnFlags.bump("searchGuides") > MAX_PER_TURN) {
+            return Map.of("error", "本轮搜索次数已用完，用已经搜到的内容回答，不要再搜");
         }
         boolean recent = Boolean.TRUE.equals(recentOnly);
         Map<String, Object> result = new LinkedHashMap<>();
@@ -61,7 +66,7 @@ public class WebSearchTools {
                             "summary", truncate(r.summary().isBlank() ? r.snippet() : r.summary())))
                     .toList();
         } catch (BizException e) {
-            return "搜索失败：" + e.getMessage();
+            return "这一路搜索暂时失败";
         }
     }
 

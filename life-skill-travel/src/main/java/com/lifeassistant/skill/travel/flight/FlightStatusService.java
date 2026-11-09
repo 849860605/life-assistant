@@ -59,7 +59,20 @@ public class FlightStatusService {
 
     /** 当前用户查一个航班某天的动态。 */
     public Result query(long userId, String flightNo, LocalDate date) {
-        String no = flightNo == null ? "" : flightNo.replaceAll("\\s+", "").toUpperCase();
+        return query(userId, flightNo, date, true);
+    }
+
+    /** 航班号规范化：去掉空白、转大写。 */
+    public static String normalize(String flightNo) {
+        return flightNo == null ? "" : flightNo.replaceAll("\\s+", "").toUpperCase();
+    }
+
+    /**
+     * 同上；allowCharge 为 false 时只看缓存，缓存里没有就返回空、不扣积分也不调接口
+     * （对话里航班号不是用户亲口说的，先让用户确认）。
+     */
+    public Result query(long userId, String flightNo, LocalDate date, boolean allowCharge) {
+        String no = normalize(flightNo);
         if (!FLIGHT_NO.matcher(no).matches()) {
             throw new BizException(ErrorCode.BAD_REQUEST, "航班号不对，例如 CZ3101");
         }
@@ -73,6 +86,9 @@ public class FlightStatusService {
         FlightStatus cached = read(key);
         if (cached != null) {
             return new Result(cached, true, 0);
+        }
+        if (!allowCharge) {
+            return null;
         }
         CreditService.Charge charge = credits.spend(userId, CreditService.FLIGHT, no + " " + date, false);
         FlightStatus status;

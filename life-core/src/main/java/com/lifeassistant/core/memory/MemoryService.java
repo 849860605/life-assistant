@@ -83,9 +83,22 @@ public class MemoryService {
                 .eq(MemoryItem::getMemKey, key));
     }
 
+    /** 这个用户现在有多少条记忆（AI 写新记忆前检查上限用）。 */
+    public long count(UserCtx ctx) {
+        return memoryMapper.selectCount(new LambdaQueryWrapper<MemoryItem>().eq(MemoryItem::getUserId, ctx.userId()));
+    }
+
+    /** 同一用户下这个 category + key 是不是已经有记忆（有就是覆盖，不占新名额）。 */
+    public boolean exists(UserCtx ctx, MemoryCategory category, String key) {
+        return memoryMapper.selectCount(new LambdaQueryWrapper<MemoryItem>()
+                .eq(MemoryItem::getUserId, ctx.userId())
+                .eq(MemoryItem::getCategory, category.name())
+                .eq(MemoryItem::getMemKey, key)) > 0;
+    }
+
     /**
      * 拼进 system prompt 的记忆片段：只包含未过期的非敏感记忆。
-     * 敏感记忆需要时由具体技能按需读取。
+     * 敏感记忆需要时由具体技能按需读取。内容去掉换行和附件、代码的分隔符，AI 推断的标上"推测"。
      */
     public String promptSnippet(UserCtx ctx) {
         OffsetDateTime now = OffsetDateTime.now();
@@ -98,7 +111,21 @@ public class MemoryService {
             return "（暂无）";
         }
         return items.stream()
-                .map(m -> "- [%s/%s] %s".formatted(m.getCategory(), m.getMemKey(), m.getContent()))
+                .map(m -> "- [%s/%s] %s%s".formatted(m.getCategory(), sanitize(m.getMemKey(), 64),
+                        sanitize(m.getContent(), PROMPT_MAX),
+                        MemorySource.AI_INFERRED.name().equals(m.getSource()) ? "（推测，未经用户确认）" : ""))
                 .collect(Collectors.joining("\n"));
+    }
+
+    /** 拼进提示词时每条记忆最多多少字 */
+    static final int PROMPT_MAX = 200;
+
+    /** 记忆内容放进提示词前清理：换行、〔〕和反引号换成空格或去掉，超长截断，避免伪造附件块、代码块或另起一段"指令"。 */
+    static String sanitize(String text, int max) {
+        if (text == null) {
+            return "";
+        }
+        String s = text.replaceAll("[\\r\\n\\u2028\\u2029]+", " ").replaceAll("[〔〕`]", "").strip();
+        return s.length() > max ? s.substring(0, max) + "…" : s;
     }
 }

@@ -3,6 +3,7 @@ package com.lifeassistant.core.llm;
 import com.lifeassistant.common.auth.UserCtx;
 import com.lifeassistant.core.audit.CallRecorder;
 import com.lifeassistant.core.auth.ToolContexts;
+import com.lifeassistant.core.conversation.TurnFlags;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
@@ -39,6 +40,9 @@ import java.util.function.Function;
  * 工具都是无状态的，身份通过 ToolContext 传递，并行执行是安全的。每次调用的参数、耗时和成败写入调用日志。
  */
 public class ParallelToolCallingManager implements ToolCallingManager {
+
+    /** 用户在回答过程中补充的话，拼进对话时的开头 */
+    public static final String INTERJECTION = "（你处理的过程中，用户补充了）";
 
     private final ToolCallbackResolver toolCallbackResolver;
     private final ToolExecutionExceptionProcessor exceptionProcessor;
@@ -107,6 +111,12 @@ public class ParallelToolCallingManager implements ToolCallingManager {
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new IllegalStateException("工具调用被中断", e);
+            } catch (java.util.concurrent.ExecutionException e) {
+                // 业务异常（比如工具调用次数到了硬上限）原样抛出，让用户看到能看懂的提示
+                if (e.getCause() instanceof com.lifeassistant.common.error.BizException biz) {
+                    throw biz;
+                }
+                throw new IllegalStateException("工具调用失败", e);
             } catch (Exception e) {
                 throw new IllegalStateException("工具调用失败", e);
             }
@@ -126,7 +136,7 @@ public class ParallelToolCallingManager implements ToolCallingManager {
         CallRecorder.Scope scope = scope(toolContext);
         List<String> added = scope == null ? List.of() : interjections.apply(scope.conversationId());
         if (!added.isEmpty()) {
-            history.add(new UserMessage("（你处理的过程中，用户补充了）" + String.join("\n", added)
+            history.add(new UserMessage(INTERJECTION + String.join("\n", added)
                     + "\n请把补充考虑进去：小改动（加个地方、换个档次）就接着做，已经查到的结果还能用的继续用，只补查新的；"
                     + "改了目的地、日期这类大前提，就别再按原来的做，按新需求重新安排。回答里用一句话说明按补充改了什么。"));
             returnDirect = false;
@@ -154,7 +164,7 @@ public class ParallelToolCallingManager implements ToolCallingManager {
         String arguments = repairJson(StringUtils.hasText(call.arguments()) ? call.arguments() : "{}");
         CallRecorder.Scope scope = scope(toolContext);
         if (limiter.test(scope.conversationId(), call.name())) {
-            return "{\"error\":\"这一轮工具已经调了太多次，不要再调用任何工具：用已经拿到的结果直接回答，查不到的如实告诉用户\"}";
+            return "{\"error\":\"" + TurnFlags.LIMIT_HINT + "；查不到的如实告诉用户\"}";
         }
         long start = System.nanoTime();
         String result = null;

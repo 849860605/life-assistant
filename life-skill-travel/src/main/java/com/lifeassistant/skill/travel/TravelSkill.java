@@ -256,10 +256,44 @@ public class TravelSkill implements LifeSkill {
                 flightTools, foodTools, webSearchTools, routeTools, trainTools, flightStatusTools);
     }
 
-    /** MCP 工具：高德地图和 RollingGo 酒店（都是用到才连，出错自动重连）；没配置的返回空。 */
+    /** MCP 工具：高德地图和 RollingGo 酒店（都是用到才连，出错自动重连）；没配置的返回空。返回给模型的内容限长。 */
     @Override
     public List<ToolCallback> toolCallbacks() {
-        return Stream.concat(mcpServers.tools("amap").stream(), mcpServers.tools("rollinggo").stream()).toList();
+        return Stream.concat(mcpServers.tools("amap").stream(), mcpServers.tools("rollinggo").stream())
+                .map(TravelSkill::capped).toList();
+    }
+
+    /** MCP 返回给模型的内容最多多少字，太长的截断（控制 Token，也减少外部内容夹带的东西） */
+    static final int MAX_MCP_RESULT = 4000;
+
+    /** 包一层：工具定义和执行不变，返回内容超过 MAX_MCP_RESULT 时截断并注明。 */
+    static ToolCallback capped(ToolCallback delegate) {
+        return new ToolCallback() {
+            @Override
+            public org.springframework.ai.tool.definition.ToolDefinition getToolDefinition() {
+                return delegate.getToolDefinition();
+            }
+
+            @Override
+            public org.springframework.ai.tool.metadata.ToolMetadata getToolMetadata() {
+                return delegate.getToolMetadata();
+            }
+
+            @Override
+            public String call(String toolInput) {
+                return cut(delegate.call(toolInput));
+            }
+
+            @Override
+            public String call(String toolInput, org.springframework.ai.chat.model.ToolContext toolContext) {
+                return cut(delegate.call(toolInput, toolContext));
+            }
+        };
+    }
+
+    /** 超长的截断，后面注明被截断了。 */
+    static String cut(String text) {
+        return text == null || text.length() <= MAX_MCP_RESULT ? text : text.substring(0, MAX_MCP_RESULT) + "…（内容太长，后面截掉了）";
     }
 
 }

@@ -110,7 +110,7 @@ public class UploadService {
             if (row.getText() == null) {
                 out.append("（这个文件没识别出来：").append(row.getError()).append("）\n");
             } else {
-                String text = row.getText();
+                String text = escapeBrackets(row.getText());
                 int cap = Math.max(500, Math.min(PER_FILE, budget));
                 if (text.length() > cap) {
                     text = text.substring(0, cap) + "\n（文件太长，后面没带上）";
@@ -152,6 +152,11 @@ public class UploadService {
         String preview = text.replaceAll("\\s+", " ").strip();
         return new View(row.getId(), row.getName(), row.getKind(), row.getSizeBytes(), row.getPages(), text.length(),
                 preview.length() > 60 ? preview.substring(0, 60) + "…" : preview, row.getError());
+    }
+
+    /** 文件内容里的〔〕换成【】，免得文件里伪造〔附件结束〕把后面的内容冒充成用户说的话。 */
+    static String escapeBrackets(String text) {
+        return text == null ? null : text.replace('〔', '【').replace('〕', '】');
     }
 
     /** 文件名去掉路径和会和附件格式冲突的符号。 */
