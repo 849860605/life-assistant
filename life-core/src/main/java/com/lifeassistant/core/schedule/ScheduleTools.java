@@ -4,6 +4,7 @@ import com.lifeassistant.common.auth.UserCtx;
 import com.lifeassistant.core.auth.ToolContexts;
 import com.lifeassistant.core.user.UserService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
@@ -26,8 +27,12 @@ public class ScheduleTools {
 
     private final ScheduleService scheduleService;
     private final UserService userService;
+    private final ObjectProvider<TripOwnership> tripOwnership;
 
-    /** 时间按用户时区解析；end 为空或空白视为未知。带 tripId 的记为出游日程并关联行程，删行程时一起删。 */
+    /**
+     * 时间按用户时区解析；end 为空或空白视为未知。带 tripId 的记为出游日程并关联行程，删行程时一起删。
+     * tripId 不是当前用户的行程（或没装出游模块）时当没填，按普通日程建。
+     */
     @Tool(description = "新建一条日程，可以顺便设置提前多少分钟推送提醒到用户手机。行程相关的提醒要带上 tripId。")
     public Map<String, Object> createEvent(
             @ToolParam(description = "标题，例如：爬泰山、和老王吃饭") String title,
@@ -39,6 +44,12 @@ public class ScheduleTools {
             ToolContext toolContext) {
         UserCtx ctx = ToolContexts.user(toolContext);
         ZoneId zone = userService.zoneOf(ctx.userId());
+        if (tripId != null) {
+            TripOwnership owner = tripOwnership.getIfAvailable();
+            if (owner == null || !owner.owns(ctx, tripId)) {
+                tripId = null;
+            }
+        }
         ScheduleEvent event = scheduleService.createEvent(ctx, new ScheduleService.NewEvent(
                 title, parse(start, zone), end == null || end.isBlank() ? null : parse(end, zone),
                 location, null, tripId == null ? "AI" : "TRAVEL", tripId == null ? null : tripId.toString(),

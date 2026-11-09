@@ -759,10 +759,9 @@ public class TripTools {
         }
     }
 
-    /** 只留 http(s) 链接，别的（比如 javascript:）当没有，免得页面上点出问题。 */
+    /** 模型给的链接只留常用订票、点评、地图平台的 https 地址（见 BookingLinks），别的当没有，免得页面上点出问题。 */
     static String webUrl(String url) {
-        String u = blankToNull(url);
-        return u != null && u.matches("(?i)^https?://\\S+$") ? u : null;
+        return BookingLinks.safe(url);
     }
 
     private static String blankToNull(String s) {

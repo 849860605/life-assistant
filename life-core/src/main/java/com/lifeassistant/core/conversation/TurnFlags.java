@@ -1,5 +1,7 @@
 package com.lifeassistant.core.conversation;
 
+import com.lifeassistant.common.error.BizException;
+import com.lifeassistant.common.error.ErrorCode;
 import com.lifeassistant.core.audit.CallRecorder;
 import org.springframework.stereotype.Component;
 
@@ -25,8 +27,13 @@ public class TurnFlags {
     /** 一轮里同一个工具最多调几次、所有工具加起来最多几次，防止模型在几个工具之间来回调停不下来 */
     public static final int MAX_SAME_TOOL = 6;
     public static final int MAX_TOOLS = 30;
+    /** 被拦下后模型还在调：总数超过 MAX_TOOLS + 这个数就直接结束这一轮（Spring AI 只要模型还在要工具就会一直循环） */
+    public static final int HARD_STOP_EXTRA = 5;
+    /** 被拦下时给模型的话 */
+    public static final String LIMIT_HINT = "工具调用次数已到上限，直接根据已有信息回答用户，不要再调用任何工具";
 
-    private record Turn(String input, Set<String> flags, long startedAt, Map<String, Integer> calls) {
+    private record Turn(String input, Set<String> flags, long startedAt, Map<String, Integer> calls,
+                        Map<String, Integer> counters) {
     }
 
     /** 用户发了一条新消息：开始新的一轮，记下这句话。 */
@@ -34,7 +41,7 @@ public class TurnFlags {
         long now = System.currentTimeMillis();
         turns.values().removeIf(t -> now - t.startedAt() > TURN_MS);
         turns.put(conversationId, new Turn(input == null ? "" : input, ConcurrentHashMap.newKeySet(), now,
-                new ConcurrentHashMap<>()));
+                new ConcurrentHashMap<>(), new ConcurrentHashMap<>()));
     }
 
     /** 在当前工具调用所属会话的这一轮打个标记。 */
@@ -65,6 +72,7 @@ public class TurnFlags {
 
     /**
      * 记一次工具调用，返回这次该不该拦下：同一个工具这一轮已经调了 MAX_SAME_TOOL 次，或所有工具加起来到了 MAX_TOOLS 次。
+     * 拦下后模型还接着调、总数超过 MAX_TOOLS + HARD_STOP_EXTRA 时抛异常结束这一轮（对话按出错处理，积分会退回）。
      * 不在会话里调用的（没有这一轮的记录）不拦。
      */
     public boolean tooMany(String conversationId, String tool) {
@@ -74,7 +82,28 @@ public class TurnFlags {
         }
         int same = t.calls().merge(tool, 1, Integer::sum);
         int total = t.calls().values().stream().mapToInt(Integer::intValue).sum();
+        if (total > MAX_TOOLS + HARD_STOP_EXTRA) {
+            throw new BizException(ErrorCode.TOO_MANY_REQUESTS, "这次要查的东西太多，没能整理出回答。把问题拆小一点再试试");
+        }
         return same > MAX_SAME_TOOL || total > MAX_TOOLS;
+    }
+
+    /** 这一轮里除了 exempt 列出的工具，还调过别的工具没有（工具调用期间用，按当前会话判断）。 */
+    public boolean otherToolsCalled(Set<String> exempt) {
+        Turn t = current();
+        return t != null && t.calls().keySet().stream().anyMatch(name -> !exempt.contains(name));
+    }
+
+    /** 这一轮里某件事的次数加一并返回加后的次数（比如这一轮搜了几次）；不在会话里调用时返回 0，表示不限。 */
+    public int bump(String key) {
+        Turn t = current();
+        return t == null ? 0 : t.counters().merge(key, 1, Integer::sum);
+    }
+
+    /** 用户这一轮说的原话；不在会话里调用时返回空。 */
+    public String userInput() {
+        Turn t = current();
+        return t == null ? null : t.input();
     }
 
     /** 这一轮里第一次走到这里返回 true（之后都返回 false），用来"同一件事一轮只扣一次积分"；不在会话里调用时返回 false。 */

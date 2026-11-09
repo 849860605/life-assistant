@@ -9,6 +9,7 @@ import com.lifeassistant.common.error.BizException;
 import com.lifeassistant.common.error.ErrorCode;
 import com.lifeassistant.core.schedule.ScheduleEvent;
 import com.lifeassistant.core.schedule.ScheduleService;
+import com.lifeassistant.core.schedule.TripOwnership;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,7 +23,7 @@ import java.util.List;
  */
 @Service
 @RequiredArgsConstructor
-public class TripService {
+public class TripService implements TripOwnership {
 
     private final TripMapper tripMapper;
     private final TripVersionMapper versionMapper;
@@ -251,6 +252,13 @@ public class TripService {
                         TripVersion::getCreatedBy, TripVersion::getCreatedAt)
                 .eq(TripVersion::getTripId, tripId)
                 .orderByDesc(TripVersion::getVersion));
+    }
+
+    /** 行程存在并且属于当前用户（日程关联行程前校验用）。 */
+    @Override
+    public boolean owns(UserCtx ctx, long tripId) {
+        Trip trip = tripMapper.selectById(tripId);
+        return trip != null && Long.valueOf(ctx.userId()).equals(trip.getUserId());
     }
 
     /** 按 id 取行程并校验归属：不存在抛 notFound，不是当前用户的抛 forbidden。 */
