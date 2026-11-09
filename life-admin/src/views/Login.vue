@@ -15,6 +15,13 @@
         <el-form-item label="密码" prop="password">
           <el-input id="admin-password" v-model="form.password" type="password" show-password autocomplete="current-password" size="large" :prefix-icon="Lock" @keyup.enter="submit" />
         </el-form-item>
+        <!-- 输错几次以后才出现，点图片换一张 -->
+        <el-form-item v-if="captcha" label="验证码">
+          <div class="captcha">
+            <el-input id="admin-captcha" v-model="captchaCode" maxlength="4" size="large" placeholder="右侧图中的 4 个字符" @keyup.enter="submit" />
+            <img :src="captcha.image" alt="验证码" title="看不清？点一下换一张" @click="refreshCaptcha" />
+          </div>
+        </el-form-item>
         <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon class="err" />
         <el-button type="primary" size="large" class="go" :loading="loading" native-type="submit">登录</el-button>
       </el-form>
@@ -29,6 +36,7 @@ import { useRoute, useRouter } from "vue-router";
 import type { FormInstance, FormRules } from "element-plus";
 import { Lock, User } from "@element-plus/icons-vue";
 import { api } from "../api";
+import { ApiError } from "../api/http";
 import { signIn } from "../session";
 
 /** 管理员登录页：登录后回到原来要去的页面（没有就去总览） */
@@ -42,20 +50,40 @@ const rules: FormRules = {
 };
 const loading = ref(false);
 const error = ref("");
+/** 输错几次以后要填的图形验证码；没要求时为空 */
+const captcha = ref<{ id: string; image: string } | null>(null);
+const captchaCode = ref("");
 
 async function submit() {
   if (!(await formRef.value?.validate().catch(() => false))) return;
+  if (captcha.value && captchaCode.value.trim().length !== 4) {
+    error.value = "请输入图中的 4 个字符";
+    return;
+  }
   loading.value = true;
   error.value = "";
   try {
-    const r = await api.login(form.username.trim(), form.password);
+    const answer = captcha.value ? { id: captcha.value.id, code: captchaCode.value.trim() } : undefined;
+    const r = await api.login(form.username.trim(), form.password, answer);
     signIn(r.token, r.admin);
     const from = typeof route.query.from === "string" ? route.query.from : "/dashboard";
     router.replace(from);
   } catch (e) {
     error.value = e instanceof Error ? e.message : "登录失败";
+    // 后端要验证码（428），或者已经填过一张（不管对错都作废了），换一张新的
+    if ((e instanceof ApiError && e.code === 428) || captcha.value) refreshCaptcha();
   } finally {
     loading.value = false;
+  }
+}
+
+/** 换一张验证码，清掉已填的 */
+async function refreshCaptcha() {
+  captchaCode.value = "";
+  try {
+    captcha.value = await api.captcha();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "验证码加载失败，点一下重试";
   }
 }
 </script>
@@ -100,6 +128,19 @@ async function submit() {
 .sub {
   color: var(--x-muted);
   font-size: 13px;
+}
+.captcha {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+}
+.captcha img {
+  flex-shrink: 0;
+  width: 110px;
+  height: 40px;
+  border-radius: 6px;
+  border: 1px solid var(--x-line);
+  cursor: pointer;
 }
 .err {
   margin-bottom: 14px;

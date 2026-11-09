@@ -1,5 +1,6 @@
 import { request, upload } from "./http";
 import { solveChallenge } from "../utils/pow";
+import { sealPassword, type LoginKey } from "../utils/rsa";
 import type {
   Brief,
   TodayAgenda,
@@ -18,11 +19,19 @@ function qs(params: Record<string, string | number | boolean | null | undefined>
   return parts.length ? "?" + parts.join("&") : "";
 }
 
+/** 提交密码前领一次公钥和服务器时间，返回把密码加密的函数（请求里不出现明文密码，见 utils/rsa）。 */
+async function sealer(): Promise<(password: string) => string> {
+  const key = await request<LoginKey>("GET", "/api/v1/auth/login-key");
+  return (password) => sealPassword(password, key);
+}
+
 /** 所有后端接口，路径和后端 /api/v1 一一对应。 */
 export const api = {
   /** 改自己的密码；改完其他设备上的登录会下线 */
-  changePassword: (oldPassword: string, newPassword: string) =>
-    request<void>("POST", "/api/v1/auth/password", { oldPassword, newPassword }),
+  changePassword: async (oldPassword: string, newPassword: string) => {
+    const seal = await sealer();
+    return request<void>("POST", "/api/v1/auth/password", { oldPassword: seal(oldPassword), newPassword: seal(newPassword) });
+  },
   /** 注册是否开放、能不能发邮件 */
   registerOptions: () => request<{ open: boolean; mailReady: boolean }>("GET", "/api/v1/auth/register-options"),
   /**
@@ -35,15 +44,32 @@ export const api = {
     return request<{ cooldown: number }>("POST", "/api/v1/auth/email-code", { email, purpose, challenge: challenge.token, nonce });
   },
   /** 邮箱注册，成功直接登录 */
-  register: (email: string, code: string, password: string, nickname: string) =>
-    request<{ token: string; user: UserView }>("POST", "/api/v1/auth/register", { email, code, password, nickname, device: "web" }),
+  register: async (email: string, code: string, password: string, nickname: string) => {
+    const seal = await sealer();
+    return request<{ token: string; user: UserView }>("POST", "/api/v1/auth/register", { email, code, password: seal(password), nickname, device: "web" });
+  },
   /** 邮箱验证码重置密码，成功后所有设备的登录下线 */
-  resetPassword: (email: string, code: string, newPassword: string) =>
-    request<void>("POST", "/api/v1/auth/password/reset", { email, code, newPassword }),
+  resetPassword: async (email: string, code: string, newPassword: string) => {
+    const seal = await sealer();
+    return request<void>("POST", "/api/v1/auth/password/reset", { email, code, newPassword: seal(newPassword) });
+  },
+  /** 注销自己的账号（要当前密码）：内容全部删除，所有设备下线 */
+  deleteAccount: async (password: string) => {
+    const seal = await sealer();
+    return request<void>("POST", "/api/v1/auth/account/delete", { password: seal(password) });
+  },
+  /** 用户协议、隐私政策里的联系邮箱（不用登录），没配时为空 */
+  contact: () => request<{ email: string | null }>("GET", "/api/v1/legal/contact"),
   /** 已登录用户绑定邮箱 */
   bindEmail: (email: string, code: string) => request<UserView>("POST", "/api/v1/auth/email/bind", { email, code }),
-  login: (username: string, password: string) =>
-    request<{ token: string; user: UserView }>("POST", "/api/v1/auth/login", { username, password, device: "web" }),
+  /** 登录：密码加密后提交；输错几次以后要带上图形验证码（没带时报 428，见 captcha） */
+  login: async (username: string, password: string, captcha?: { id: string; code: string }) => {
+    const seal = await sealer();
+    return request<{ token: string; user: UserView }>("POST", "/api/v1/auth/login",
+      { username, password: seal(password), device: "web", captchaId: captcha?.id, captchaCode: captcha?.code });
+  },
+  /** 领一张登录用的图形验证码，image 是 data:image/png 地址 */
+  captcha: () => request<{ id: string; image: string }>("GET", "/api/v1/auth/captcha"),
   logout: () => request<void>("POST", "/api/v1/auth/logout"),
   me: () => request<UserView>("GET", "/api/v1/auth/me"),
 

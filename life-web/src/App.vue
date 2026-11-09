@@ -2,9 +2,9 @@
 import { onLaunch } from "@dcloudio/uni-app";
 import { getToken, rememberBack } from "./api/http";
 
-// 没登录直接去登录页；打开的是某个页面（比如分享来的行程链接）就记下来，登录后回去
+// 没登录直接去登录页；打开的是某个页面（比如分享来的行程链接）就记下来，登录后回去。用户协议、隐私政策不用登录也能看
 onLaunch((opts) => {
-  if (!getToken()) {
+  if (!getToken() && opts?.path !== "pages/legal/legal") {
     if (opts?.path) rememberBack({ route: opts.path, options: opts.query as Record<string, string> });
     uni.reLaunch({ url: "/pages/login/login" });
   }

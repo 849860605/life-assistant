@@ -7,7 +7,9 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lifeassistant.common.error.BizException;
 import com.lifeassistant.common.error.ErrorCode;
+import com.lifeassistant.core.audit.ToolCallLogCleaner;
 import com.lifeassistant.core.card.Card;
+import com.lifeassistant.core.orchestrator.GraphCheckpoints;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -26,6 +28,8 @@ public class ConversationService {
     private final ConversationMapper conversationMapper;
     private final ChatMessageMapper chatMessageMapper;
     private final ObjectMapper objectMapper;
+    private final GraphCheckpoints checkpoints;
+    private final ToolCallLogCleaner toolCallLogs;
 
     /** 新建会话，ID 用随机 UUID，状态 ACTIVE。 */
     public Conversation create(UserCtx ctx, String title) {
@@ -159,9 +163,11 @@ public class ConversationService {
         }
     }
 
-    /** 校验归属后删除会话，消息由外键级联删除。 */
+    /** 校验归属后删除会话，消息由外键级联删除；对话流程的断点、工具调用记录里也有内容，一起删。 */
     public void delete(UserCtx ctx, String conversationId) {
         getOwned(ctx, conversationId);
         conversationMapper.deleteById(conversationId);
+        checkpoints.forget(List.of(conversationId));
+        toolCallLogs.forgetConversation(conversationId);
     }
 }

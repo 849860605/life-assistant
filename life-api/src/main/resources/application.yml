@@ -146,6 +146,8 @@ life:
     register-daily-limit: ${LIFE_MAIL_REGISTER_DAILY_LIMIT:200}
     reset-daily-limit: ${LIFE_MAIL_RESET_DAILY_LIMIT:60}
     bind-daily-limit: ${LIFE_MAIL_BIND_DAILY_LIMIT:40}
+  # 用户协议、隐私政策里给用户的联系邮箱；不填就用上面发验证码的邮箱
+  contact-email: ${LIFE_CONTACT_EMAIL:}
   # 要验证码前浏览器要算的工作量证明难度（开头几个 0 比特），16 平均算六万多次哈希，手机上一两秒
   auth:
     pow-difficulty: ${LIFE_POW_DIFFICULTY:16}

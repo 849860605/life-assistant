@@ -7,6 +7,7 @@ import com.lifeassistant.core.audit.AdminStatsService;
 import com.lifeassistant.core.user.AdminUser;
 import com.lifeassistant.core.setting.AppSettingService;
 import com.lifeassistant.core.user.EmailCodeService;
+import com.lifeassistant.core.user.PasswordCipher;
 import com.lifeassistant.core.user.User;
 import com.lifeassistant.core.user.UserService;
 import jakarta.validation.Valid;
@@ -39,6 +40,7 @@ public class AdminAppUserController {
     private final AdminContext adminContext;
     private final AppSettingService settings;
     private final EmailCodeService emailCodes;
+    private final PasswordCipher passwords;
 
     /** 新建用户的请求体。 */
     public record CreateUserRequest(@NotBlank String username, @NotBlank String password, String nickname) {
@@ -96,7 +98,7 @@ public class AdminAppUserController {
     @PostMapping
     public ApiResponse<UserDetail> create(@Valid @RequestBody CreateUserRequest request) {
         AdminUser me = adminContext.current();
-        User user = userService.createByAdmin(request.username(), request.password(), request.nickname());
+        User user = userService.createByAdmin(request.username(), passwords.open(request.password()), request.nickname());
         adminContext.log(me.getId(), "CREATE_USER", user.getUsername());
         return ApiResponse.ok(detail(user.getId()));
     }
@@ -113,7 +115,7 @@ public class AdminAppUserController {
     public ApiResponse<Void> resetPassword(@PathVariable long id, @Valid @RequestBody PasswordRequest request) {
         AdminUser me = adminContext.requireSuper();
         User user = userService.get(id);
-        userService.resetPassword(id, request.password());
+        userService.resetPassword(id, passwords.open(request.password()));
         StpUtil.logout(id);
         adminContext.log(me.getId(), "RESET_USER_PASSWORD", user.getUsername());
         return ApiResponse.ok();

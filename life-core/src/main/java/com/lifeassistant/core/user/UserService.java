@@ -237,7 +237,7 @@ public class UserService {
 
     /** 重置用户密码（后台重置、找回密码、自己改密码都走这里），按规则校验；之前签的下载票据一起作废。 */
     public void resetPassword(long userId, String rawPassword) {
-        get(userId);
+        requireNotDeleted(get(userId));
         PasswordPolicy.check(rawPassword);
         userMapper.update(null, new LambdaUpdateWrapper<User>().eq(User::getId, userId)
                 .set(User::getPasswordHash, passwordEncoder.encode(rawPassword))
@@ -260,6 +260,7 @@ public class UserService {
     /** 启用或停用用户；停用后登录会报"账号已被禁用"，下载票据作废，已有的登录态由调用方踢掉。 */
     public User setEnabled(long userId, boolean enabled) {
         User user = get(userId);
+        requireNotDeleted(user);
         user.setStatus(enabled ? 1 : 0);
         userMapper.update(null, new LambdaUpdateWrapper<User>().eq(User::getId, userId)
                 .set(User::getStatus, user.getStatus())
@@ -268,6 +269,33 @@ public class UserService {
             ticketVersions.bump(userId);
         }
         return user;
+    }
+
+    /** 已注销的账号不能再重置密码、启用。 */
+    private static void requireNotDeleted(User user) {
+        if (user.getDeletedAt() != null) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "这个账号已注销");
+        }
+    }
+
+    /**
+     * 注销后清掉账号行里的个人信息：用户名改成 deleted-id（原用户名、邮箱可以重新注册），邮箱、昵称、手机号清空，
+     * 密码换成一个谁也不知道的随机值，状态改成停用并记下注销时间；下载票据作废。行本身保留，付款订单和积分流水要关联它。
+     */
+    public void anonymize(long userId) {
+        userMapper.update(null, new LambdaUpdateWrapper<User>().eq(User::getId, userId)
+                .set(User::getUsername, "deleted-" + userId)
+                .set(User::getPasswordHash, passwordEncoder.encode(java.util.UUID.randomUUID().toString()))
+                .set(User::getNickname, "已注销用户")
+                .set(User::getPhoneEnc, null)
+                .set(User::getEmail, null)
+                .set(User::getEmailCanonical, null)
+                .set(User::getEmailVerifiedAt, null)
+                .set(User::getPreferredModelId, null)
+                .set(User::getStatus, 0)
+                .set(User::getDeletedAt, OffsetDateTime.now())
+                .set(User::getUpdatedAt, OffsetDateTime.now()));
+        ticketVersions.bump(userId);
     }
 
     /** 记下最近一次登录时间，后台列表里看谁还在用。 */

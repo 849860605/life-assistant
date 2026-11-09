@@ -13,6 +13,10 @@
 			"style": { "navigationStyle": "custom" }
 		},
 		{
+			"path": "pages/legal/legal",
+			"style": { "navigationStyle": "custom" }
+		},
+		{
 			"path": "pages/trips/trips",
 			"style": { "navigationBarTitleText": "我的行程" }
 		},

@@ -30,6 +30,8 @@ public class User {
     private String source;
     /** 自己选的对话模型（t_llm_model.id），空表示用默认 */
     private Long preferredModelId;
+    /** 用户自己注销账号的时间；注销后账号不能登录、不能被后台重新启用 */
+    private OffsetDateTime deletedAt;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
 }

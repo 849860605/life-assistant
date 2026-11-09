@@ -1,9 +1,12 @@
 package com.lifeassistant.api.web.admin;
 
 import com.lifeassistant.api.auth.AdminContext;
+import com.lifeassistant.api.auth.LoginCaptcha;
 import com.lifeassistant.api.auth.LoginGuard;
 import com.lifeassistant.api.auth.StpAdminUtil;
 import com.lifeassistant.common.api.ApiResponse;
+import com.lifeassistant.common.error.BizException;
+import com.lifeassistant.common.error.ErrorCode;
 import com.lifeassistant.core.audit.LlmUsageMapper;
 import com.lifeassistant.core.audit.ToolCallLogMapper;
 import com.lifeassistant.core.eval.EvalRun;
@@ -11,6 +14,8 @@ import com.lifeassistant.core.eval.EvalService;
 import com.lifeassistant.core.schedule.ReminderDispatcher;
 import com.lifeassistant.core.user.AdminUser;
 import com.lifeassistant.core.user.AdminUserService;
+import com.lifeassistant.core.limit.RateLimiter;
+import com.lifeassistant.core.user.PasswordCipher;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -43,9 +48,12 @@ public class AdminController {
     private final ToolCallLogMapper toolCallLogMapper;
     private final LoginGuard loginGuard;
     private final AdminContext adminContext;
+    private final PasswordCipher passwords;
+    private final LoginCaptcha captcha;
+    private final RateLimiter limiter;
 
     /** 管理员登录请求体。 */
-    public record AdminLoginRequest(@NotBlank String username, @NotBlank String password) {
+    public record AdminLoginRequest(@NotBlank String username, @NotBlank String password, String captchaId, String captchaCode) {
     }
 
     /** 改自己密码的请求体。 */
@@ -67,12 +75,29 @@ public class AdminController {
     public record AdminLoginResponse(String token, AdminView admin) {
     }
 
+    /** GET /admin/api/v1/auth/login-key：提交密码前领的公钥和服务器时间，密码在浏览器里加密后再提交（见 PasswordCipher）。 */
+    @GetMapping("/auth/login-key")
+    public ApiResponse<PasswordCipher.LoginKey> loginKey() {
+        return ApiResponse.ok(passwords.loginKey());
+    }
+
+    /** GET /admin/api/v1/auth/captcha：领一张图形验证码（登录输错几次以后要填）；同一 IP 每分钟最多 30 张。 */
+    @GetMapping("/auth/captcha")
+    public ApiResponse<LoginCaptcha.Captcha> captcha(HttpServletRequest http) {
+        if (!limiter.perMinute("captcha:" + http.getRemoteAddr(), 30)) {
+            throw new BizException(ErrorCode.TOO_MANY_REQUESTS, "刷新太频繁，请稍后再试");
+        }
+        return ApiResponse.ok(captcha.issue());
+    }
+
     /** POST /admin/api/v1/auth/login：管理员登录；连续输错会暂停登录（见 LoginGuard）。 */
     @PostMapping("/auth/login")
     public ApiResponse<AdminLoginResponse> login(@Valid @RequestBody AdminLoginRequest request,
                                                  HttpServletRequest http) {
-        AdminUser admin = loginGuard.guard("admin", request.username(), http.getRemoteAddr(),
-                () -> adminUserService.authenticate(request.username(), request.password()));
+        String password = passwords.open(request.password());
+        AdminUser admin = loginGuard.guard("admin", request.username(), null, http.getRemoteAddr(),
+                new LoginGuard.CaptchaAnswer(request.captchaId(), request.captchaCode()),
+                () -> adminUserService.authenticate(request.username(), password));
         StpAdminUtil.STP.login(admin.getId());
         adminContext.log(admin.getId(), "LOGIN", null);
         return ApiResponse.ok(new AdminLoginResponse(StpAdminUtil.STP.getTokenValue(),
@@ -96,7 +121,8 @@ public class AdminController {
     @PostMapping("/auth/password")
     public ApiResponse<Void> changePassword(@Valid @RequestBody ChangePasswordRequest request) {
         AdminUser admin = adminContext.current();
-        adminUserService.changeOwnPassword(admin.getId(), request.oldPassword(), request.newPassword());
+        adminUserService.changeOwnPassword(admin.getId(), passwords.open(request.oldPassword()),
+                passwords.open(request.newPassword()));
         String current = StpAdminUtil.STP.getTokenValue();
         StpAdminUtil.STP.getTokenValueListByLoginId(admin.getId()).stream()
                 .filter(t -> !t.equals(current)).forEach(StpAdminUtil.STP::logoutByTokenValue);

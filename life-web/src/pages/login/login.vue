@@ -33,8 +33,18 @@
             <view class="field">
               <Icon name="lock" :size="18" color="#5b6782" />
               <input id="password" v-model="password" class="field-input" :password="!showPwd" placeholder="请输入密码" @confirm="submit" />
-              <view class="eye" :class="{ on: showPwd }" @click="showPwd = !showPwd">{{ showPwd ? "隐藏" : "显示" }}</view>
+              <view class="eye" :title="showPwd ? '隐藏密码' : '显示密码'" @click="showPwd = !showPwd"><Icon :name="showPwd ? 'eyeOff' : 'eye'" :size="19" :color="showPwd ? 'var(--accent)' : '#7a859c'" /></view>
             </view>
+            <!-- 输错几次以后才出现，点图片换一张 -->
+            <template v-if="captcha">
+              <view class="label">验证码</view>
+              <view class="field">
+                <Icon name="shield" :size="18" color="#5b6782" />
+                <input id="captcha-code" v-model="captchaCode" class="field-input" maxlength="4" placeholder="请输入验证码" @confirm="submit" />
+                <image class="captcha-img" :src="captcha.image" title="看不清？点一下换一张" @click="refreshCaptcha" />
+                <view class="eye" title="换一张" @click="refreshCaptcha"><Icon name="refresh" :size="18" color="#7a859c" /></view>
+              </view>
+            </template>
             <view class="forgot"><text class="link" @click="switchView('reset')">忘记密码？</text></view>
           </view>
 
@@ -63,7 +73,7 @@
             <view class="field">
               <Icon name="lock" :size="18" color="#5b6782" />
               <input id="reg-password" v-model="password" class="field-input" :password="!showPwd" placeholder="8 位以上，字母加数字" @confirm="submit" />
-              <view class="eye" :class="{ on: showPwd }" @click="showPwd = !showPwd">{{ showPwd ? "隐藏" : "显示" }}</view>
+              <view class="eye" :title="showPwd ? '隐藏密码' : '显示密码'" @click="showPwd = !showPwd"><Icon :name="showPwd ? 'eyeOff' : 'eye'" :size="19" :color="showPwd ? 'var(--accent)' : '#7a859c'" /></view>
             </view>
             <view v-if="passwordProblem(password)" class="hint">{{ passwordProblem(password) }}</view>
           </view>
@@ -86,7 +96,7 @@
             <view class="field">
               <Icon name="lock" :size="18" color="#5b6782" />
               <input id="reset-password" v-model="password" class="field-input" :password="!showPwd" placeholder="8 位以上，字母加数字" />
-              <view class="eye" :class="{ on: showPwd }" @click="showPwd = !showPwd">{{ showPwd ? "隐藏" : "显示" }}</view>
+              <view class="eye" :title="showPwd ? '隐藏密码' : '显示密码'" @click="showPwd = !showPwd"><Icon :name="showPwd ? 'eyeOff' : 'eye'" :size="19" :color="showPwd ? 'var(--accent)' : '#7a859c'" /></view>
             </view>
             <view class="field">
               <Icon name="lock" :size="18" color="#5b6782" />
@@ -98,9 +108,9 @@
           <view v-if="view !== 'reset'" class="agree" @click="agreed = !agreed">
             <view class="box" :class="{ on: agreed }"><Icon v-if="agreed" name="check" :size="12" color="#fff" /></view>
             <text>我已阅读并同意</text>
-            <text class="link" @click.stop="notReady('《用户协议》还没写，正式上线前补上')">《用户协议》</text>
+            <text class="link" @click.stop="openLegal('terms')">《用户协议》</text>
             <text>和</text>
-            <text class="link" @click.stop="notReady('《隐私政策》还没写，正式上线前补上')">《隐私政策》</text>
+            <text class="link" @click.stop="openLegal('privacy')">《隐私政策》</text>
           </view>
 
           <button class="submit" :disabled="!canSubmit" @click="submit">{{ submitText }}</button>
@@ -123,7 +133,7 @@
 import { computed, onUnmounted, ref } from "vue";
 import { onLoad } from "@dcloudio/uni-app";
 import { api } from "../../api";
-import { BACK_KEY, setToken } from "../../api/http";
+import { ApiError, BACK_KEY, setToken } from "../../api/http";
 import { clearMediaTicket } from "../../utils/media";
 import Icon from "../../components/Icon.vue";
 import BrandMark from "../../components/BrandMark.vue";
@@ -149,6 +159,9 @@ const agreed = ref(false);
 const showPwd = ref(false);
 const loading = ref(false);
 const error = ref("");
+/** 输错几次以后要填的图形验证码；没要求时为空 */
+const captcha = ref<{ id: string; image: string } | null>(null);
+const captchaCode = ref("");
 /** 登录卡片上的绿色提示（比如"密码已重置"） */
 const notice = ref("");
 /** 注册是否开放、能不能发邮件；没查到时按开放处理，提交时后端会再拦 */
@@ -197,7 +210,7 @@ const resetProblem = computed(() => {
 
 const canSubmit = computed(() => {
   if (loading.value) return false;
-  if (view.value === "login") return !!username.value.trim() && !!password.value;
+  if (view.value === "login") return !!username.value.trim() && !!password.value && (!captcha.value || captchaCode.value.trim().length === 4);
   const base = looksLikeEmail(email.value) && /^\d{6}$/.test(code.value.trim()) && !!password.value && !passwordProblem(password.value);
   if (view.value === "register") return base && !registerBlocked.value;
   return base && again.value === password.value;
@@ -208,8 +221,9 @@ const submitText = computed(() => {
   return view.value === "login" ? "登录" : view.value === "register" ? "注册并登录" : "重置密码";
 });
 
-function notReady(msg: string) {
-  uni.showToast({ title: msg, icon: "none", duration: 2500 });
+/** 打开用户协议或隐私政策（返回时登录页填的内容还在） */
+function openLegal(doc: "terms" | "privacy") {
+  uni.navigateTo({ url: `/pages/legal/legal?doc=${doc}` });
 }
 
 /** 要验证码：成功后开始倒计时，告诉用户发到哪了 */
@@ -254,7 +268,8 @@ async function submit() {
   error.value = "";
   try {
     if (view.value === "login") {
-      finishLogin(await api.login(username.value.trim(), password.value));
+      const answer = captcha.value ? { id: captcha.value.id, code: captchaCode.value.trim() } : undefined;
+      finishLogin(await api.login(username.value.trim(), password.value, answer));
     } else if (view.value === "register") {
       finishLogin(await api.register(email.value.trim(), code.value.trim(), password.value, nickname.value.trim()));
     } else {
@@ -266,8 +281,20 @@ async function submit() {
     }
   } catch (e) {
     error.value = e instanceof Error ? e.message : "操作失败";
+    // 后端要验证码（428），或者已经填过一张（不管对错都作废了），换一张新的
+    if (view.value === "login" && ((e instanceof ApiError && e.code === 428) || captcha.value)) refreshCaptcha();
   } finally {
     loading.value = false;
+  }
+}
+
+/** 换一张验证码，清掉已填的 */
+async function refreshCaptcha() {
+  captchaCode.value = "";
+  try {
+    captcha.value = await api.captcha();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "验证码加载失败，点一下重试";
   }
 }
 
@@ -318,11 +345,11 @@ function forgetOtherUser(userId: number) {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px max(24px, env(safe-area-inset-left)) 24px max(24px, env(safe-area-inset-right));
+  padding: 24px max(24px, 6vw, env(safe-area-inset-left)) 24px max(24px, 6vw, env(safe-area-inset-right));
 }
 .login-card {
   width: 100%;
-  max-width: 1180px;
+  max-width: 1480px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 0.86fr);
   background: #fff;
@@ -354,7 +381,7 @@ function forgetOtherUser(userId: number) {
 
 /* 右侧表单 */
 .panel {
-  padding: 56px 56px 40px;
+  padding: 56px 64px 40px;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -369,10 +396,10 @@ function forgetOtherUser(userId: number) {
 .field { display: flex; align-items: center; gap: 10px; height: 50px; padding: 0 14px; border: 1px solid #d6dce8; border-radius: 10px; background: #fff; }
 .field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12); }
 .field-input { flex: 1; min-width: 0; height: 100%; font-size: 15px; color: #1b2333; background: transparent; border: none; }
-.eye { font-size: 13px; color: #7a859c; cursor: pointer; padding: 4px 2px; white-space: nowrap; }
-.eye.on { color: var(--accent); }
+.eye { display: flex; align-items: center; cursor: pointer; padding: 4px 2px; }
 .code-btn { padding: 6px 12px; border: 1px solid #c9d6f3; border-radius: 8px; color: #9aa6bf; font-size: 14px; font-weight: 600; white-space: nowrap; }
 .code-btn.on { color: var(--accent); border-color: var(--accent); cursor: pointer; }
+.captcha-img { flex-shrink: 0; width: 110px; height: 38px; border-radius: 6px; cursor: pointer; }
 .forgot { display: flex; justify-content: flex-end; font-size: 14px; }
 .hint { font-size: 13px; color: #5b6782; }
 .agree { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; margin-top: 6px; font-size: 14px; color: #4b5874; cursor: pointer; }

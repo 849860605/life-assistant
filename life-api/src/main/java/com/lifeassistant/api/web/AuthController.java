@@ -4,6 +4,8 @@ import com.lifeassistant.common.error.ErrorCode;
 import com.lifeassistant.common.error.BizException;
 import cn.dev33.satoken.stp.StpUtil;
 import cn.dev33.satoken.stp.parameter.SaLoginParameter;
+import com.lifeassistant.api.account.AccountDeletion;
+import com.lifeassistant.api.auth.LoginCaptcha;
 import com.lifeassistant.api.auth.LoginGuard;
 import com.lifeassistant.api.auth.MediaAuth;
 import com.lifeassistant.common.api.ApiResponse;
@@ -13,6 +15,7 @@ import com.lifeassistant.core.member.CreditService;
 import com.lifeassistant.core.setting.AppSettingService;
 import com.lifeassistant.core.user.EmailCodeService;
 import com.lifeassistant.core.user.HumanCheck;
+import com.lifeassistant.core.user.PasswordCipher;
 import com.lifeassistant.core.user.PasswordPolicy;
 import com.lifeassistant.core.user.User;
 import com.lifeassistant.core.user.UserService;
@@ -49,9 +52,13 @@ public class AuthController {
     private final HumanCheck humanCheck;
     private final RateLimiter limiter;
     private final CreditService credits;
+    private final PasswordCipher passwords;
+    private final LoginCaptcha captcha;
+    private final AccountDeletion accountDeletion;
 
-    /** 登录请求体；device 可空，默认 WEB。 */
-    public record LoginRequest(@NotBlank String username, @NotBlank String password, String device) {
+    /** 登录请求体；device 可空，默认 WEB；captchaId、captchaCode 是输错几次以后要填的图形验证码。 */
+    public record LoginRequest(@NotBlank String username, @NotBlank String password, String device,
+                               String captchaId, String captchaCode) {
     }
 
     /** 登录结果：token 放在后续请求的 Authorization 头里。 */
@@ -66,13 +73,30 @@ public class AuthController {
         }
     }
 
+    /** GET /api/v1/auth/login-key：提交密码前领的公钥和服务器时间，密码在浏览器里加密后再提交（见 PasswordCipher）。 */
+    @GetMapping("/login-key")
+    public ApiResponse<PasswordCipher.LoginKey> loginKey() {
+        return ApiResponse.ok(passwords.loginKey());
+    }
+
+    /** GET /api/v1/auth/captcha：领一张图形验证码（登录输错几次以后要填）；同一 IP 每分钟最多 30 张。 */
+    @GetMapping("/captcha")
+    public ApiResponse<LoginCaptcha.Captcha> captcha(HttpServletRequest http) {
+        if (!limiter.perMinute("captcha:" + http.getRemoteAddr(), 30)) {
+            throw new BizException(ErrorCode.TOO_MANY_REQUESTS, "刷新太频繁，请稍后再试");
+        }
+        return ApiResponse.ok(captcha.issue());
+    }
+
     /** POST /api/v1/auth/login：账号密码登录，返回 token；连续输错会暂停登录（见 LoginGuard）。device 区分设备类型（WEB / MOBILE，默认 WEB），同类设备再次登录会顶掉旧会话。 */
     @PostMapping("/login")
     public ApiResponse<LoginResponse> login(@Valid @RequestBody LoginRequest request, HttpServletRequest http) {
         // 错误次数按账号（用户 id）记，用户名和邮箱换着输也绕不过上限；账号不存在时按输入的登录名记
+        String password = passwords.open(request.password());
         Long userId = userService.findByLogin(request.username()).map(User::getId).orElse(null);
         User user = loginGuard.guard("user", request.username(), userId, http.getRemoteAddr(),
-                () -> userService.authenticate(request.username(), request.password()));
+                new LoginGuard.CaptchaAnswer(request.captchaId(), request.captchaCode()),
+                () -> userService.authenticate(request.username(), password));
         return ApiResponse.ok(signIn(user, request.device()));
     }
 
@@ -159,7 +183,8 @@ public class AuthController {
         requireRegisterOpen();
         String email = UserService.checkEmail(request.email());
         // 先查邮箱和密码，不合规时不用掉验证码
-        PasswordPolicy.check(request.password());
+        String password = passwords.open(request.password());
+        PasswordPolicy.check(password);
         if (userService.findEmailOwner(email, null).isPresent()) {
             throw new BizException(ErrorCode.CONFLICT, "这个邮箱已注册，直接登录或找回密码");
         }
@@ -167,7 +192,7 @@ public class AuthController {
             throw new BizException(ErrorCode.BAD_REQUEST, "昵称最多 32 个字");
         }
         emailCodes.verify(email, EmailCodeService.Purpose.REGISTER, request.code());
-        User user = userService.registerByEmail(email, request.password(), request.nickname());
+        User user = userService.registerByEmail(email, password, request.nickname());
         if (!limiter.perDay("signup-bonus:" + http.getRemoteAddr(), SIGNUP_BONUS_PER_IP_DAY)) {
             credits.openWithoutSignupBonus(user.getId());
             log.info("IP {} 今天注册的账号太多，新账号 {} 不送注册积分", http.getRemoteAddr(), user.getId());
@@ -183,12 +208,13 @@ public class AuthController {
     @PostMapping("/password/reset")
     public ApiResponse<Void> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
         String email = UserService.checkEmail(request.email());
-        PasswordPolicy.check(request.newPassword());
+        String newPassword = passwords.open(request.newPassword());
+        PasswordPolicy.check(newPassword);
         // 邮箱没注册时没发过验证码，这里会报"验证码已过期或还没获取"，和注册过的邮箱输错一样，不暴露有没有账号
         emailCodes.verify(email, EmailCodeService.Purpose.RESET, request.code());
         User user = userService.findByEmail(email)
                 .orElseThrow(() -> new BizException(ErrorCode.BAD_REQUEST, "验证码已过期或还没获取，请重新获取"));
-        userService.resetPassword(user.getId(), request.newPassword());
+        userService.resetPassword(user.getId(), newPassword);
         StpUtil.logout(user.getId());
         return ApiResponse.ok();
     }
@@ -229,6 +255,33 @@ public class AuthController {
         return ApiResponse.ok(UserView.of(userService.get(StpUtil.getLoginIdAsLong())));
     }
 
+    /** 注销账号请求体：当前密码（加密后的）。 */
+    public record DeleteAccountRequest(@NotBlank String password) {
+    }
+
+    /**
+     * POST /api/v1/auth/account/delete：注销自己的账号，要当前密码（输错和登录一样计次、会暂停）。
+     * 对话、记忆、行程、日程、收藏、文件全部删除，账号里的个人信息清空，所有设备下线；付款订单和积分流水按法律保留。
+     */
+    @PostMapping("/account/delete")
+    public ApiResponse<Void> deleteAccount(@Valid @RequestBody DeleteAccountRequest request, HttpServletRequest http) {
+        long userId = StpUtil.getLoginIdAsLong();
+        User user = userService.get(userId);
+        String password = passwords.open(request.password());
+        try {
+            loginGuard.guard("user-password", user.getUsername(), userId, http.getRemoteAddr(),
+                    () -> userService.authenticate(user.getUsername(), password));
+        } catch (BizException e) {
+            // 密码错用 400 报出去，401 会让前端以为登录过期、直接退出
+            if (e.errorCode() == ErrorCode.UNAUTHORIZED) {
+                throw new BizException(ErrorCode.BAD_REQUEST, "密码不对");
+            }
+            throw e;
+        }
+        accountDeletion.delete(userId);
+        return ApiResponse.ok();
+    }
+
     /** 改密码请求体：原密码和新密码。 */
     public record ChangePasswordRequest(@NotBlank String oldPassword, @NotBlank String newPassword) {
     }
@@ -241,9 +294,11 @@ public class AuthController {
     public ApiResponse<Void> changePassword(@Valid @RequestBody ChangePasswordRequest request, HttpServletRequest http) {
         long userId = StpUtil.getLoginIdAsLong();
         User user = userService.get(userId);
+        String oldPassword = passwords.open(request.oldPassword());
+        String newPassword = passwords.open(request.newPassword());
         try {
             loginGuard.guard("user-password", user.getUsername(), userId, http.getRemoteAddr(), () -> {
-                userService.changeOwnPassword(userId, request.oldPassword(), request.newPassword());
+                userService.changeOwnPassword(userId, oldPassword, newPassword);
                 return true;
             });
         } catch (BizException e) {

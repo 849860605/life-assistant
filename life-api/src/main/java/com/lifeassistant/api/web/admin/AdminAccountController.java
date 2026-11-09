@@ -7,6 +7,7 @@ import com.lifeassistant.common.error.BizException;
 import com.lifeassistant.common.error.ErrorCode;
 import com.lifeassistant.core.user.AdminUser;
 import com.lifeassistant.core.user.AdminUserService;
+import com.lifeassistant.core.user.PasswordCipher;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import lombok.RequiredArgsConstructor;
@@ -30,6 +31,7 @@ public class AdminAccountController {
 
     private final AdminUserService adminUserService;
     private final AdminContext adminContext;
+    private final PasswordCipher passwords;
 
     /** 新建管理员：role 是 SUPER 或 ADMIN。 */
     public record CreateAdminRequest(@NotBlank String username, @NotBlank String password, @NotBlank String role,
@@ -55,7 +57,7 @@ public class AdminAccountController {
     @PostMapping
     public ApiResponse<AdminController.AdminView> create(@Valid @RequestBody CreateAdminRequest request) {
         AdminUser me = adminContext.requireSuper();
-        AdminUser created = adminUserService.create(request.username(), request.password(), request.role(),
+        AdminUser created = adminUserService.create(request.username(), passwords.open(request.password()), request.role(),
                 request.nickname());
         adminContext.log(me.getId(), "CREATE_ADMIN", created.getUsername() + "（" + created.getRole() + "）");
         return ApiResponse.ok(AdminController.AdminView.of(adminUserService.get(created.getId())));
@@ -69,7 +71,7 @@ public class AdminAccountController {
             throw new BizException(ErrorCode.BAD_REQUEST, "改自己的密码请到\"修改密码\"页，要输原密码");
         }
         AdminUser target = adminUserService.get(id);
-        adminUserService.resetPassword(id, request.password());
+        adminUserService.resetPassword(id, passwords.open(request.password()));
         StpAdminUtil.STP.logout(id);
         adminContext.log(me.getId(), "RESET_ADMIN_PASSWORD", target.getUsername());
         return ApiResponse.ok();

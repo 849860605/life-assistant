@@ -1,4 +1,5 @@
 import { request } from "./http";
+import { sealPassword, type LoginKey } from "./rsa";
 
 /** 管理员：role 是 SUPER（超级管理员）或 ADMIN（普通管理员） */
 export interface Admin {
@@ -326,13 +327,27 @@ export interface BillingStats {
   totalIncome: number;
 }
 
+/** 提交密码前领一次公钥和服务器时间，返回把密码加密的函数（请求里不出现明文密码，见 rsa.ts）。 */
+async function sealer(): Promise<(password: string) => string> {
+  const key = await request<LoginKey>("GET", "/auth/login-key", undefined, true);
+  return (password) => sealPassword(password, key);
+}
+
 export const api = {
-  login: (username: string, password: string) =>
-    request<{ token: string; admin: Admin }>("POST", "/auth/login", { username, password }, true),
+  /** 登录：密码加密后提交；输错几次以后要带上图形验证码（没带时报 428） */
+  login: async (username: string, password: string, captcha?: { id: string; code: string }) => {
+    const seal = await sealer();
+    return request<{ token: string; admin: Admin }>("POST", "/auth/login",
+      { username, password: seal(password), captchaId: captcha?.id, captchaCode: captcha?.code }, true);
+  },
+  /** 领一张登录用的图形验证码，image 是 data:image/png 地址 */
+  captcha: () => request<{ id: string; image: string }>("GET", "/auth/captcha", undefined, true),
   logout: () => request<void>("POST", "/auth/logout", undefined, true),
   me: () => request<Admin>("GET", "/auth/me", undefined, true),
-  changePassword: (oldPassword: string, newPassword: string) =>
-    request<void>("POST", "/auth/password", { oldPassword, newPassword }),
+  changePassword: async (oldPassword: string, newPassword: string) => {
+    const seal = await sealer();
+    return request<void>("POST", "/auth/password", { oldPassword: seal(oldPassword), newPassword: seal(newPassword) });
+  },
 
   overview: () => request<Overview>("GET", "/overview"),
   callStats: (days = 7) => request<CallStat[]>("GET", `/calls/stats?days=${days}`),
@@ -342,14 +357,25 @@ export const api = {
   /** 是否开放注册、发信邮箱配好没有 */
   registerSetting: () => request<{ open: boolean; mailReady: boolean }>("GET", "/users/register"),
   setRegisterOpen: (open: boolean) => request<{ open: boolean; mailReady: boolean }>("PUT", "/users/register", { open }),
-  createUser: (body: { username: string; password: string; nickname?: string }) => request<UserDetail>("POST", "/users", body),
-  resetUserPassword: (id: number, password: string) => request<void>("POST", `/users/${id}/password`, { password }),
+  createUser: async (body: { username: string; password: string; nickname?: string }) => {
+    const seal = await sealer();
+    return request<UserDetail>("POST", "/users", { ...body, password: seal(body.password) });
+  },
+  resetUserPassword: async (id: number, password: string) => {
+    const seal = await sealer();
+    return request<void>("POST", `/users/${id}/password`, { password: seal(password) });
+  },
   setUserEnabled: (id: number, enabled: boolean) => request<UserDetail>("POST", `/users/${id}/status`, { enabled }),
 
   admins: () => request<Admin[]>("GET", "/admins"),
-  createAdmin: (body: { username: string; password: string; role: string; nickname?: string }) =>
-    request<Admin>("POST", "/admins", body),
-  resetAdminPassword: (id: number, password: string) => request<void>("POST", `/admins/${id}/password`, { password }),
+  createAdmin: async (body: { username: string; password: string; role: string; nickname?: string }) => {
+    const seal = await sealer();
+    return request<Admin>("POST", "/admins", { ...body, password: seal(body.password) });
+  },
+  resetAdminPassword: async (id: number, password: string) => {
+    const seal = await sealer();
+    return request<void>("POST", `/admins/${id}/password`, { password: seal(password) });
+  },
   setAdminEnabled: (id: number, enabled: boolean) => request<Admin>("POST", `/admins/${id}/status`, { enabled }),
 
   llmProviders: () => request<LlmProvider[]>("GET", "/llm/providers"),

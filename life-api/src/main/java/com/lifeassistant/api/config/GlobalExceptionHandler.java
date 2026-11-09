@@ -34,6 +34,7 @@ public class GlobalExceptionHandler {
             case NOT_FOUND -> HttpStatus.NOT_FOUND;
             case CONFLICT -> HttpStatus.CONFLICT;
             case QUOTA_EXCEEDED, CREDIT_NOT_ENOUGH -> HttpStatus.PAYMENT_REQUIRED;
+            case CAPTCHA_REQUIRED -> HttpStatus.PRECONDITION_REQUIRED;
             case TOO_MANY_REQUESTS -> HttpStatus.TOO_MANY_REQUESTS;
             case EXTERNAL_SERVICE -> HttpStatus.BAD_GATEWAY;
             case INTERNAL -> HttpStatus.INTERNAL_SERVER_ERROR;

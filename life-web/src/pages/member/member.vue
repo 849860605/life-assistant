@@ -78,7 +78,7 @@
         <button class="btn pay" :disabled="!pickedPack || creating" @click="pay">
           {{ creating ? "正在创建订单…" : pickedPack ? `支付宝支付 ¥${money(pickedPack.yuan)}` : "选一个积分包" }}
         </button>
-        <view class="muted small">在支付宝完成付款，付完积分马上到账，长期有效。积分不能提现、不能转给别人；没用过的可以联系我们退款。</view>
+        <view class="muted small">在支付宝完成付款，付完积分马上到账，长期有效。积分不能提现、不能转给别人；没用过的可以联系我们退款<text v-if="contactEmail">（发邮件到 {{ contactEmail }}，写明账号和订单号）</text>。</view>
       </view>
 
       <!-- 价格表 -->
@@ -161,6 +161,9 @@ type FlowState = "checking" | "paid" | "pending" | "closed" | "unknown";
 const RECHECK_MS = 30 * 60 * 1000;
 const KIND_TEXT: Record<string, string> = { SIGNUP: "新用户赠送", PURCHASE: "购买积分", RETURN: "没有完成，退回", ADMIN: "星络调整", REFUND: "订单退款，扣回" };
 
+/** 退款联系邮箱（协议里写的那个），没配时不显示 */
+const contactEmail = ref<string | null>(null);
+api.contact().then((c) => (contactEmail.value = c.email)).catch(() => {});
 const orders = ref<PayOrder[]>([]);
 const ledger = ref<CreditEntry[]>([]);
 const picked = ref("");

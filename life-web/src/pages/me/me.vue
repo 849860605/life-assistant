@@ -151,6 +151,26 @@
         <text class="del" @click="revoke(t)">吊销</text>
       </view>
     </view>
+
+    <!-- 协议、联系方式和注销账号 -->
+    <view class="card links">
+      <view class="link-row" @click="go('/pages/legal/legal?doc=terms')"><text>用户协议</text><text class="muted">›</text></view>
+      <view class="link-row" @click="go('/pages/legal/legal?doc=privacy')"><text>隐私政策</text><text class="muted">›</text></view>
+      <view v-if="contactEmail" class="link-row" @click="copy(contactEmail)"><text>联系我们</text><text class="muted">{{ contactEmail }} · 复制</text></view>
+      <view class="link-row" @click="del.open = !del.open"><text class="danger-text">注销账号</text><text class="muted">{{ del.open ? "收起" : "›" }}</text></view>
+    </view>
+    <!-- 注销账号：说清楚删什么、积分作废，输密码再二次确认 -->
+    <view v-if="del.open" class="card stack">
+      <view class="small del-note">
+        注销后会<text class="strong">立即删除</text>你的全部对话、长期记忆、行程、日程和提醒、收藏、上传的文件和常用地址，所有设备上的登录随即失效，<text class="strong">无法恢复</text>。
+        账号里剩余的积分一并作废，买的积分要退款，请在注销前联系我们<text v-if="contactEmail">（{{ contactEmail }}）</text>。付款订单和积分记录按法律保留 3 年，但不再关联你的身份。
+      </view>
+      <input id="del-password" v-model="del.password" class="input" password placeholder="输入当前密码确认" />
+      <view class="row">
+        <button class="btn small danger" :disabled="!del.password || del.saving" @click="deleteAccount">{{ del.saving ? "注销中…" : "注销账号" }}</button>
+        <button class="btn ghost small" @click="closeDelete">取消</button>
+      </view>
+    </view>
   </view>
   </Shell>
 </template>
@@ -400,6 +420,33 @@ function copy(text: string) {
   uni.setClipboardData({ data: text });
 }
 
+/** 联系邮箱（协议里写的那个），没配时不显示 */
+const contactEmail = ref<string | null>(null);
+api.contact().then((c) => (contactEmail.value = c.email)).catch(() => {});
+
+/** 注销账号表单 */
+const del = reactive({ open: false, password: "", saving: false });
+
+function closeDelete() {
+  Object.assign(del, { open: false, password: "" });
+}
+
+/** 二次确认后注销，成功后回登录页 */
+function deleteAccount() {
+  if (!del.password) return;
+  confirm("确定注销账号？", "对话、记忆、行程等全部数据会立即删除，剩余积分作废，无法恢复。", async () => {
+    del.saving = true;
+    try {
+      await api.deleteAccount(del.password);
+      clearMediaTicket();
+      uni.showToast({ title: "账号已注销", icon: "none", duration: 2500 });
+      setTimeout(toLogin, 1200);
+    } finally {
+      del.saving = false;
+    }
+  });
+}
+
 async function logout() {
   try {
     await api.logout();
@@ -482,6 +529,9 @@ function go(url: string) {
 .feed-url { flex: 1; min-width: 0; font-family: var(--mono); font-size: 12px; word-break: break-all; }
 .token { display: flex; align-items: center; gap: 10px; font-size: 14px; }
 .del { margin-left: auto; font-size: 13px; color: var(--muted); cursor: pointer; flex-shrink: 0; }
+.danger-text { color: var(--danger); }
+.del-note { line-height: 1.7; color: var(--ink); }
+.strong { font-weight: 700; }
 .del:hover { color: var(--danger); }
 .links { padding: 0 16px; margin-top: 12px; }
 .addr-label { font-weight: 700; }

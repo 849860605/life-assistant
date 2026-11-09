@@ -19,16 +19,16 @@ public class SaTokenConfig implements WebMvcConfigurer {
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(new SaInterceptor(handler -> {
             SaRouter.match("/api/v1/**")
-                    // 登录、注册、领真人检查的题、要验证码、找回密码不需要登录（要验证码时绑定邮箱的用途在接口里自己查登录）；日历订阅用个人访问令牌，地图图片、高德 JS 地图转发和行程 PDF 用下载票据，都在接口里自己校验
-                    .notMatch("/api/v1/auth/login", "/api/v1/auth/register-options", "/api/v1/auth/challenge", "/api/v1/auth/email-code",
-                            "/api/v1/auth/register", "/api/v1/auth/password/reset", "/api/v1/calendar/feed/**", "/api/v1/maps/static",
+                    // 登录（含领公钥、图形验证码）、注册、领真人检查的题、要验证码、找回密码不需要登录（要验证码时绑定邮箱的用途在接口里自己查登录）；日历订阅用个人访问令牌，地图图片、高德 JS 地图转发和行程 PDF 用下载票据，都在接口里自己校验
+                    .notMatch("/api/v1/auth/login", "/api/v1/auth/login-key", "/api/v1/auth/captcha", "/api/v1/auth/register-options", "/api/v1/auth/challenge", "/api/v1/auth/email-code",
+                            "/api/v1/auth/register", "/api/v1/auth/password/reset", "/api/v1/legal/contact", "/api/v1/calendar/feed/**", "/api/v1/maps/static",
                             "/api/v1/maps/amap/**",
                             "/api/v1/trips/*/pdf",
                             // 支付宝异步通知、付款后回跳的结果页和结果查询：支付宝和浏览器回跳都不带登录态，接口里靠验签校验
                             "/api/v1/pay/alipay/notify", "/api/v1/pay/alipay/return", "/api/v1/pay/alipay/return/status")
                     .check(r -> StpUtil.checkLogin());
             SaRouter.match("/admin/api/v1/**")
-                    .notMatch("/admin/api/v1/auth/login")
+                    .notMatch("/admin/api/v1/auth/login", "/admin/api/v1/auth/login-key", "/admin/api/v1/auth/captcha")
                     .check(r -> StpAdminUtil.STP.checkLogin());
         })).addPathPatterns("/api/**", "/admin/api/**");
     }

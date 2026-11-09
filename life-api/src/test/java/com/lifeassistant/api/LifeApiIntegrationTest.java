@@ -15,6 +15,7 @@ import com.lifeassistant.core.orchestrator.SkillRunner;
 import com.lifeassistant.api.auth.MediaAuth;
 import com.lifeassistant.core.user.ProofOfWork;
 import com.lifeassistant.core.user.User;
+import com.lifeassistant.core.user.PasswordCipher;
 import com.lifeassistant.core.user.UserService;
 import com.lifeassistant.skill.travel.trip.TripService;
 import com.lifeassistant.skill.travel.trip.TripVersion;
@@ -105,6 +106,8 @@ class LifeApiIntegrationTest {
     @Autowired
     TestRestTemplate rest;
     @Autowired
+    PasswordCipher passwordCipher;
+    @Autowired
     JdbcTemplate jdbc;
     @Autowired
     UserService userService;
@@ -156,14 +159,14 @@ class LifeApiIntegrationTest {
 
         // 弱密码建不了用户
         assertThat(call(admin, HttpMethod.POST, "/admin/api/v1/users",
-                Map.of("username", "carol", "password", "short")).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+                Map.of("username", "carol", "password", seal("short"))).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         long bobId = body(call(admin, HttpMethod.POST, "/admin/api/v1/users",
-                Map.of("username", "carol", "password", "carol-pass-1234", "nickname", "卡罗尔"))).path("data").path("id").asLong();
+                Map.of("username", "carol", "password", seal("carol-pass-1234"), "nickname", "卡罗尔"))).path("data").path("id").asLong();
         String bobToken = loginAs("carol", "carol-pass-1234");
 
         // 重置密码：旧 token 失效，新密码能登录
         assertThat(call(admin, HttpMethod.POST, "/admin/api/v1/users/" + bobId + "/password",
-                Map.of("password", "carol-new-5678")).getStatusCode()).isEqualTo(HttpStatus.OK);
+                Map.of("password", seal("carol-new-5678"))).getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(call(bobToken, HttpMethod.GET, "/api/v1/auth/me", null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
         bobToken = loginAs("carol", "carol-new-5678");
 
@@ -171,7 +174,7 @@ class LifeApiIntegrationTest {
         assertThat(call(admin, HttpMethod.POST, "/admin/api/v1/users/" + bobId + "/status",
                 Map.of("enabled", false)).getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(call(bobToken, HttpMethod.GET, "/api/v1/auth/me", null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
-        assertThat(rest.postForEntity("/api/v1/auth/login", Map.of("username", "carol", "password", "carol-new-5678"),
+        assertThat(rest.postForEntity("/api/v1/auth/login", Map.of("username", "carol", "password", seal("carol-new-5678")),
                 String.class).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
 
         // 列表和概要只有计数，能搜到 bob
@@ -186,12 +189,12 @@ class LifeApiIntegrationTest {
         assertThat(call(admin, HttpMethod.POST, "/admin/api/v1/admins/" + adminId + "/status",
                 Map.of("enabled", false)).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(call(admin, HttpMethod.POST, "/admin/api/v1/admins",
-                Map.of("username", "ops", "password", "ops-pass-1234", "role", "ADMIN")).getStatusCode()).isEqualTo(HttpStatus.OK);
+                Map.of("username", "ops", "password", seal("ops-pass-1234"), "role", "ADMIN")).getStatusCode()).isEqualTo(HttpStatus.OK);
         String ops = adminLogin("ops", "ops-pass-1234");
         assertThat(call(ops, HttpMethod.GET, "/admin/api/v1/admins", null).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
         // 普通管理员不能重置用户密码、开关注册、加减积分、加会员天数
         assertThat(call(ops, HttpMethod.POST, "/admin/api/v1/users/" + bobId + "/password",
-                Map.of("password", "carol-new-9999")).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+                Map.of("password", seal("carol-new-9999"))).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
         assertThat(call(ops, HttpMethod.PUT, "/admin/api/v1/users/register", Map.of("open", false)).getStatusCode())
                 .isEqualTo(HttpStatus.FORBIDDEN);
         assertThat(call(ops, HttpMethod.POST, "/admin/api/v1/credits/users/" + bobId + "/adjust",
@@ -201,9 +204,9 @@ class LifeApiIntegrationTest {
 
         // 改自己密码要原密码；改完新密码能登录
         assertThat(call(ops, HttpMethod.POST, "/admin/api/v1/auth/password",
-                Map.of("oldPassword", "wrong-pass-1", "newPassword", "ops-new-5678")).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+                Map.of("oldPassword", seal("wrong-pass-1"), "newPassword", seal("ops-new-5678"))).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(call(ops, HttpMethod.POST, "/admin/api/v1/auth/password",
-                Map.of("oldPassword", "ops-pass-1234", "newPassword", "ops-new-5678")).getStatusCode()).isEqualTo(HttpStatus.OK);
+                Map.of("oldPassword", seal("ops-pass-1234"), "newPassword", seal("ops-new-5678"))).getStatusCode()).isEqualTo(HttpStatus.OK);
         adminLogin("ops", "ops-new-5678");
 
         // 操作都记了日志
@@ -216,7 +219,7 @@ class LifeApiIntegrationTest {
     void membershipGrantsTimeAndRaisesDailyQuota() throws Exception {
         String admin = adminLogin("admin", "admin-pass-123");
         long daveId = body(call(admin, HttpMethod.POST, "/admin/api/v1/users",
-                Map.of("username", "dave", "password", "dave-pass-1234"))).path("data").path("id").asLong();
+                Map.of("username", "dave", "password", seal("dave-pass-1234")))).path("data").path("id").asLong();
         String dave = loginAs("dave", "dave-pass-1234");
         assertThat(body(call(dave, HttpMethod.GET, "/api/v1/membership", null)).path("data").path("active").asBoolean()).isFalse();
 
@@ -264,7 +267,7 @@ class LifeApiIntegrationTest {
     void creditsChargeDailyFirstRefundOnceAndGrantOrderOnce() throws Exception {
         String admin = adminLogin("admin", "admin-pass-123");
         long erinId = body(call(admin, HttpMethod.POST, "/admin/api/v1/users",
-                Map.of("username", "erin", "password", "erin-pass-1234"))).path("data").path("id").asLong();
+                Map.of("username", "erin", "password", seal("erin-pass-1234")))).path("data").path("id").asLong();
         String erin = loginAs("erin", "erin-pass-1234");
 
         // 第一次看就开户：注册送 300，今天送 10，流水里有一条注册赠送
@@ -337,7 +340,7 @@ class LifeApiIntegrationTest {
     @Test
     void wrongPasswordIsRejected() {
         ResponseEntity<String> response = rest.postForEntity("/api/v1/auth/login",
-                Map.of("username", "alice", "password", "wrong"), String.class);
+                Map.of("username", "alice", "password", seal("wrong")), String.class);
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 
@@ -586,7 +589,7 @@ class LifeApiIntegrationTest {
         assertThat(withUserToken.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
 
         String adminToken = objectMapper.readTree(rest.postForEntity("/admin/api/v1/auth/login",
-                        Map.of("username", "admin", "password", "admin-pass-123"), String.class).getBody())
+                        Map.of("username", "admin", "password", seal("admin-pass-123")), String.class).getBody())
                 .path("data").path("token").asText();
         ResponseEntity<String> withAdminToken = rest.exchange("/admin/api/v1/usage/daily", HttpMethod.GET,
                 new HttpEntity<>(headers(adminToken)), String.class);
@@ -612,20 +615,20 @@ class LifeApiIntegrationTest {
 
         // 密码太弱、验证码错都注册不了；密码弱时验证码不会被用掉
         assertThat(anon(HttpMethod.POST, "/api/v1/auth/register",
-                Map.of("email", email, "code", code, "password", "short")).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+                Map.of("email", email, "code", code, "password", seal("short"))).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         String wrong = code.equals("000000") ? "000001" : "000000";
         ResponseEntity<String> bad = anon(HttpMethod.POST, "/api/v1/auth/register",
-                Map.of("email", email, "code", wrong, "password", "dave-pass-123"));
+                Map.of("email", email, "code", wrong, "password", seal("dave-pass-123")));
         assertThat(bad.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(bad.getBody()).contains("验证码不对");
         JsonNode registered = body(anon(HttpMethod.POST, "/api/v1/auth/register",
-                Map.of("email", email, "code", code, "password", "dave-pass-123", "nickname", "戴夫"))).path("data");
+                Map.of("email", email, "code", code, "password", seal("dave-pass-123"), "nickname", "戴夫"))).path("data");
         String daveToken = registered.path("token").asText();
         assertThat(registered.path("user").path("email").asText()).isEqualTo("dave@example.com");
         assertThat(registered.path("user").path("nickname").asText()).isEqualTo("戴夫");
         // 验证码用过就作废
         assertThat(anon(HttpMethod.POST, "/api/v1/auth/register",
-                Map.of("email", "dave2@example.com", "code", code, "password", "dave-pass-123")).getStatusCode())
+                Map.of("email", "dave2@example.com", "code", code, "password", seal("dave-pass-123"))).getStatusCode())
                 .isEqualTo(HttpStatus.BAD_REQUEST);
 
         // 用邮箱登录（不区分大小写）；邮箱已注册时不能再要注册验证码
@@ -641,7 +644,7 @@ class LifeApiIntegrationTest {
         assertThat(anon(HttpMethod.POST, "/api/v1/auth/email-code", codeReq(email, "RESET"))
                 .getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(body(anon(HttpMethod.POST, "/api/v1/auth/password/reset", Map.of("email", email,
-                "code", lastCode("dave@example.com"), "newPassword", "dave-new-456"))).path("code").asInt()).isZero();
+                "code", lastCode("dave@example.com"), "newPassword", seal("dave-new-456")))).path("code").asInt()).isZero();
         // 重置后旧登录失效，新密码能登录
         assertThat(call(daveToken, HttpMethod.GET, "/api/v1/auth/me", null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
         assertThat(loginAs("dave@example.com", "dave-new-456")).isNotBlank();
@@ -652,10 +655,10 @@ class LifeApiIntegrationTest {
         String erinCode = lastCode("erin@example.com");
         String erinWrong = erinCode.equals("111111") ? "222222" : "111111";
         for (int i = 0; i < 5; i++) {
-            anon(HttpMethod.POST, "/api/v1/auth/register", Map.of("email", "erin@example.com", "code", erinWrong, "password", "erin-pass-123"));
+            anon(HttpMethod.POST, "/api/v1/auth/register", Map.of("email", "erin@example.com", "code", erinWrong, "password", seal("erin-pass-123")));
         }
         ResponseEntity<String> tooMany = anon(HttpMethod.POST, "/api/v1/auth/register",
-                Map.of("email", "erin@example.com", "code", erinCode, "password", "erin-pass-123"));
+                Map.of("email", "erin@example.com", "code", erinCode, "password", seal("erin-pass-123")));
         assertThat(tooMany.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
 
         // 老用户绑定邮箱：别人的邮箱绑不了；绑好后能用邮箱登录
@@ -707,7 +710,7 @@ class LifeApiIntegrationTest {
         bonusKeys.forEach(k -> redis.opsForValue().set(k, "3"));
         try {
             JsonNode hank = body(anon(HttpMethod.POST, "/api/v1/auth/register", Map.of("email", "hank@example.com",
-                    "code", lastCode("hank@example.com"), "password", "hank-pass-123"))).path("data");
+                    "code", lastCode("hank@example.com"), "password", seal("hank-pass-123")))).path("data");
             long hankId = hank.path("user").path("id").asLong();
             CreditService.View view = creditService.view(hankId);
             assertThat(view.balance()).isZero();
@@ -731,7 +734,7 @@ class LifeApiIntegrationTest {
     void accountQuestionsAreAnsweredFreeEvenWithNoCredits() throws Exception {
         String admin = adminLogin("admin", "admin-pass-123");
         long ginaId = body(call(admin, HttpMethod.POST, "/admin/api/v1/users",
-                Map.of("username", "gina", "password", "gina-pass-1234"))).path("data").path("id").asLong();
+                Map.of("username", "gina", "password", seal("gina-pass-1234")))).path("data").path("id").asLong();
         String gina = loginAs("gina", "gina-pass-1234");
         // 把积分用光：余额扣到 0，今天送的 10 用两条对话用掉
         creditService.view(ginaId);
@@ -801,6 +804,38 @@ class LifeApiIntegrationTest {
         } finally {
             redis.delete(minuteKeys);
         }
+    }
+
+    @Test
+    void userCanDeleteOwnAccount() throws Exception {
+        String admin = adminLogin("admin", "admin-pass-123");
+        long zoeId = body(call(admin, HttpMethod.POST, "/admin/api/v1/users",
+                Map.of("username", "zoe", "password", seal("zoe-pass-1234")))).path("data").path("id").asLong();
+        String zoe = loginAs("zoe", "zoe-pass-1234");
+        String conversationId = body(call(zoe, HttpMethod.POST, "/api/v1/conversations", Map.of())).path("data").path("id").asText();
+        assertThat(call(zoe, HttpMethod.PUT, "/api/v1/memories",
+                Map.of("category", "PREFERENCE", "key", "seat", "content", "靠窗")).getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        // 密码不对不注销，报 400（不是 401，免得前端以为登录过期）
+        assertThat(call(zoe, HttpMethod.POST, "/api/v1/auth/account/delete", Map.of("password", seal("wrong-pass-1")))
+                .getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        ResponseEntity<String> deleted = call(zoe, HttpMethod.POST, "/api/v1/auth/account/delete",
+                Map.of("password", seal("zoe-pass-1234")));
+        assertThat(deleted.getStatusCode()).as(deleted.getBody()).isEqualTo(HttpStatus.OK);
+
+        // 内容删光，账号里的个人信息清掉，登录态失效，原用户名登不上、可以重新注册
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM t_conversation WHERE id = ?", Integer.class, conversationId)).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM t_memory WHERE user_id = ?", Integer.class, zoeId)).isZero();
+        Map<String, Object> row = jdbc.queryForMap("SELECT username, nickname, email, status, deleted_at FROM t_user WHERE id = ?", zoeId);
+        assertThat(row.get("username")).isEqualTo("deleted-" + zoeId);
+        assertThat(row.get("email")).isNull();
+        assertThat(row.get("deleted_at")).isNotNull();
+        assertThat(call(zoe, HttpMethod.GET, "/api/v1/auth/me", null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(rest.postForEntity("/api/v1/auth/login", Map.of("username", "zoe", "password", seal("zoe-pass-1234")),
+                String.class).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        // 后台不能把注销的账号重新启用
+        assertThat(call(admin, HttpMethod.POST, "/admin/api/v1/users/" + zoeId + "/status", Map.of("enabled", true))
+                .getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
     }
 
     @Test
@@ -877,16 +912,32 @@ class LifeApiIntegrationTest {
         return new ChatResponse(List.of(new Generation(new AssistantMessage(text))));
     }
 
+    /** 和前端一样把密码加密（服务端只认加密过的密码）。 */
+    private String seal(String password) {
+        try {
+            PasswordCipher.LoginKey key = passwordCipher.loginKey();
+            java.security.PublicKey pub = java.security.KeyFactory.getInstance("RSA").generatePublic(
+                    new java.security.spec.RSAPublicKeySpec(new java.math.BigInteger(key.n(), 16), new java.math.BigInteger(key.e(), 16)));
+            javax.crypto.Cipher c = javax.crypto.Cipher.getInstance("RSA/ECB/OAEPPadding");
+            c.init(javax.crypto.Cipher.ENCRYPT_MODE, pub, new javax.crypto.spec.OAEPParameterSpec("SHA-256", "MGF1",
+                    java.security.spec.MGF1ParameterSpec.SHA256, javax.crypto.spec.PSource.PSpecified.DEFAULT));
+            return java.util.Base64.getEncoder().encodeToString(
+                    c.doFinal((key.time() + "\n" + password).getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     private String loginAs(String username, String password) throws Exception {
         ResponseEntity<String> response = rest.postForEntity("/api/v1/auth/login",
-                Map.of("username", username, "password", password), String.class);
+                Map.of("username", username, "password", seal(password)), String.class);
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         return objectMapper.readTree(response.getBody()).path("data").path("token").asText();
     }
 
     private String adminLogin(String username, String password) throws Exception {
         ResponseEntity<String> response = rest.postForEntity("/admin/api/v1/auth/login",
-                Map.of("username", username, "password", password), String.class);
+                Map.of("username", username, "password", seal(password)), String.class);
         assertThat(response.getStatusCode()).as(response.getBody()).isEqualTo(HttpStatus.OK);
         return objectMapper.readTree(response.getBody()).path("data").path("token").asText();
     }
