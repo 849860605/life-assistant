@@ -1,154 +1,121 @@
 <template>
   <view class="login">
     <view class="topbar">
-      <BrandMark :size="32" />
-      <text class="logo-text">星络 Xinglo</text>
+      <BrandMark :size="34" />
+      <text class="logo-text">星络</text>
+      <text class="logo-sep" />
+      <text class="logo-slogan">你的 AI 旅行管家</text>
     </view>
 
     <view class="main">
-      <!-- 左侧介绍：背景图放在 static/login/hero.jpg，没有就只显示渐变 -->
-      <view class="intro">
-        <view class="intro-head">
-          <view class="title">星络</view>
-          <view class="slogan"><text class="ai">AI</text> 帮你规划行程、比价预订、轻松出行</view>
+      <view class="login-card">
+        <!-- 左侧品牌：一句话说清星络做什么，配旅行插画；手机上缩成卡片顶部的横幅 -->
+        <view class="hero">
+          <view class="hero-title">分散的旅行灵感，<br />在这里成为行程。</view>
+          <view class="hero-pic"><image class="hero-img" src="/static/login/hero.jpg" mode="widthFix" /></view>
+          <view class="hero-sub">从路线规划到酒店比价，安排好每一程。</view>
         </view>
-        <view class="features">
-          <view v-for="f in FEATURES" :key="f.title" class="feature">
-            <view class="f-icon"><Icon :name="f.icon" :size="22" color="var(--accent)" /></view>
-            <view>
-              <view class="f-title">{{ f.title }}</view>
-              <view class="f-desc">{{ f.desc }}</view>
+
+        <!-- 右侧表单：登录、注册、找回密码三种状态，注册和找回密码从底部入口进 -->
+        <view class="panel">
+          <view class="panel-title">{{ TITLES[view].title }}</view>
+          <view class="panel-sub">{{ TITLES[view].sub }}</view>
+
+          <!-- 登录 -->
+          <view v-if="view === 'login'" class="form">
+            <view v-if="notice" class="ok-notice">{{ notice }}</view>
+            <view class="label">账号</view>
+            <view class="field">
+              <Icon name="user" :size="18" color="#5b6782" />
+              <input id="username" v-model="username" class="field-input" placeholder="用户名或邮箱" />
             </view>
-          </view>
-        </view>
-
-        <view class="samples">
-          <view class="sample-tag"><Icon name="sparkle" :size="14" color="var(--accent)" />西安 3 日游 · AI 行程示例</view>
-          <view class="sample-row">
-            <view class="card plan">
-              <view class="card-title"><Icon name="calendar" :size="16" color="var(--accent)" />AI 行程推荐 · 西安 3 日游</view>
-              <view v-for="d in SAMPLE_DAYS" :key="d.day" class="plan-day">
-                <text class="day-chip">{{ d.day }}</text><text>{{ d.spots }}</text>
-              </view>
+            <view class="label">密码</view>
+            <view class="field">
+              <Icon name="lock" :size="18" color="#5b6782" />
+              <input id="password" v-model="password" class="field-input" :password="!showPwd" placeholder="请输入密码" @confirm="submit" />
+              <view class="eye" :class="{ on: showPwd }" @click="showPwd = !showPwd">{{ showPwd ? "隐藏" : "显示" }}</view>
             </view>
-            <view class="mini-list">
-              <view v-for="m in SAMPLE_TOOLS" :key="m.title" class="card mini">
-                <view class="mini-icon" :class="m.tone"><Icon :name="m.icon" :size="18" color="currentColor" /></view>
-                <view class="mini-body">
-                  <view class="mini-title">{{ m.title }}</view>
-                  <view class="mini-desc">{{ m.desc }}</view>
-                </view>
-              </view>
+            <view class="forgot"><text class="link" @click="switchView('reset')">忘记密码？</text></view>
+          </view>
+
+          <!-- 注册 -->
+          <view v-else-if="view === 'register'" class="form">
+            <view v-if="options && !options.open" class="notice">暂未开放注册，请联系管理员开通账号。</view>
+            <view v-else-if="options && !options.mailReady" class="notice">暂时不能发邮件验证码，请稍后再试或联系管理员。</view>
+            <view class="label">邮箱</view>
+            <view class="field">
+              <Icon name="mail" :size="18" color="#5b6782" />
+              <input id="reg-email" v-model="email" class="field-input" placeholder="用来登录和找回密码" />
             </view>
+            <view class="label">验证码</view>
+            <view class="field">
+              <Icon name="shield" :size="18" color="#5b6782" />
+              <input id="reg-code" v-model="code" class="field-input" type="number" maxlength="6" placeholder="6 位验证码" />
+              <view class="code-btn" :class="{ on: canSendCode }" @click="sendCode('REGISTER')">{{ codeBtnText }}</view>
+            </view>
+            <view v-if="codeHint" class="hint">{{ codeHint }}</view>
+            <view class="label">昵称<text class="optional">（选填，星络这样称呼你）</text></view>
+            <view class="field">
+              <Icon name="user" :size="18" color="#5b6782" />
+              <input id="reg-nickname" v-model="nickname" class="field-input" maxlength="32" placeholder="比如：小星" />
+            </view>
+            <view class="label">密码</view>
+            <view class="field">
+              <Icon name="lock" :size="18" color="#5b6782" />
+              <input id="reg-password" v-model="password" class="field-input" :password="!showPwd" placeholder="8 位以上，字母加数字" @confirm="submit" />
+              <view class="eye" :class="{ on: showPwd }" @click="showPwd = !showPwd">{{ showPwd ? "隐藏" : "显示" }}</view>
+            </view>
+            <view v-if="passwordProblem(password)" class="hint">{{ passwordProblem(password) }}</view>
           </view>
-        </view>
-      </view>
 
-      <!-- 右侧卡片：登录、注册、找回密码三种状态 -->
-      <view class="panel">
-        <template v-if="view === 'reset'">
-          <view class="panel-title">找回密码</view>
-          <view class="panel-sub">用绑定的邮箱收验证码，设一个新密码</view>
-        </template>
-        <template v-else>
-          <view class="panel-title">{{ view === "register" ? "注册星络" : "登录星络" }}</view>
-          <view class="panel-sub">{{ view === "register" ? "用邮箱注册，验证码 10 分钟内有效" : "登录后可保存行程、继续编辑与查看预订信息" }}</view>
-          <view class="tabs">
-            <view class="tab" :class="{ on: view === 'login' }" @click="switchView('login')">登录</view>
-            <view class="tab" :class="{ on: view === 'register' }" @click="switchView('register')">注册</view>
+          <!-- 找回密码 -->
+          <view v-else class="form">
+            <view class="label">邮箱</view>
+            <view class="field">
+              <Icon name="mail" :size="18" color="#5b6782" />
+              <input id="reset-email" v-model="email" class="field-input" placeholder="绑定的邮箱" />
+            </view>
+            <view class="label">验证码</view>
+            <view class="field">
+              <Icon name="shield" :size="18" color="#5b6782" />
+              <input id="reset-code" v-model="code" class="field-input" type="number" maxlength="6" placeholder="6 位验证码" />
+              <view class="code-btn" :class="{ on: canSendCode }" @click="sendCode('RESET')">{{ codeBtnText }}</view>
+            </view>
+            <view v-if="codeHint" class="hint">{{ codeHint }}</view>
+            <view class="label">新密码</view>
+            <view class="field">
+              <Icon name="lock" :size="18" color="#5b6782" />
+              <input id="reset-password" v-model="password" class="field-input" :password="!showPwd" placeholder="8 位以上，字母加数字" />
+              <view class="eye" :class="{ on: showPwd }" @click="showPwd = !showPwd">{{ showPwd ? "隐藏" : "显示" }}</view>
+            </view>
+            <view class="field">
+              <Icon name="lock" :size="18" color="#5b6782" />
+              <input id="reset-again" v-model="again" class="field-input" :password="!showPwd" placeholder="再输一遍新密码" @confirm="submit" />
+            </view>
+            <view v-if="resetProblem" class="hint">{{ resetProblem }}</view>
           </view>
-        </template>
 
-        <!-- 登录 -->
-        <view v-if="view === 'login'" class="form">
-          <view v-if="notice" class="ok-notice">{{ notice }}</view>
-          <view class="field">
-            <Icon name="user" :size="18" color="var(--muted)" />
-            <input id="username" v-model="username" class="field-input" placeholder="用户名或邮箱" />
+          <view v-if="view !== 'reset'" class="agree" @click="agreed = !agreed">
+            <view class="box" :class="{ on: agreed }"><Icon v-if="agreed" name="check" :size="12" color="#fff" /></view>
+            <text>我已阅读并同意</text>
+            <text class="link" @click.stop="notReady('《用户协议》还没写，正式上线前补上')">《用户协议》</text>
+            <text>和</text>
+            <text class="link" @click.stop="notReady('《隐私政策》还没写，正式上线前补上')">《隐私政策》</text>
           </view>
-          <view class="field">
-            <Icon name="lock" :size="18" color="var(--muted)" />
-            <input id="password" v-model="password" class="field-input" password placeholder="请输入密码" @confirm="submit" />
-          </view>
-        </view>
 
-        <!-- 注册 -->
-        <view v-else-if="view === 'register'" class="form">
-          <view v-if="options && !options.open" class="notice">暂未开放注册，请联系管理员开通账号。</view>
-          <view v-else-if="options && !options.mailReady" class="notice">暂时不能发邮件验证码，请稍后再试或联系管理员。</view>
-          <view class="field">
-            <Icon name="mail" :size="18" color="var(--muted)" />
-            <input id="reg-email" v-model="email" class="field-input" placeholder="邮箱" />
-          </view>
-          <view class="field">
-            <Icon name="shield" :size="18" color="var(--muted)" />
-            <input id="reg-code" v-model="code" class="field-input" type="number" maxlength="6" placeholder="6 位验证码" />
-            <view class="code-btn" :class="{ on: canSendCode }" @click="sendCode('REGISTER')">{{ codeBtnText }}</view>
-          </view>
-          <view v-if="codeHint" class="hint left">{{ codeHint }}</view>
-          <view class="field">
-            <Icon name="user" :size="18" color="var(--muted)" />
-            <input id="reg-nickname" v-model="nickname" class="field-input" maxlength="32" placeholder="昵称（选填，星络这样称呼你）" />
-          </view>
-          <view class="field">
-            <Icon name="lock" :size="18" color="var(--muted)" />
-            <input id="reg-password" v-model="password" class="field-input" password placeholder="设置密码：8 位以上，字母加数字" @confirm="submit" />
-          </view>
-          <view v-if="passwordProblem(password)" class="hint left">{{ passwordProblem(password) }}</view>
-        </view>
+          <button class="submit" :disabled="!canSubmit" @click="submit">{{ submitText }}</button>
+          <view v-if="error" class="error">{{ error }}</view>
 
-        <!-- 找回密码 -->
-        <view v-else class="form">
-          <view class="field">
-            <Icon name="mail" :size="18" color="var(--muted)" />
-            <input id="reset-email" v-model="email" class="field-input" placeholder="绑定的邮箱" />
+          <view class="switch">
+            <text v-if="view === 'login'">还没有账号？<text class="link" @click="switchView('register')">立即注册</text></text>
+            <text v-else-if="view === 'register'">已有账号？<text class="link" @click="switchView('login')">去登录</text></text>
+            <text v-else class="link" @click="switchView('login')">‹ 返回登录</text>
           </view>
-          <view class="field">
-            <Icon name="shield" :size="18" color="var(--muted)" />
-            <input id="reset-code" v-model="code" class="field-input" type="number" maxlength="6" placeholder="6 位验证码" />
-            <view class="code-btn" :class="{ on: canSendCode }" @click="sendCode('RESET')">{{ codeBtnText }}</view>
-          </view>
-          <view v-if="codeHint" class="hint left">{{ codeHint }}</view>
-          <view class="field">
-            <Icon name="lock" :size="18" color="var(--muted)" />
-            <input id="reset-password" v-model="password" class="field-input" password placeholder="新密码：8 位以上，字母加数字" />
-          </view>
-          <view class="field">
-            <Icon name="lock" :size="18" color="var(--muted)" />
-            <input id="reset-again" v-model="again" class="field-input" password placeholder="再输一遍新密码" @confirm="submit" />
-          </view>
-          <view v-if="resetProblem" class="hint left">{{ resetProblem }}</view>
-        </view>
-
-        <view v-if="view !== 'reset'" class="agree" @click="agreed = !agreed">
-          <view class="box" :class="{ on: agreed }"><Icon v-if="agreed" name="check" :size="12" color="#fff" /></view>
-          <text>我已阅读并同意</text>
-          <text class="link" @click.stop="notReady('《用户协议》还没写，正式上线前补上')">《用户协议》</text>
-          <text class="link" @click.stop="notReady('《隐私政策》还没写，正式上线前补上')">《隐私政策》</text>
-        </view>
-
-        <button class="submit" :disabled="!canSubmit" @click="submit">{{ submitText }}</button>
-        <view v-if="error" class="error">{{ error }}</view>
-
-        <view class="links">
-          <template v-if="view === 'reset'">
-            <text @click="switchView('login')">‹ 返回登录</text>
-          </template>
-          <template v-else>
-            <text @click="switchView('reset')">忘记密码</text>
-            <text class="sep">|</text>
-            <text v-if="view === 'login'">还没有账号？<text class="link" @click="switchView('register')">注册</text></text>
-            <text v-else>已有账号？<text class="link" @click="switchView('login')">去登录</text></text>
-          </template>
-        </view>
-
-        <view class="trust">
-          <view><Icon name="lock" :size="15" color="var(--muted)" />密码加密存储</view>
-          <text class="sep">|</text>
-          <view><Icon name="shield" :size="15" color="var(--muted)" />邮箱只用于登录和找回密码</view>
         </view>
       </view>
     </view>
+
+    <view class="footer">星络 · 你的 AI 旅行管家</view>
   </view>
 </template>
 
@@ -162,23 +129,12 @@ import Icon from "../../components/Icon.vue";
 import BrandMark from "../../components/BrandMark.vue";
 import { looksLikeEmail, passwordProblem } from "../../utils/password";
 
-/** 左侧三条功能介绍 */
-const FEATURES = [
-  { icon: "calendar", title: "智能生成行程", desc: "基于兴趣与天数，AI 一键定制个性化旅行计划" },
-  { icon: "plane", title: "机票酒店比价", desc: "携程、飞猪、美团、途牛多平台比价，按价格排序" },
-  { icon: "pin", title: "地图天气美食一站式整合", desc: "行程路线、实时天气、顺路美食与景点门票" },
-];
-/** 示例行程（只是展示用，不带价格） */
-const SAMPLE_DAYS = [
-  { day: "Day 1", spots: "城墙 · 钟楼 · 回民街" },
-  { day: "Day 2", spots: "大雁塔 · 陕西历史博物馆" },
-  { day: "Day 3", spots: "大唐不夜城 · 盛唐文化体验" },
-];
-const SAMPLE_TOOLS = [
-  { icon: "plane", tone: "blue", title: "机票比价", desc: "四个平台同一航班放一起比" },
-  { icon: "bed", tone: "violet", title: "酒店比价", desc: "按离行程景点的远近推荐" },
-  { icon: "food", tone: "orange", title: "美食推荐", desc: "按当天路线找顺路的店" },
-];
+/** 三种状态各自的标题和副标题 */
+const TITLES = {
+  login: { title: "欢迎回到星络", sub: "登录，继续规划你的下一段旅程。" },
+  register: { title: "注册星络", sub: "用邮箱注册，验证码 10 分钟内有效。" },
+  reset: { title: "找回密码", sub: "用绑定的邮箱收验证码，设一个新密码。" },
+} as const;
 
 /** 卡片现在是登录、注册还是找回密码 */
 const view = ref<"login" | "register" | "reset">("login");
@@ -189,6 +145,8 @@ const code = ref("");
 const nickname = ref("");
 const again = ref("");
 const agreed = ref(false);
+/** 密码框是否显示明文 */
+const showPwd = ref(false);
 const loading = ref(false);
 const error = ref("");
 /** 登录卡片上的绿色提示（比如"密码已重置"） */
@@ -221,6 +179,7 @@ function switchView(next: "login" | "register" | "reset") {
   codeHint.value = "";
   password.value = "";
   again.value = "";
+  showPwd.value = false;
 }
 
 const registerBlocked = computed(() => !!options.value && (!options.value.open || !options.value.mailReady));
@@ -336,115 +295,117 @@ function forgetOtherUser(userId: number) {
 </script>
 
 <style scoped>
+/* 版式：顶栏品牌 + 居中一张大卡片（左旅行插画、右表单），底部一行品牌字；手机上插画缩成卡片顶部横幅 */
 .login {
   min-height: 100vh;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  background:
-    url("/static/login/hero.jpg") left bottom / 62% auto no-repeat,
-    linear-gradient(160deg, #eef4ff 0%, #dfeafc 45%, #f3f7ff 100%);
+  background: #f7f9fc;
+  color: #1b2333;
 }
 .topbar {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 14px max(24px, env(safe-area-inset-left)) 14px max(24px, env(safe-area-inset-right));
-  background: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(8px);
+  padding: 20px max(32px, env(safe-area-inset-left)) 8px max(32px, env(safe-area-inset-right));
 }
-.logo-text { font-size: 20px; font-weight: 800; color: #142046; }
+.logo-text { font-size: 24px; font-weight: 800; color: #0f1a3d; letter-spacing: 0.04em; }
+.logo-sep { width: 1px; height: 18px; background: #c9d1df; margin: 0 6px; }
+.logo-slogan { font-size: 16px; color: #4b5874; }
 .main {
   flex: 1;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 460px;
-  gap: 48px;
+  display: flex;
   align-items: center;
+  justify-content: center;
+  padding: 24px max(24px, env(safe-area-inset-left)) 24px max(24px, env(safe-area-inset-right));
+}
+.login-card {
   width: 100%;
-  max-width: 1360px;
-  margin: 0 auto;
-  padding: 32px max(24px, env(safe-area-inset-left)) 40px max(24px, env(safe-area-inset-right));
-  box-sizing: border-box;
+  max-width: 1180px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.86fr);
+  background: #fff;
+  border: 1px solid #e3e9f3;
+  border-radius: 20px;
+  box-shadow: 0 16px 48px rgba(20, 40, 90, 0.08);
+  overflow: hidden;
 }
 
-/* 左侧介绍 */
-.intro { display: flex; flex-direction: column; gap: 32px; min-width: 0; }
-.title { font-size: 56px; font-weight: 900; color: #0f1a3d; letter-spacing: 0.02em; line-height: 1.1; }
-.slogan { margin-top: 10px; font-size: 24px; font-weight: 700; font-style: italic; color: #142046; }
-.slogan .ai { color: var(--accent); font-size: 30px; font-weight: 900; }
-.features { display: flex; flex-direction: column; gap: 20px; }
-.feature { display: flex; align-items: center; gap: 14px; }
-.f-icon { width: 52px; height: 52px; border-radius: 14px; background: rgba(255, 255, 255, 0.85); box-shadow: 0 4px 14px rgba(37, 99, 235, 0.1); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-.f-title { font-size: 18px; font-weight: 800; color: #142046; }
-.f-desc { margin-top: 3px; font-size: 14px; color: #4b5874; }
-
-.samples { display: flex; flex-direction: column; gap: 12px; }
-.sample-tag { align-self: flex-start; display: flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 999px; background: rgba(255, 255, 255, 0.85); font-size: 14px; font-weight: 700; color: #1d3a8a; }
-.sample-row { display: flex; gap: 14px; align-items: stretch; flex-wrap: wrap; }
-.card { background: rgba(255, 255, 255, 0.88); border-radius: 16px; box-shadow: 0 8px 24px rgba(20, 40, 90, 0.1); backdrop-filter: blur(6px); }
-.plan { flex: 1 1 300px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; }
-.card-title { display: flex; align-items: center; gap: 6px; font-size: 15px; font-weight: 800; color: #142046; }
-.plan-day { display: flex; align-items: center; gap: 10px; font-size: 14px; color: #33405c; }
-.day-chip { padding: 2px 8px; border-radius: 6px; background: var(--accent-soft); color: var(--accent); font-size: 12px; font-weight: 700; }
-.mini-list { flex: 1 1 240px; display: flex; flex-direction: column; gap: 10px; }
-.mini { display: flex; align-items: center; gap: 12px; padding: 10px 14px; }
-.mini-icon { width: 34px; height: 34px; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
-.mini-icon.blue { background: #e6eefd; color: #2563eb; }
-.mini-icon.violet { background: #efeafd; color: #6d4fd8; }
-.mini-icon.orange { background: #fdf0e3; color: #e8590c; }
-.mini-title { font-size: 14px; font-weight: 800; color: #142046; }
-.mini-desc { font-size: 12px; color: #5b6782; }
-
-/* 右侧登录卡片 */
-.panel {
-  background: #fff;
-  border-radius: 22px;
-  box-shadow: 0 18px 48px rgba(20, 40, 90, 0.14);
-  padding: 40px 40px 24px;
+/* 左侧品牌 */
+.hero {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  color: #1b2333;
+  min-height: 560px;
+  background: linear-gradient(180deg, #e3effd 0%, #e8f3fe 60%, #e3f1fe 100%);
 }
-.panel-title { text-align: center; font-size: 30px; font-weight: 900; color: #0f1a3d; }
-.panel-sub { text-align: center; font-size: 14px; color: #5b6782; margin-top: -6px; }
-.tabs { display: grid; grid-template-columns: 1fr 1fr; background: #f1f4f9; border-radius: 12px; padding: 4px; margin-top: 8px; }
-.tab { text-align: center; padding: 10px 0; font-size: 15px; font-weight: 600; color: #33405c; border-radius: 9px; cursor: pointer; }
-.tab.on { background: #fff; color: var(--accent); font-weight: 800; box-shadow: inset 0 -3px 0 var(--accent); }
-.form { display: flex; flex-direction: column; gap: 14px; }
+.hero-title {
+  padding: 56px 56px 0;
+  font-size: 40px;
+  line-height: 1.4;
+  font-weight: 900;
+  color: #0f1a3d;
+  letter-spacing: 0.02em;
+}
+.hero-pic { margin-top: auto; }
+.hero-img { display: block; width: 100%; }
+.hero-sub { padding: 6px 56px 32px; font-size: 16px; color: #33405c; }
+
+/* 右侧表单 */
+.panel {
+  padding: 56px 56px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.panel-title { font-size: 34px; font-weight: 900; color: #0f1a3d; letter-spacing: 0.02em; }
+.panel-sub { font-size: 16px; color: #5b6782; margin: -4px 0 12px; }
+.form { display: flex; flex-direction: column; gap: 10px; }
+.label { margin-top: 6px; font-size: 15px; font-weight: 700; color: #1b2333; }
+.optional { font-weight: 400; color: #7a859c; font-size: 13px; }
 .notice { font-size: 13px; color: #9a5b12; background: #fdf3e3; border-radius: 8px; padding: 8px 12px; }
-.field { display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 12px 0 14px; border: 1px solid #dfe4ee; border-radius: 10px; background: #fff; }
+.ok-notice { font-size: 13px; color: #17703a; background: #e7f6ec; border-radius: 8px; padding: 8px 12px; }
+.field { display: flex; align-items: center; gap: 10px; height: 50px; padding: 0 14px; border: 1px solid #d6dce8; border-radius: 10px; background: #fff; }
 .field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12); }
-.field.disabled { background: #f7f8fb; }
 .field-input { flex: 1; min-width: 0; height: 100%; font-size: 15px; color: #1b2333; background: transparent; border: none; }
+.eye { font-size: 13px; color: #7a859c; cursor: pointer; padding: 4px 2px; white-space: nowrap; }
+.eye.on { color: var(--accent); }
 .code-btn { padding: 6px 12px; border: 1px solid #c9d6f3; border-radius: 8px; color: #9aa6bf; font-size: 14px; font-weight: 600; white-space: nowrap; }
 .code-btn.on { color: var(--accent); border-color: var(--accent); cursor: pointer; }
-.ok-notice { font-size: 13px; color: #17703a; background: #e7f6ec; border-radius: 8px; padding: 8px 12px; }
-.agree { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; font-size: 13px; color: #4b5874; cursor: pointer; }
-.box { width: 16px; height: 16px; border: 1px solid #b9c3d6; border-radius: 4px; margin-right: 6px; display: flex; align-items: center; justify-content: center; }
+.forgot { display: flex; justify-content: flex-end; font-size: 14px; }
+.hint { font-size: 13px; color: #5b6782; }
+.agree { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; margin-top: 6px; font-size: 14px; color: #4b5874; cursor: pointer; }
+.box { width: 18px; height: 18px; border: 1px solid #b9c3d6; border-radius: 4px; margin-right: 8px; display: flex; align-items: center; justify-content: center; }
 .box.on { background: var(--accent); border-color: var(--accent); }
 .link { color: var(--accent); cursor: pointer; }
-.submit { height: 52px; line-height: 52px; border-radius: 12px; background: var(--accent); color: #fff; font-size: 18px; font-weight: 800; border: none; margin: 4px 0 0; }
+.submit { height: 52px; line-height: 52px; border-radius: 10px; background: var(--accent); color: #fff; font-size: 18px; font-weight: 800; border: none; margin: 8px 0 0; letter-spacing: 0.1em; }
 .submit[disabled] { background: #9db8f2; color: #fff; }
 .error { color: var(--danger); font-size: 14px; text-align: center; }
-.links { display: flex; justify-content: center; align-items: center; gap: 24px; font-size: 14px; color: #4b5874; }
-.links > text { cursor: pointer; }
-.sep { color: #d3d9e4; }
-.hint { text-align: center; font-size: 13px; color: #5b6782; }
-.hint.left { text-align: left; margin-top: -6px; }
-.trust { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 16px; padding: 12px; margin-top: 4px; background: #f6f8fc; border-radius: 12px; font-size: 13px; color: #5b6782; }
-.trust > view { display: flex; align-items: center; gap: 6px; }
+.switch { text-align: center; font-size: 15px; color: #33405c; margin-top: 4px; }
+.footer { padding: 8px 0 24px; text-align: center; font-size: 13px; color: #7a859c; letter-spacing: 0.04em; }
 
-/* 窄屏：只留登录卡片，介绍收成标题 */
-@media (max-width: 960px) {
-  .login { background: linear-gradient(160deg, #eef4ff 0%, #dfeafc 45%, #f3f7ff 100%); }
-  .main { grid-template-columns: minmax(0, 1fr); gap: 20px; padding-top: 20px; }
-  .features, .samples { display: none; }
-  .title { font-size: 34px; }
-  .slogan { font-size: 17px; }
-  .slogan .ai { font-size: 20px; }
-  .panel { padding: 28px 20px 20px; }
-  .panel-title { font-size: 24px; }
-  .trust .sep { display: none; }
+/* 平板：两栏变窄 */
+@media (max-width: 1100px) {
+  .hero-title { padding: 44px 40px 0; font-size: 32px; }
+  .hero-sub { padding: 6px 40px 28px; }
+  .panel { padding: 44px 40px 32px; }
+}
+/* 手机：插画缩成卡片顶部的横幅，表单在下面 */
+@media (max-width: 760px) {
+  .topbar { padding: 14px max(16px, env(safe-area-inset-left)) 4px max(16px, env(safe-area-inset-right)); }
+  .logo-text { font-size: 20px; }
+  .logo-slogan { font-size: 14px; }
+  .main { align-items: flex-start; padding: 12px max(12px, env(safe-area-inset-left)) 12px max(12px, env(safe-area-inset-right)); }
+  .login-card { grid-template-columns: minmax(0, 1fr); border-radius: 16px; }
+  .hero { min-height: 0; }
+  .hero-title { padding: 18px 20px 4px; font-size: 21px; line-height: 1.45; }
+  /* 只露出插画下半部分（山和城楼），上面的天空裁掉 */
+  .hero-pic { position: relative; height: 132px; overflow: hidden; }
+  .hero-img { position: absolute; left: 0; right: 0; bottom: 0; }
+  .hero-sub { display: none; }
+  .panel { padding: 24px 20px 24px; gap: 12px; }
+  .panel-title { font-size: 26px; }
+  .panel-sub { font-size: 14px; margin-bottom: 4px; }
 }
 </style>
