@@ -1,7 +1,7 @@
 package com.lifeassistant.api.web;
 
 import com.lifeassistant.common.api.ApiResponse;
-import com.lifeassistant.core.auth.MediaTicket;
+import com.lifeassistant.api.auth.MediaAuth;
 import com.lifeassistant.core.integration.IntegrationSettings;
 import com.lifeassistant.core.place.AmapPlaceService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -45,7 +45,7 @@ public class AmapJsController {
     private static final int MAX_STOPS = 15;
 
     private final IntegrationSettings settings;
-    private final MediaTicket mediaTicket;
+    private final MediaAuth mediaAuth;
     private final AmapPlaceService places;
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
 
@@ -90,7 +90,7 @@ public class AmapJsController {
      */
     @GetMapping("/amap/{mt}/**")
     public ResponseEntity<byte[]> proxy(@PathVariable String mt, HttpServletRequest request) {
-        if (mediaTicket.verify(mt).isEmpty()) {
+        if (mediaAuth.verify(mt).isEmpty()) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
         String security = settings.value("amap-js", "js-security");
@@ -113,14 +113,34 @@ public class AmapJsController {
             HttpResponse<byte[]> res = http.send(HttpRequest.newBuilder(URI.create(target)).timeout(Duration.ofSeconds(10))
                     .header("User-Agent", request.getHeader("User-Agent") == null ? "Mozilla/5.0" : request.getHeader("User-Agent"))
                     .GET().build(), HttpResponse.BodyHandlers.ofByteArray());
-            String type = res.headers().firstValue("Content-Type").orElse(MediaType.APPLICATION_JSON_VALUE);
-            return ResponseEntity.status(res.statusCode()).contentType(MediaType.parseMediaType(type)).body(res.body());
+            String type = safeType(res.headers().firstValue("Content-Type").orElse(MediaType.APPLICATION_JSON_VALUE));
+            return ResponseEntity.status(res.statusCode()).contentType(MediaType.parseMediaType(type))
+                    .header("X-Content-Type-Options", "nosniff").body(res.body());
         } catch (Exception e) {
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
             }
             log.warn("转发高德请求失败 {}：{}", path, e.getMessage());
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY).build();
+        }
+    }
+
+    /**
+     * 转发回去的 Content-Type 只放行脚本、JSON、图片、纯文本和高德矢量数据常用的几种，其他（比如 text/html）一律当成二进制，
+     * 防止借这个同源地址返回能执行的网页。
+     */
+    static String safeType(String type) {
+        try {
+            MediaType t = MediaType.parseMediaType(type);
+            String main = t.getType().toLowerCase(java.util.Locale.ROOT);
+            String sub = t.getSubtype().toLowerCase(java.util.Locale.ROOT);
+            boolean ok = main.equals("image") && !sub.contains("svg")
+                    || main.equals("text") && (sub.equals("plain") || sub.equals("javascript") || sub.equals("css"))
+                    || main.equals("application") && (sub.equals("json") || sub.endsWith("+json") || sub.equals("javascript")
+                    || sub.equals("x-javascript") || sub.equals("octet-stream") || sub.equals("x-protobuf") || sub.equals("protobuf"));
+            return ok ? type : MediaType.APPLICATION_OCTET_STREAM_VALUE;
+        } catch (RuntimeException e) {
+            return MediaType.APPLICATION_OCTET_STREAM_VALUE;
         }
     }
 }

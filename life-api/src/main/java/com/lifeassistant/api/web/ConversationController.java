@@ -10,6 +10,9 @@ import com.lifeassistant.core.conversation.ChatMessageEntity;
 import com.lifeassistant.core.conversation.Conversation;
 import com.lifeassistant.core.conversation.ConversationService;
 import com.lifeassistant.core.file.UploadService;
+import com.lifeassistant.core.limit.RateLimiter;
+import com.lifeassistant.core.member.AccountQuestion;
+import com.lifeassistant.core.member.AccountReplies;
 import com.lifeassistant.core.member.ChatQuota;
 import com.lifeassistant.core.member.CreditService;
 import com.lifeassistant.core.member.MembershipService;
@@ -55,6 +58,11 @@ public class ConversationController {
     private final ChatQuota chatQuota;
     private final CreditService credits;
     private final MembershipService membership;
+    private final AccountReplies accountReplies;
+    private final RateLimiter limiter;
+
+    /** 单纯问积分的消息每人每天最多免费答多少次，超过就照常走模型、照常扣（防止拿它刷库） */
+    static final int FREE_ACCOUNT_ANSWERS_PER_DAY = 30;
 
     /**
      * 发消息请求体：内容最长 4000 字；files 是这条消息带的上传文件 id，最多 5 个；
@@ -112,15 +120,24 @@ public class ConversationController {
     public Flux<ServerSentEvent<ChatEvent>> send(@PathVariable String id, @Valid @RequestBody SendMessageRequest request) {
         // 身份必须在请求线程里取，后面的图和工具都在其他线程执行
         UserCtx ctx = authFacade.current();
+        // 先校验会话是不是自己的、附件能不能用，都没问题了才扣积分
+        conversationService.getOwned(ctx, id);
+        String input = uploadService.compose(ctx, request.content(), request.files());
+        boolean chip = Boolean.TRUE.equals(request.chip());
+        boolean noFiles = request.files() == null || request.files().isEmpty();
+        // 单纯问自己积分（还有多少、花哪了、多少钱、怎么买）：按模板答，不扣积分、不进模型、不占会员每天的次数，积分是 0 也能问
+        AccountQuestion.Intent intent = chip || !noFiles ? null : AccountQuestion.match(request.content());
+        if (intent != null && limiter.perDay("account-answer:" + ctx.userId(), FREE_ACCOUNT_ANSWERS_PER_DAY)) {
+            return chatOrchestrator.quickReply(ctx, id, request.content(), accountReplies.answer(ctx.userId(), intent))
+                    .map(event -> ServerSentEvent.builder(event).event(event.type()).build());
+        }
         // 发一条扣一次对话的积分，不够直接报 402、不进模型；老会员到期前不扣积分，但仍有每天的次数上限防刷
         if (membership.status(ctx.userId()).active()) {
             chatQuota.consume(ctx.userId());
         }
         CreditService.Charge charge = credits.spend(ctx.userId(), CreditService.CHAT, id, false);
-        String input = uploadService.compose(ctx, request.content(), request.files());
         // 新的一轮：清掉上一轮工具打的标记（比如"正在规划"）
         turnFlags.start(id, request.content());
-        boolean chip = Boolean.TRUE.equals(request.chip());
         if (chip) {
             // 记下点了哪个快捷回复，以后看哪些有用
             try {
@@ -130,7 +147,7 @@ public class ConversationController {
                 // 统计失败不影响发消息
             }
         }
-        // 这一轮出错了（模型或网络问题，不是用户主动停）就把对话的积分退回
+        // 这一轮出错了（模型或网络问题、超时，不是用户主动停）就把对话的积分退回
         java.util.concurrent.atomic.AtomicBoolean refunded = new java.util.concurrent.atomic.AtomicBoolean();
         Runnable refund = () -> {
             if (refunded.compareAndSet(false, true)) {
@@ -147,13 +164,14 @@ public class ConversationController {
                 .map(event -> ServerSentEvent.builder(event).event(event.type()).build());
     }
 
-    /** 回答过程中补充的一句话：id 是前端给的编号，星络看到后用它回一个进度事件。 */
-    public record InterjectRequest(@NotBlank @Size(max = 64) String id, @NotBlank @Size(max = 2000) String content) {
+    /** 回答过程中补充的一句话：id 是前端给的编号，星络看到后用它回一个进度事件；补充最长 500 字（更长的等这轮结束后正常发）。 */
+    public record InterjectRequest(@NotBlank @Size(max = 64) String id,
+                                   @NotBlank @Size(max = CardHub.MAX_INTERJECTION_LENGTH, message = "补充最多 500 个字") String content) {
     }
 
     /**
      * POST /api/v1/conversations/{id}/interject：回答还没结束时补充一句，星络在下一次工具调用结束后看到并调整。
-     * accepted 为 false 表示这个会话现在没有正在进行的回答，前端改成正常发送。
+     * accepted 为 false 表示这个会话现在没有正在进行的回答，或者这一轮已经补充过 3 句了，前端等这轮结束后改成正常发送。
      */
     @PostMapping("/{id}/interject")
     public ApiResponse<Map<String, Boolean>> interject(@PathVariable String id, @Valid @RequestBody InterjectRequest request) {

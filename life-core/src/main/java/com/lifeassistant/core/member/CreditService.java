@@ -91,6 +91,16 @@ public class CreditService {
         return new View(a.balance(), a.dailyLeft(), plan.daily(), m.active(), m.active() ? m.expiresAt() : null, plan);
     }
 
+    /**
+     * 开户但不送注册积分（同一 IP 当天注册太多个号时用），每天的赠送照常；已经开过户的不变。
+     * 注册积分本来是第一次用到时才送，先把户开好，之后就不会再送了。
+     */
+    public void openWithoutSignupBonus(long userId) {
+        jdbc.update("""
+                INSERT INTO t_credit_account (user_id, balance, daily_date, daily_left) VALUES (?, 0, ?, ?)
+                ON CONFLICT (user_id) DO NOTHING""", userId, today(), plan().daily());
+    }
+
     /** 某人最近的流水，新的在前。 */
     public List<Entry> ledger(long userId, int limit) {
         return jdbc.query("""

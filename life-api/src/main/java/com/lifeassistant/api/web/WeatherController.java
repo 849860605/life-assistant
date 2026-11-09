@@ -24,6 +24,7 @@ public class WeatherController {
     private final com.lifeassistant.core.weather.WeatherBoard weatherBoard;
     private final com.lifeassistant.skill.travel.trip.TripWeather tripWeather;
     private final com.lifeassistant.core.auth.AuthFacade authFacade;
+    private final com.lifeassistant.api.config.SearchLimits limits;
 
     /** 今天的天气：城市名、白天天气、最低和最高气温。 */
     public record Today(String city, String text, int tempMin, int tempMax) {
@@ -49,7 +50,7 @@ public class WeatherController {
     @GetMapping("/board")
     public ApiResponse<com.lifeassistant.core.weather.WeatherBoard.Board> board(@RequestParam String city,
                                                                                @RequestParam(defaultValue = "false") boolean refresh) {
-        return ApiResponse.ok(weatherBoard.board(city, refresh));
+        return ApiResponse.ok(weatherBoard.board(city, limits.refresh(refresh)));
     }
 
     /** GET /api/v1/weather/trip/{id}：行程每天的天气（在预报范围内的）和下雨天的对调建议。 */
@@ -57,6 +58,6 @@ public class WeatherController {
     public ApiResponse<com.lifeassistant.skill.travel.trip.TripWeather.TripForecast> trip(
             @org.springframework.web.bind.annotation.PathVariable long id,
             @RequestParam(defaultValue = "false") boolean refresh) {
-        return ApiResponse.ok(tripWeather.forecast(authFacade.current(), id, refresh));
+        return ApiResponse.ok(tripWeather.forecast(authFacade.current(), id, limits.refresh(refresh)));
     }
 }

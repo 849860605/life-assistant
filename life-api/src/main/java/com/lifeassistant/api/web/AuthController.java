@@ -5,10 +5,14 @@ import com.lifeassistant.common.error.BizException;
 import cn.dev33.satoken.stp.StpUtil;
 import cn.dev33.satoken.stp.parameter.SaLoginParameter;
 import com.lifeassistant.api.auth.LoginGuard;
+import com.lifeassistant.api.auth.MediaAuth;
 import com.lifeassistant.common.api.ApiResponse;
 import com.lifeassistant.core.auth.MediaTicket;
+import com.lifeassistant.core.limit.RateLimiter;
+import com.lifeassistant.core.member.CreditService;
 import com.lifeassistant.core.setting.AppSettingService;
 import com.lifeassistant.core.user.EmailCodeService;
+import com.lifeassistant.core.user.HumanCheck;
 import com.lifeassistant.core.user.PasswordPolicy;
 import com.lifeassistant.core.user.User;
 import com.lifeassistant.core.user.UserService;
@@ -16,6 +20,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -27,16 +32,23 @@ import java.util.Locale;
 /**
  * 用户登录态接口：登录（用户名或邮箱）、登出、查询当前用户、改密码，以及邮箱验证码注册、找回密码、绑定邮箱。
  */
+@Slf4j
 @RestController
 @RequestMapping("/api/v1/auth")
 @RequiredArgsConstructor
 public class AuthController {
 
+    /** 同一个 IP 每天最多几个新注册的账号能拿到注册赠送积分，再多的照样能注册，只是不送 */
+    static final int SIGNUP_BONUS_PER_IP_DAY = 3;
+
     private final UserService userService;
-    private final MediaTicket mediaTicket;
+    private final MediaAuth mediaAuth;
     private final LoginGuard loginGuard;
     private final EmailCodeService emailCodes;
     private final AppSettingService settings;
+    private final HumanCheck humanCheck;
+    private final RateLimiter limiter;
+    private final CreditService credits;
 
     /** 登录请求体；device 可空，默认 WEB。 */
     public record LoginRequest(@NotBlank String username, @NotBlank String password, String device) {
@@ -57,7 +69,9 @@ public class AuthController {
     /** POST /api/v1/auth/login：账号密码登录，返回 token；连续输错会暂停登录（见 LoginGuard）。device 区分设备类型（WEB / MOBILE，默认 WEB），同类设备再次登录会顶掉旧会话。 */
     @PostMapping("/login")
     public ApiResponse<LoginResponse> login(@Valid @RequestBody LoginRequest request, HttpServletRequest http) {
-        User user = loginGuard.guard("user", request.username(), http.getRemoteAddr(),
+        // 错误次数按账号（用户 id）记，用户名和邮箱换着输也绕不过上限；账号不存在时按输入的登录名记
+        Long userId = userService.findByLogin(request.username()).map(User::getId).orElse(null);
+        User user = loginGuard.guard("user", request.username(), userId, http.getRemoteAddr(),
                 () -> userService.authenticate(request.username(), request.password()));
         return ApiResponse.ok(signIn(user, request.device()));
     }
@@ -79,8 +93,17 @@ public class AuthController {
         return ApiResponse.ok(new RegisterOptions(settings.registerOpen(), emailCodes.ready()));
     }
 
-    /** 要验证码：purpose 是 REGISTER 注册、RESET 找回密码、BIND 绑定邮箱（要已登录）。 */
-    public record EmailCodeRequest(@NotBlank String email, @NotBlank String purpose) {
+    /**
+     * 要验证码：purpose 是 REGISTER 注册、RESET 找回密码、BIND 绑定邮箱（要已登录）；
+     * challenge 是从 /auth/challenge 领的题目，nonce 是浏览器算出来的答案。
+     */
+    public record EmailCodeRequest(@NotBlank String email, @NotBlank String purpose, String challenge, String nonce) {
+    }
+
+    /** GET /api/v1/auth/challenge：领一道真人检查的题（5 分钟有效、只能用一次），算出答案后才能要验证码。 */
+    @GetMapping("/challenge")
+    public ApiResponse<HumanCheck.Challenge> challenge() {
+        return ApiResponse.ok(humanCheck.issue());
     }
 
     /** 发验证码的结果：cooldown 是多少秒后才能再要一次。 */
@@ -93,6 +116,7 @@ public class AuthController {
      */
     @PostMapping("/email-code")
     public ApiResponse<EmailCodeSent> emailCode(@Valid @RequestBody EmailCodeRequest request, HttpServletRequest http) {
+        humanCheck.verify(request.challenge(), request.nonce());
         String email = UserService.checkEmail(request.email());
         EmailCodeService.Purpose purpose;
         try {
@@ -104,16 +128,17 @@ public class AuthController {
         switch (purpose) {
             case REGISTER -> {
                 requireRegisterOpen();
-                if (userService.findByEmail(email).isPresent()) {
+                // 同一个邮箱的别名（a+1@x.com、gmail 加点）也算注册过
+                if (userService.findEmailOwner(email, null).isPresent()) {
                     throw new BizException(ErrorCode.CONFLICT, "这个邮箱已注册，直接登录或找回密码");
                 }
             }
             case RESET -> deliver = userService.findByEmail(email).isPresent();
             case BIND -> {
                 long me = StpUtil.getLoginIdAsLong();
-                userService.findByEmail(email).filter(u -> u.getId() != me).ifPresent(u -> {
+                if (userService.findEmailOwner(email, me).isPresent()) {
                     throw new BizException(ErrorCode.CONFLICT, "这个邮箱已被其他账号绑定");
-                });
+                }
             }
         }
         emailCodes.send(email, purpose, http.getRemoteAddr(), deliver);
@@ -125,14 +150,17 @@ public class AuthController {
                                   String nickname, String device) {
     }
 
-    /** POST /api/v1/auth/register：邮箱 + 验证码注册，成功后直接登录（返回和登录一样）。 */
+    /**
+     * POST /api/v1/auth/register：邮箱 + 验证码注册，成功后直接登录（返回和登录一样）。
+     * 同一个 IP 当天注册的前几个账号送注册积分，再多的照样注册成功，只是不送（防止批量注册领积分）。
+     */
     @PostMapping("/register")
-    public ApiResponse<LoginResponse> register(@Valid @RequestBody RegisterRequest request) {
+    public ApiResponse<LoginResponse> register(@Valid @RequestBody RegisterRequest request, HttpServletRequest http) {
         requireRegisterOpen();
         String email = UserService.checkEmail(request.email());
         // 先查邮箱和密码，不合规时不用掉验证码
         PasswordPolicy.check(request.password());
-        if (userService.findByEmail(email).isPresent()) {
+        if (userService.findEmailOwner(email, null).isPresent()) {
             throw new BizException(ErrorCode.CONFLICT, "这个邮箱已注册，直接登录或找回密码");
         }
         if (request.nickname() != null && request.nickname().trim().length() > 32) {
@@ -140,6 +168,10 @@ public class AuthController {
         }
         emailCodes.verify(email, EmailCodeService.Purpose.REGISTER, request.code());
         User user = userService.registerByEmail(email, request.password(), request.nickname());
+        if (!limiter.perDay("signup-bonus:" + http.getRemoteAddr(), SIGNUP_BONUS_PER_IP_DAY)) {
+            credits.openWithoutSignupBonus(user.getId());
+            log.info("IP {} 今天注册的账号太多，新账号 {} 不送注册积分", http.getRemoteAddr(), user.getId());
+        }
         return ApiResponse.ok(signIn(user, request.device()));
     }
 
@@ -170,9 +202,9 @@ public class AuthController {
     public ApiResponse<UserView> bindEmail(@Valid @RequestBody BindEmailRequest request) {
         long me = StpUtil.getLoginIdAsLong();
         String email = UserService.checkEmail(request.email());
-        userService.findByEmail(email).filter(u -> u.getId() != me).ifPresent(u -> {
+        if (userService.findEmailOwner(email, me).isPresent()) {
             throw new BizException(ErrorCode.CONFLICT, "这个邮箱已被其他账号绑定");
-        });
+        }
         emailCodes.verify(email, EmailCodeService.Purpose.BIND, request.code());
         return ApiResponse.ok(UserView.of(userService.bindEmail(me, email)));
     }
@@ -210,7 +242,7 @@ public class AuthController {
         long userId = StpUtil.getLoginIdAsLong();
         User user = userService.get(userId);
         try {
-            loginGuard.guard("user-password", user.getUsername(), http.getRemoteAddr(), () -> {
+            loginGuard.guard("user-password", user.getUsername(), userId, http.getRemoteAddr(), () -> {
                 userService.changeOwnPassword(userId, request.oldPassword(), request.newPassword());
                 return true;
             });
@@ -227,9 +259,12 @@ public class AuthController {
         return ApiResponse.ok();
     }
 
-    /** GET /api/v1/auth/media-ticket：地图图片、PDF 下载链接用的短期票据（12 小时），代替把登录 token 放进链接。 */
+    /**
+     * GET /api/v1/auth/media-ticket：地图图片、PDF 下载链接用的短期票据（4 小时），代替把登录 token 放进链接。
+     * 改密码、重置密码、停用账号后之前的票据作废。
+     */
     @GetMapping("/media-ticket")
     public ApiResponse<MediaTicket.Issued> mediaTicket() {
-        return ApiResponse.ok(mediaTicket.issue(StpUtil.getLoginIdAsLong()));
+        return ApiResponse.ok(mediaAuth.issue(StpUtil.getLoginIdAsLong()));
     }
 }

@@ -13,6 +13,7 @@ import java.util.Queue;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 卡片中转：编排器每轮对话开一个通道，工具查到结构化结果时往当前会话的通道里发卡片（还有长任务的进度），编排器把它合进 SSE 流。
@@ -20,6 +21,11 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  */
 @Component
 public class CardHub {
+
+    /** 一轮回答里最多收几句补充（补充不扣积分，不能无限塞），再多的等这轮结束后正常发送 */
+    public static final int MAX_INTERJECTIONS = 3;
+    /** 一句补充最长多少字 */
+    public static final int MAX_INTERJECTION_LENGTH = 500;
 
     private final Map<String, Turn> turns = new ConcurrentHashMap<>();
 
@@ -29,6 +35,8 @@ public class CardHub {
         private final Sinks.Many<Object> sink = Sinks.many().unicast().onBackpressureBuffer();
         /** 回答过程中用户补充的话，等下一次工具调用结束时交给模型 */
         private final Queue<Interjection> inbox = new ConcurrentLinkedQueue<>();
+        /** 这一轮已经收了几句补充（取走了也算），收件箱因此最多 MAX_INTERJECTIONS 条 */
+        private final AtomicInteger interjected = new AtomicInteger();
 
         private Turn(String conversationId) {
             this.conversationId = conversationId;
@@ -64,13 +72,17 @@ public class CardHub {
     public record Interjection(String id, String text) {
     }
 
-    /** 回答过程中收到用户补充，放进这一轮的收件箱；这个会话没有正在进行的回答时返回 false，前端改成正常发送。 */
+    /**
+     * 回答过程中收到用户补充，放进这一轮的收件箱；这个会话没有正在进行的回答、或者这一轮已经收满 MAX_INTERJECTIONS 句时
+     * 返回 false，前端等这轮结束后改成正常发送。太长的截到 MAX_INTERJECTION_LENGTH 字。
+     */
     public boolean interject(String conversationId, String id, String text) {
         Turn turn = turns.get(conversationId);
-        if (turn == null) {
+        if (turn == null || text == null || turn.interjected.incrementAndGet() > MAX_INTERJECTIONS) {
             return false;
         }
-        turn.inbox.add(new Interjection(id, text));
+        String cut = text.length() > MAX_INTERJECTION_LENGTH ? text.substring(0, MAX_INTERJECTION_LENGTH) : text;
+        turn.inbox.add(new Interjection(id, cut));
         return true;
     }
 

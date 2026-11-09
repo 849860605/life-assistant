@@ -13,3 +13,6 @@ life-web/unpackage
 data/*
 !data/fonts
 *.log
+# 支付宝沙箱的本地配置（含私钥）也不进镜像
+.alipay-sandbox.json
+**/.alipay-sandbox.json

@@ -20,7 +20,9 @@
           <span v-if="!register.mailReady" class="warn">；发信邮箱还没配好（服务器 .env 的 LIFE_MAIL_*），现在收不到验证码</span>
         </div>
       </div>
-      <el-switch id="register-open" v-model="register.open" :loading="register.saving" :before-change="toggleRegister" />
+      <el-tooltip :disabled="canSuper" content="只有超级管理员能开关注册" placement="left">
+        <el-switch id="register-open" v-model="register.open" :loading="register.saving" :disabled="!canSuper" :before-change="toggleRegister" />
+      </el-tooltip>
     </div>
 
     <div class="card">
@@ -56,7 +58,7 @@
         <el-table-column label="操作" width="200" :fixed="narrow ? false : 'right'">
           <template #default="{ row }">
             <el-button link type="primary" @click.stop="openDetail(row)">详情</el-button>
-            <el-button link type="primary" @click.stop="openReset(row)">重置密码</el-button>
+            <el-button v-if="canSuper" link type="primary" @click.stop="openReset(row)">重置密码</el-button>
             <el-button link :type="row.status === 1 ? 'danger' : 'success'" @click.stop="toggle(row)">{{ row.status === 1 ? "停用" : "启用" }}</el-button>
           </template>
         </el-table-column>
@@ -128,7 +130,7 @@
               <span class="muted small">（余额 {{ credit.view.balance }}，今天赠送剩 {{ credit.view.dailyLeft }}）</span></span>
             <el-tag v-if="credit.view.member" size="small" type="warning">会员期内不扣</el-tag>
           </div>
-          <div class="grant">
+          <div v-if="canSuper" class="grant">
             <el-button v-for="d in [100, 500, 1000]" :key="d" size="small" @click="adjustCredit(d)">+{{ d }}</el-button>
             <el-button size="small" @click="adjustCredit(0)">自定义</el-button>
           </div>
@@ -149,7 +151,7 @@
             </span>
             <span class="muted small">今天对话 {{ member.todayUsed }} / {{ member.dailyLimit }}</span>
           </div>
-          <div class="grant">
+          <div v-if="canSuper" class="grant">
             <el-button v-for="d in [30, 90, 365]" :key="d" size="small" @click="grantMember(d)">+{{ d }} 天</el-button>
             <el-button size="small" @click="grantCustom">自定义</el-button>
           </div>
@@ -174,11 +176,12 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from "element-plus";
 import { Plus, Search } from "@element-plus/icons-vue";
 import { api, type MemberStatus, type UserCredits, type UserDetail, type UserRow } from "../api";
 import { fmtDate, fmtTime, fromNow, money, narrow, num, passwordRules, randomPassword, usernameRules } from "../utils";
+import { isSuper } from "../session";
 
 /** App 用户管理：注册开关、搜索分页、新建、详情（只有统计）、重置密码、启用停用 */
 const keyword = ref("");
@@ -188,6 +191,8 @@ const total = ref(0);
 const rows = ref<UserRow[]>([]);
 const loading = ref(false);
 const saving = ref(false);
+/** 重置密码、开关注册、加减积分、加会员天数只有超级管理员能做，普通管理员不显示这些按钮 */
+const canSuper = computed(() => isSuper());
 
 async function load() {
   loading.value = true;

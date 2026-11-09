@@ -713,8 +713,8 @@ async function interject() {
   messages.value.splice(at, 0, { key: ++seq, role: "user", text, cards: [], addState: "waiting", addId });
   scrollToBottom();
   try {
-    // 会话还没建好时先留着，这轮结束后正常发送
-    if (currentId.value) await api.interject(currentId.value, addId, text);
+    // 会话还没建好、或者超过 500 字（后端一句补充最多收 500 字）时先留着，这轮结束后正常发送
+    if (currentId.value && text.length <= 500) await api.interject(currentId.value, addId, text);
   } catch (e) {
     // 没交上去的同样留着，回答结束后正常发送
   }

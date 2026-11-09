@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.lifeassistant.common.error.BizException;
 import com.lifeassistant.common.error.ErrorCode;
+import com.lifeassistant.core.auth.TicketVersions;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -27,6 +28,9 @@ public class UserService {
 
     private final UserMapper userMapper;
     private final PasswordEncoder passwordEncoder;
+    private final TicketVersions ticketVersions;
+    /** 账号不存在时也比对一次这个哈希，让"账号不存在"和"密码错"耗时一样，不能靠响应快慢猜账号 */
+    private volatile String dummyHash;
 
     /** 注册新用户：用户名不能重复，昵称默认同用户名，时区默认 Asia/Shanghai。 */
     public User create(String username, String rawPassword, String nickname) {
@@ -46,13 +50,27 @@ public class UserService {
 
     /** 校验账号密码（账号可以是用户名或绑定的邮箱），失败统一报"用户名或密码错误"，不区分是哪一项错；密码正确但账号已禁用时报 403。 */
     public User authenticate(String username, String rawPassword) {
-        User user = findByLogin(username)
-                .filter(u -> passwordEncoder.matches(rawPassword, u.getPasswordHash()))
+        Optional<User> found = findByLogin(username);
+        if (found.isEmpty()) {
+            passwordEncoder.matches(rawPassword, dummyHash());
+            throw new BizException(ErrorCode.UNAUTHORIZED, "用户名或密码错误");
+        }
+        User user = found.filter(u -> passwordEncoder.matches(rawPassword, u.getPasswordHash()))
                 .orElseThrow(() -> new BizException(ErrorCode.UNAUTHORIZED, "用户名或密码错误"));
         if (user.getStatus() == null || user.getStatus() != 1) {
             throw new BizException(ErrorCode.FORBIDDEN, "账号已被禁用");
         }
         return user;
+    }
+
+    /** 假哈希（第一次用到时生成），和真实密码哈希同样的强度。 */
+    private String dummyHash() {
+        String hash = dummyHash;
+        if (hash == null) {
+            hash = passwordEncoder.encode("dummy-" + RANDOM.nextLong());
+            dummyHash = hash;
+        }
+        return hash;
     }
 
     /** 按 id 取用户，不存在报 404。 */
@@ -91,13 +109,53 @@ public class UserService {
     }
 
     /**
+     * 这个邮箱（或者它的别名，比如 a+1@x.com、gmail 加点的写法）已经被别的账号用了时返回那个账号。
+     * exceptUserId 是自己（绑定邮箱时排除自己），没有传 null。
+     */
+    public Optional<User> findEmailOwner(String email, Long exceptUserId) {
+        Optional<User> exact = findByEmail(email).filter(u -> !u.getId().equals(exceptUserId));
+        if (exact.isPresent()) {
+            return exact;
+        }
+        String canonical = canonicalEmail(email);
+        if (canonical.isEmpty()) {
+            return Optional.empty();
+        }
+        return userMapper.selectList(new LambdaQueryWrapper<User>().eq(User::getEmailCanonical, canonical).last("LIMIT 5"))
+                .stream().filter(u -> !u.getId().equals(exceptUserId)).findFirst();
+    }
+
+    /**
+     * 邮箱的归一写法：转小写，去掉 @ 前面 + 号及后面的部分（所有邮箱），gmail.com / googlemail.com 再去掉 @ 前面的点、
+     * 域名统一成 gmail.com。和 V9_12_0 迁移里的 SQL 规则一致。
+     */
+    public static String canonicalEmail(String email) {
+        String address = email == null ? "" : email.trim().toLowerCase(Locale.ROOT);
+        int at = address.lastIndexOf('@');
+        if (at <= 0) {
+            return address;
+        }
+        String local = address.substring(0, at);
+        String domain = address.substring(at + 1);
+        int plus = local.indexOf('+');
+        if (plus >= 0) {
+            local = local.substring(0, plus);
+        }
+        if (domain.equals("gmail.com") || domain.equals("googlemail.com")) {
+            local = local.replace(".", "");
+            domain = "gmail.com";
+        }
+        return local + "@" + domain;
+    }
+
+    /**
      * 邮箱注册：邮箱已验证过，用户名自动生成（u 加 8 位随机字母数字），登录用邮箱；昵称不填用邮箱 @ 前面那段。
-     * 邮箱已被占用报 CONFLICT。
+     * 邮箱或它的别名已被占用报 CONFLICT。
      */
     public User registerByEmail(String email, String rawPassword, String nickname) {
         String address = checkEmail(email);
         PasswordPolicy.check(rawPassword);
-        if (findByEmail(address).isPresent()) {
+        if (findEmailOwner(address, null).isPresent()) {
             throw new BizException(ErrorCode.CONFLICT, "这个邮箱已注册，直接登录或找回密码");
         }
         String name = blankToNull(nickname);
@@ -112,6 +170,7 @@ public class UserService {
         user.setTimezone("Asia/Shanghai");
         user.setStatus(1);
         user.setEmail(address);
+        user.setEmailCanonical(canonicalEmail(address));
         user.setEmailVerifiedAt(OffsetDateTime.now());
         user.setSource(SOURCE_EMAIL);
         try {
@@ -126,13 +185,13 @@ public class UserService {
     /** 给已有用户绑定（或换）邮箱，邮箱已验证过；被别的账号占用时报 CONFLICT。 */
     public User bindEmail(long userId, String email) {
         String address = checkEmail(email);
-        User owner = findByEmail(address).orElse(null);
-        if (owner != null && owner.getId() != userId) {
+        if (findEmailOwner(address, userId).isPresent()) {
             throw new BizException(ErrorCode.CONFLICT, "这个邮箱已被其他账号绑定");
         }
         try {
             userMapper.update(null, new LambdaUpdateWrapper<User>().eq(User::getId, userId)
                     .set(User::getEmail, address)
+                    .set(User::getEmailCanonical, canonicalEmail(address))
                     .set(User::getEmailVerifiedAt, OffsetDateTime.now())
                     .set(User::getUpdatedAt, OffsetDateTime.now()));
         } catch (DuplicateKeyException e) {
@@ -176,13 +235,14 @@ public class UserService {
         return create(name, rawPassword, blankToNull(nickname));
     }
 
-    /** 后台重置用户密码，按规则校验。 */
+    /** 重置用户密码（后台重置、找回密码、自己改密码都走这里），按规则校验；之前签的下载票据一起作废。 */
     public void resetPassword(long userId, String rawPassword) {
         get(userId);
         PasswordPolicy.check(rawPassword);
         userMapper.update(null, new LambdaUpdateWrapper<User>().eq(User::getId, userId)
                 .set(User::getPasswordHash, passwordEncoder.encode(rawPassword))
                 .set(User::getUpdatedAt, OffsetDateTime.now()));
+        ticketVersions.bump(userId);
     }
 
     /** 用户自己改密码：原密码不对报 401（由调用方计入错误次数），新密码按规则校验，不能和原密码一样。 */
@@ -197,13 +257,16 @@ public class UserService {
         resetPassword(userId, newPassword);
     }
 
-    /** 启用或停用用户；停用后登录会报"账号已被禁用"，已有的登录态由调用方踢掉。 */
+    /** 启用或停用用户；停用后登录会报"账号已被禁用"，下载票据作废，已有的登录态由调用方踢掉。 */
     public User setEnabled(long userId, boolean enabled) {
         User user = get(userId);
         user.setStatus(enabled ? 1 : 0);
         userMapper.update(null, new LambdaUpdateWrapper<User>().eq(User::getId, userId)
                 .set(User::getStatus, user.getStatus())
                 .set(User::getUpdatedAt, OffsetDateTime.now()));
+        if (!enabled) {
+            ticketVersions.bump(userId);
+        }
         return user;
     }
 

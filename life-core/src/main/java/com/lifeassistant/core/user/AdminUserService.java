@@ -23,6 +23,8 @@ public class AdminUserService {
 
     private final AdminUserMapper adminUserMapper;
     private final PasswordEncoder passwordEncoder;
+    /** 账号不存在时也比对一次这个哈希，让耗时和密码错时一样 */
+    private volatile String dummyHash;
 
     /** 启动时初始化首个管理员用：超级管理员，密码沿用环境变量里配的，不按规则校验。 */
     public AdminUser create(String username, String rawPassword) {
@@ -59,6 +61,9 @@ public class AdminUserService {
     public AdminUser authenticate(String username, String rawPassword) {
         AdminUser admin = adminUserMapper.selectOne(
                 new LambdaQueryWrapper<AdminUser>().eq(AdminUser::getUsername, username));
+        if (admin == null) {
+            passwordEncoder.matches(rawPassword, dummyHash());
+        }
         if (admin == null || !passwordEncoder.matches(rawPassword, admin.getPasswordHash())
                 || admin.getStatus() == null || admin.getStatus() != 1) {
             throw new BizException(ErrorCode.UNAUTHORIZED, "用户名或密码错误");
@@ -66,6 +71,16 @@ public class AdminUserService {
         adminUserMapper.update(null, new LambdaUpdateWrapper<AdminUser>().eq(AdminUser::getId, admin.getId())
                 .set(AdminUser::getLastLoginAt, OffsetDateTime.now()));
         return admin;
+    }
+
+    /** 假哈希（第一次用到时生成），和真实密码哈希同样的强度。 */
+    private String dummyHash() {
+        String hash = dummyHash;
+        if (hash == null) {
+            hash = passwordEncoder.encode("dummy-" + System.nanoTime());
+            dummyHash = hash;
+        }
+        return hash;
     }
 
     /** 按 id 取管理员，不存在报 404。 */

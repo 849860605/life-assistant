@@ -49,11 +49,14 @@ public class FileController {
         try (InputStream in = file.content()) {
             bytes = in.readAllBytes();
         }
-        boolean inline = file.mime().startsWith("image/") || file.mime().equals("application/pdf");
+        // SVG 里能带脚本，和其他文件一样只给下载
+        boolean inline = file.mime().startsWith("image/") && !file.mime().contains("svg") || file.mime().equals("application/pdf");
         ContentDisposition disposition = (inline ? ContentDisposition.inline() : ContentDisposition.attachment())
                 .filename(file.name(), StandardCharsets.UTF_8).build();
         return ResponseEntity.ok().contentType(MediaType.parseMediaType(file.mime()))
                 .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
+                // 不让浏览器按内容猜类型（上传的文件内容不可信，猜成网页就能执行脚本）
+                .header("X-Content-Type-Options", "nosniff")
                 .cacheControl(CacheControl.maxAge(Duration.ofDays(7)).cachePrivate()).body(bytes);
     }
 }

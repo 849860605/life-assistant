@@ -7,14 +7,19 @@ import com.alibaba.cloud.ai.graph.streaming.OutputType;
 import com.alibaba.cloud.ai.graph.streaming.StreamingOutput;
 import com.lifeassistant.common.auth.UserCtx;
 import com.lifeassistant.common.error.BizException;
+import com.lifeassistant.common.error.ErrorCode;
 import com.lifeassistant.core.card.Card;
 import com.lifeassistant.core.card.CardHub;
 import com.lifeassistant.core.card.Progress;
 import com.lifeassistant.core.conversation.Conversation;
 import com.lifeassistant.core.conversation.ConversationService;
+import com.lifeassistant.core.skill.GeneralSkill;
 import com.lifeassistant.core.skill.SkillRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -26,6 +31,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -41,6 +47,13 @@ public class ChatOrchestrator {
     private final SkillRegistry skillRegistry;
     private final CardHub cardHub;
     private final SuggestionService suggestionService;
+    private final ChatMemory chatMemory;
+
+    /**
+     * 一轮回答最长多久：规划完整行程（查价、排路线、写方案）一般两三分钟，慢的时候五六分钟；
+     * 超过就停下发 error，调用方据此退回积分。要比 nginx 的 proxy_read_timeout（600 秒）短，用户才能收到这条提示。
+     */
+    static final Duration TURN_TIMEOUT = Duration.ofMinutes(8);
 
     /**
      * 以会话 id 作为图的 thread 运行一轮，流式输出事件，正常结束时补一个 done；
@@ -104,11 +117,44 @@ public class ChatOrchestrator {
                             return chips.isEmpty() ? Flux.just(ChatEvent.done())
                                     : Flux.just(ChatEvent.suggestions(chips), ChatEvent.done());
                         }))
+                .transform(flux -> withDeadline(flux, TURN_TIMEOUT))
                 .onErrorResume(e -> {
                     log.error("对话 {} 出错", conversationId, e);
                     String message = e instanceof BizException biz ? biz.getMessage() : "这次回答出错了，请稍后再试";
                     return Flux.just(ChatEvent.error(message));
                 });
+    }
+
+    /**
+     * 不经过模型的一轮（比如单纯问积分时的模板回答）：和正常一轮一样把用户这句和回答存进会话记录、没有标题时用这句当标题，
+     * 再按 route → delta → done 发给前端。
+     */
+    public Flux<ChatEvent> quickReply(UserCtx ctx, String conversationId, String typed, String reply) {
+        Conversation conversation = conversationService.getOwned(ctx, conversationId);
+        String firstInput = conversation.getTitle() == null ? typed : null;
+        return Mono.fromRunnable(() -> {
+                    chatMemory.add(conversationId, List.of(new UserMessage(typed), new AssistantMessage(reply)));
+                    conversationService.touch(conversationId, null, firstInput);
+                })
+                .subscribeOn(Schedulers.boundedElastic())
+                .thenMany(Flux.just(ChatEvent.route(GeneralSkill.ID, skillRegistry.get(GeneralSkill.ID).name()),
+                        ChatEvent.delta(reply), ChatEvent.done()))
+                .onErrorResume(e -> {
+                    log.error("对话 {} 存模板回答出错", conversationId, e);
+                    return Flux.just(ChatEvent.error("这次回答出错了，请稍后再试"));
+                });
+    }
+
+    /**
+     * 给整轮加一个总时长上限：到点还没结束就取消上游（图和工具），再以"太久了"的业务异常结束，
+     * 由后面的 onErrorResume 转成 error 事件。Flux.timeout 管的是相邻两个事件的间隔，不是总时长，所以这里自己做。
+     */
+    static <T> Flux<T> withDeadline(Flux<T> flux, Duration limit) {
+        AtomicBoolean expired = new AtomicBoolean();
+        return flux.takeUntilOther(Mono.delay(limit).doOnNext(x -> expired.set(true)))
+                .concatWith(Mono.defer(() -> expired.get()
+                        ? Mono.error(new BizException(ErrorCode.EXTERNAL_SERVICE, "这次回答用的时间太长，先停下了，这条消息的积分已退回。可以把问题拆小一点再试"))
+                        : Mono.empty()));
     }
 
     /**
