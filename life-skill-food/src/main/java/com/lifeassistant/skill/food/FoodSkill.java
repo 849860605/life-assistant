@@ -1,6 +1,7 @@
 package com.lifeassistant.skill.food;
 
 import com.lifeassistant.core.food.FoodTools;
+import com.lifeassistant.core.mcp.McpResultCap;
 import com.lifeassistant.core.mcp.McpServerRegistry;
 import com.lifeassistant.core.schedule.ScheduleTools;
 import com.lifeassistant.core.skill.LifeSkill;
@@ -78,6 +79,6 @@ public class FoodSkill implements LifeSkill {
     /** 高德地图 MCP（路线和距离），没配置时为空。 */
     @Override
     public List<ToolCallback> toolCallbacks() {
-        return mcpServers.tools("amap");
+        return mcpServers.tools("amap").stream().map(McpResultCap::capped).toList();
     }
 }

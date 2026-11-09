@@ -1,6 +1,7 @@
 package com.lifeassistant.skill.travel;
 
 import com.lifeassistant.core.food.FoodTools;
+import com.lifeassistant.core.mcp.McpResultCap;
 import com.lifeassistant.core.mcp.McpServerRegistry;
 import com.lifeassistant.core.schedule.ScheduleTools;
 import com.lifeassistant.core.search.WebSearchTools;
@@ -263,37 +264,17 @@ public class TravelSkill implements LifeSkill {
                 .map(TravelSkill::capped).toList();
     }
 
-    /** MCP 返回给模型的内容最多多少字，太长的截断（控制 Token，也减少外部内容夹带的东西） */
-    static final int MAX_MCP_RESULT = 4000;
+    /** MCP 返回给模型的内容最多多少字，见 McpResultCap */
+    static final int MAX_MCP_RESULT = McpResultCap.MAX;
 
-    /** 包一层：工具定义和执行不变，返回内容超过 MAX_MCP_RESULT 时截断并注明。 */
+    /** 包一层：返回内容超长时截断，见 McpResultCap。 */
     static ToolCallback capped(ToolCallback delegate) {
-        return new ToolCallback() {
-            @Override
-            public org.springframework.ai.tool.definition.ToolDefinition getToolDefinition() {
-                return delegate.getToolDefinition();
-            }
-
-            @Override
-            public org.springframework.ai.tool.metadata.ToolMetadata getToolMetadata() {
-                return delegate.getToolMetadata();
-            }
-
-            @Override
-            public String call(String toolInput) {
-                return cut(delegate.call(toolInput));
-            }
-
-            @Override
-            public String call(String toolInput, org.springframework.ai.chat.model.ToolContext toolContext) {
-                return cut(delegate.call(toolInput, toolContext));
-            }
-        };
+        return McpResultCap.capped(delegate);
     }
 
     /** 超长的截断，后面注明被截断了。 */
     static String cut(String text) {
-        return text == null || text.length() <= MAX_MCP_RESULT ? text : text.substring(0, MAX_MCP_RESULT) + "…（内容太长，后面截掉了）";
+        return McpResultCap.cut(text);
     }
 
 }
