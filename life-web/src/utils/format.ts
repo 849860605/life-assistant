@@ -11,9 +11,18 @@ DOMPurify.addHook("afterSanitizeAttributes", (node) => {
   }
 });
 
+/**
+ * 回答里不显示图片、音视频，也不许带 style：网页里藏的指令可能让模型输出一张"图片"，
+ * 地址里拼上用户的记忆或日程，浏览器一显示就自动发给别人的服务器，用户什么都不用点。
+ */
+const SANITIZE = {
+  FORBID_TAGS: ["img", "picture", "source", "video", "audio", "track", "svg", "math", "iframe", "form", "input", "style", "link"],
+  FORBID_ATTR: ["style", "srcset", "background", "poster"],
+};
+
 /** Markdown 转成安全的 HTML：模型回答里可能带网页内容，必须过一遍 DOMPurify。 */
 export function renderMarkdown(text: string): string {
-  return DOMPurify.sanitize(marked.parse(text || "", { async: false }) as string);
+  return DOMPurify.sanitize(marked.parse(text || "", { async: false }) as string, SANITIZE);
 }
 
 const pad = (n: number) => String(n).padStart(2, "0");

@@ -21,6 +21,7 @@ RUN npm run build
 FROM ${MIRROR}library/nginx:1.27-alpine
 ENV TZ=Asia/Shanghai
 COPY deploy/nginx/app.conf /etc/nginx/snippets/app.conf
+COPY deploy/nginx/security-headers.conf /etc/nginx/snippets/security-headers.conf
 COPY deploy/nginx/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh && mkdir -p /var/www/certbot
 COPY --from=build /web/dist/build/h5 /usr/share/nginx/html
