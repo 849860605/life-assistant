@@ -16,13 +16,14 @@ import java.util.Optional;
 
 /**
  * 下载票据：地图图片、行程 PDF 这类用 &lt;image&gt; 或新标签页打开的地址带不了请求头，
- * 用它代替登录 token 放在链接里。只对这几个接口有效，12 小时过期，泄露了也拿不到账号的其他权限。
- * 格式 "用户id.过期秒.签名"，签名是 HMAC-SHA256，密钥由 LIFE_CRYPTO_KEY 派生；没配密钥时每次启动随机生成。
+ * 用它代替登录 token 放在链接里。只对这几个接口有效，4 小时过期，泄露了也拿不到账号的其他权限。
+ * 格式 "用户id.版本.过期秒.签名"，签名是 HMAC-SHA256，密钥由 LIFE_CRYPTO_KEY 派生；没配密钥时每次启动随机生成。
+ * 版本是签发时这个用户的票据版本（见 TicketVersions），改密码、重置密码、停用账号时版本加一，之前签的票据随之作废。
  */
 @Component
 public class MediaTicket {
 
-    public static final Duration TTL = Duration.ofHours(12);
+    public static final Duration TTL = Duration.ofHours(4);
 
     private final byte[] secret;
 
@@ -46,29 +47,34 @@ public class MediaTicket {
     public record Issued(String ticket, Instant expiresAt) {
     }
 
-    public Issued issue(long userId) {
+    /** 票据里带的身份：哪个用户、签发时的票据版本。 */
+    public record Claims(long userId, long version) {
+    }
+
+    /** 给用户签一张票据，version 是这个用户现在的票据版本。 */
+    public Issued issue(long userId, long version) {
         Instant expiresAt = Instant.now().plus(TTL);
-        String body = userId + "." + expiresAt.getEpochSecond();
+        String body = userId + "." + version + "." + expiresAt.getEpochSecond();
         return new Issued(body + "." + sign(body), expiresAt);
     }
 
-    /** 校验票据，有效时返回用户 id。 */
-    public Optional<Long> verify(String ticket) {
+    /** 校验签名和有效期，有效时返回票据里的用户和版本；版本和账号状态由调用方再查。 */
+    public Optional<Claims> verify(String ticket) {
         if (!StringUtils.hasText(ticket)) {
             return Optional.empty();
         }
         String[] parts = ticket.split("\\.");
-        if (parts.length != 3) {
+        if (parts.length != 4) {
             return Optional.empty();
         }
         try {
-            String body = parts[0] + "." + parts[1];
+            String body = parts[0] + "." + parts[1] + "." + parts[2];
             boolean signed = MessageDigest.isEqual(sign(body).getBytes(StandardCharsets.UTF_8),
-                    parts[2].getBytes(StandardCharsets.UTF_8));
-            if (!signed || Instant.now().getEpochSecond() > Long.parseLong(parts[1])) {
+                    parts[3].getBytes(StandardCharsets.UTF_8));
+            if (!signed || Instant.now().getEpochSecond() > Long.parseLong(parts[2])) {
                 return Optional.empty();
             }
-            return Optional.of(Long.parseLong(parts[0]));
+            return Optional.of(new Claims(Long.parseLong(parts[0]), Long.parseLong(parts[1])));
         } catch (NumberFormatException e) {
             return Optional.empty();
         }

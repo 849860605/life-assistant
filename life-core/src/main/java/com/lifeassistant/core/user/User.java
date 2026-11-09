@@ -24,6 +24,8 @@ public class User {
     /** 绑定的邮箱（小写），可以用来登录和找回密码 */
     private String email;
     private OffsetDateTime emailVerifiedAt;
+    /** 邮箱归一后的写法（去掉 +后缀、gmail 去点），只用来认出同一个邮箱的别名 */
+    private String emailCanonical;
     /** 账号怎么来的：ADMIN 后台建的，EMAIL 自己用邮箱注册的 */
     private String source;
     /** 自己选的对话模型（t_llm_model.id），空表示用默认 */

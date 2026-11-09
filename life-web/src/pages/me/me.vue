@@ -168,6 +168,7 @@ import UserAvatar from "../../components/UserAvatar.vue";
 import { looksLikeEmail, passwordProblem } from "../../utils/password";
 import type { Brief, BriefSettings, MemoryCategory, MemoryItem, TokenView, UserView } from "../../api/types";
 import { creditTotal, credits, refreshCredits } from "../../utils/credits";
+import { clearMediaTicket } from "../../utils/media";
 
 const CATEGORY: Record<MemoryCategory, string> = {
   PROFILE: "基本信息",
@@ -257,6 +258,8 @@ async function changePassword() {
   pw.saving = true;
   try {
     await api.changePassword(pw.old, pw.next);
+    // 改密码后之前的下载票据作废，下次用到时重新领
+    clearMediaTicket();
     closePassword();
     uni.showToast({ title: "密码已改好，其他设备上的登录已退出", icon: "none", duration: 2500 });
   } catch (e) {

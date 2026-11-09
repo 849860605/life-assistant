@@ -15,12 +15,15 @@ import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.EnumMap;
 import java.util.HexFormat;
+import java.util.Map;
 
 /**
  * 邮箱验证码：6 位数字，Redis 里只存哈希，10 分钟有效，一个验证码最多试 5 次，用过就作废。
- * 频控：同一邮箱 60 秒一次、每天 10 次；同一 IP 每天 30 次；全站每天上限（life.mail.daily-limit，默认 300，
- * QQ 邮箱每天能发的量有限）。按用途分开：注册、找回密码、绑定邮箱各用各的验证码。
+ * 频控：同一邮箱 60 秒一次、每天 10 次；同一 IP 每种用途每天 10 次；每种用途全站每天各有各的额度
+ * （注册默认 200、找回密码 60、绑定邮箱 40），刷注册验证码不会把找回密码的额度也用光；
+ * 另外全站合计不超过 life.mail.daily-limit（默认 300，QQ 邮箱每天能发的量有限）。按用途分开：注册、找回密码、绑定邮箱各用各的验证码。
  */
 @Service
 public class EmailCodeService {
@@ -42,20 +45,27 @@ public class EmailCodeService {
     static final Duration COOLDOWN = Duration.ofSeconds(COOLDOWN_SECONDS);
     static final int MAX_TRIES = 5;
     static final int MAX_PER_EMAIL_DAY = 10;
-    static final int MAX_PER_IP_DAY = 30;
+    /** 同一 IP 每种用途每天最多几次 */
+    static final int MAX_PER_IP_DAY = 10;
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
     private static final String PREFIX = "email-code:";
 
     private final StringRedisTemplate redis;
     private final EmailSender sender;
     private final int dailyLimit;
+    private final Map<Purpose, Integer> purposeLimits;
     private final SecureRandom random = new SecureRandom();
 
     public EmailCodeService(StringRedisTemplate redis, EmailSender sender,
-                            @Value("${life.mail.daily-limit:300}") int dailyLimit) {
+                            @Value("${life.mail.daily-limit:300}") int dailyLimit,
+                            @Value("${life.mail.register-daily-limit:200}") int registerLimit,
+                            @Value("${life.mail.reset-daily-limit:60}") int resetLimit,
+                            @Value("${life.mail.bind-daily-limit:40}") int bindLimit) {
         this.redis = redis;
         this.sender = sender;
         this.dailyLimit = dailyLimit;
+        this.purposeLimits = new EnumMap<>(Map.of(Purpose.REGISTER, registerLimit, Purpose.RESET, resetLimit,
+                Purpose.BIND, bindLimit));
     }
 
     /** 能不能发验证码（发信邮箱配好了没有）。 */
@@ -74,7 +84,8 @@ public class EmailCodeService {
         String day = LocalDate.now(ZONE).toString();
         String cool = PREFIX + "cool:" + purpose + ":" + email;
         String emailDay = PREFIX + "day:" + day + ":mail:" + email;
-        String ipDay = PREFIX + "day:" + day + ":ip:" + ip;
+        String ipDay = PREFIX + "day:" + day + ":ip:" + purpose + ":" + ip;
+        String purposeDay = PREFIX + "day:" + day + ":all:" + purpose;
         String allDay = PREFIX + "day:" + day + ":all";
         try {
             if (!Boolean.TRUE.equals(redis.opsForValue().setIfAbsent(cool, "1", COOLDOWN))) {
@@ -84,7 +95,8 @@ public class EmailCodeService {
             }
             String limited = count(emailDay) >= MAX_PER_EMAIL_DAY ? "这个邮箱今天收验证码的次数太多了，明天再试"
                     : count(ipDay) >= MAX_PER_IP_DAY ? "今天获取验证码的次数太多了，明天再试"
-                    : count(allDay) >= dailyLimit ? "今天的验证码发送量到上限了，明天再试" : null;
+                    : count(purposeDay) >= purposeLimits.get(purpose) || count(allDay) >= dailyLimit
+                    ? "今天的验证码发送量到上限了，明天再试" : null;
             if (limited != null) {
                 redis.delete(cool);
                 throw new BizException(ErrorCode.TOO_MANY_REQUESTS, limited);
@@ -100,6 +112,7 @@ public class EmailCodeService {
                     redis.delete(cool);
                     throw e;
                 }
+                increment(purposeDay);
                 increment(allDay);
             }
             increment(emailDay);

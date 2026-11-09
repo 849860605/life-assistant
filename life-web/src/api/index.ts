@@ -1,4 +1,5 @@
 import { request, upload } from "./http";
+import { solveChallenge } from "../utils/pow";
 import type {
   Brief,
   TodayAgenda,
@@ -24,9 +25,15 @@ export const api = {
     request<void>("POST", "/api/v1/auth/password", { oldPassword, newPassword }),
   /** 注册是否开放、能不能发邮件 */
   registerOptions: () => request<{ open: boolean; mailReady: boolean }>("GET", "/api/v1/auth/register-options"),
-  /** 给邮箱发 6 位验证码（10 分钟有效），cooldown 秒后才能再要 */
-  sendEmailCode: (email: string, purpose: EmailCodePurpose) =>
-    request<{ cooldown: number }>("POST", "/api/v1/auth/email-code", { email, purpose }),
+  /**
+   * 给邮箱发 6 位验证码（10 分钟有效），cooldown 秒后才能再要。
+   * 先领一道真人检查的题、在浏览器里算出答案（一般一两秒，按钮这时显示"发送中…"），再一起交上去
+   */
+  sendEmailCode: async (email: string, purpose: EmailCodePurpose) => {
+    const challenge = await request<{ token: string; difficulty: number }>("GET", "/api/v1/auth/challenge");
+    const nonce = await solveChallenge(challenge.token, challenge.difficulty);
+    return request<{ cooldown: number }>("POST", "/api/v1/auth/email-code", { email, purpose, challenge: challenge.token, nonce });
+  },
   /** 邮箱注册，成功直接登录 */
   register: (email: string, code: string, password: string, nickname: string) =>
     request<{ token: string; user: UserView }>("POST", "/api/v1/auth/register", { email, code, password, nickname, device: "web" }),

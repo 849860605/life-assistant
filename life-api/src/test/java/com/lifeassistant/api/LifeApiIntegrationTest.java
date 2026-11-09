@@ -12,6 +12,8 @@ import com.lifeassistant.core.orchestrator.ChatOrchestrator;
 import com.lifeassistant.core.orchestrator.RouterService;
 import com.lifeassistant.core.schedule.ScheduleService;
 import com.lifeassistant.core.orchestrator.SkillRunner;
+import com.lifeassistant.api.auth.MediaAuth;
+import com.lifeassistant.core.user.ProofOfWork;
 import com.lifeassistant.core.user.User;
 import com.lifeassistant.core.user.UserService;
 import com.lifeassistant.skill.travel.trip.TripService;
@@ -32,6 +34,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -69,7 +72,9 @@ import static org.mockito.Mockito.when;
         "life.bootstrap.username=alice",
         "life.bootstrap.password=alice-pass-123",
         "life.bootstrap.admin-username=admin",
-        "life.bootstrap.admin-password=admin-pass-123"
+        "life.bootstrap.admin-password=admin-pass-123",
+        // 真人检查的题目难度调低，测试里算得快
+        "life.auth.pow-difficulty=8"
 })
 class LifeApiIntegrationTest {
 
@@ -119,6 +124,10 @@ class LifeApiIntegrationTest {
     ChatQuota chatQuota;
     @Autowired
     CreditService creditService;
+    @Autowired
+    MediaAuth mediaAuth;
+    @Autowired
+    StringRedisTemplate redis;
 
     /** 默认的积分价格表（测试改完要还原） */
     static final Map<String, Object> DEFAULT_PLAN = Map.of(
@@ -180,6 +189,15 @@ class LifeApiIntegrationTest {
                 Map.of("username", "ops", "password", "ops-pass-1234", "role", "ADMIN")).getStatusCode()).isEqualTo(HttpStatus.OK);
         String ops = adminLogin("ops", "ops-pass-1234");
         assertThat(call(ops, HttpMethod.GET, "/admin/api/v1/admins", null).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        // 普通管理员不能重置用户密码、开关注册、加减积分、加会员天数
+        assertThat(call(ops, HttpMethod.POST, "/admin/api/v1/users/" + bobId + "/password",
+                Map.of("password", "carol-new-9999")).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(call(ops, HttpMethod.PUT, "/admin/api/v1/users/register", Map.of("open", false)).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(call(ops, HttpMethod.POST, "/admin/api/v1/credits/users/" + bobId + "/adjust",
+                Map.of("delta", 100, "note", "试试")).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(call(ops, HttpMethod.POST, "/admin/api/v1/pay/members/" + bobId + "/grant",
+                Map.of("days", 30)).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
 
         // 改自己密码要原密码；改完新密码能登录
         assertThat(call(ops, HttpMethod.POST, "/admin/api/v1/auth/password",
@@ -584,10 +602,11 @@ class LifeApiIntegrationTest {
 
         // 注册：要验证码，60 秒内不能再要
         String email = "Dave@Example.com";
-        assertThat(anon(HttpMethod.POST, "/api/v1/auth/email-code", Map.of("email", email, "purpose", "REGISTER"))
+        assertThat(anon(HttpMethod.POST, "/api/v1/auth/email-code", codeReq(email, "REGISTER"))
                 .getStatusCode()).isEqualTo(HttpStatus.OK);
-        ResponseEntity<String> again = anon(HttpMethod.POST, "/api/v1/auth/email-code", Map.of("email", email, "purpose", "REGISTER"));
-        assertThat(again.getStatusCode()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+        // TestRestTemplate 的 HTTP 客户端收到 429 会把同一个请求重发一次（题目已用过，会变成 400），这里用不重试的客户端
+        ResponseEntity<String> again = anonOnce(HttpMethod.POST, "/api/v1/auth/email-code", codeReq(email, "REGISTER"));
+        assertThat(again.getStatusCode()).as(again.getBody()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
         assertThat(again.getBody()).contains("秒后再试");
         String code = lastCode("dave@example.com");
 
@@ -611,15 +630,15 @@ class LifeApiIntegrationTest {
 
         // 用邮箱登录（不区分大小写）；邮箱已注册时不能再要注册验证码
         assertThat(loginAs("DAVE@example.com", "dave-pass-123")).isNotBlank();
-        assertThat(anon(HttpMethod.POST, "/api/v1/auth/email-code", Map.of("email", email, "purpose", "REGISTER"))
+        assertThat(anon(HttpMethod.POST, "/api/v1/auth/email-code", codeReq(email, "REGISTER"))
                 .getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
 
         // 找回密码：没注册的邮箱照样回成功但不发信
         int sent = sends("nobody@example.com");
-        assertThat(anon(HttpMethod.POST, "/api/v1/auth/email-code", Map.of("email", "nobody@example.com", "purpose", "RESET"))
+        assertThat(anon(HttpMethod.POST, "/api/v1/auth/email-code", codeReq("nobody@example.com", "RESET"))
                 .getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(sends("nobody@example.com")).isEqualTo(sent);
-        assertThat(anon(HttpMethod.POST, "/api/v1/auth/email-code", Map.of("email", email, "purpose", "RESET"))
+        assertThat(anon(HttpMethod.POST, "/api/v1/auth/email-code", codeReq(email, "RESET"))
                 .getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(body(anon(HttpMethod.POST, "/api/v1/auth/password/reset", Map.of("email", email,
                 "code", lastCode("dave@example.com"), "newPassword", "dave-new-456"))).path("code").asInt()).isZero();
@@ -628,7 +647,7 @@ class LifeApiIntegrationTest {
         assertThat(loginAs("dave@example.com", "dave-new-456")).isNotBlank();
 
         // 验证码最多试 5 次
-        assertThat(anon(HttpMethod.POST, "/api/v1/auth/email-code", Map.of("email", "erin@example.com", "purpose", "REGISTER"))
+        assertThat(anon(HttpMethod.POST, "/api/v1/auth/email-code", codeReq("erin@example.com", "REGISTER"))
                 .getStatusCode()).isEqualTo(HttpStatus.OK);
         String erinCode = lastCode("erin@example.com");
         String erinWrong = erinCode.equals("111111") ? "222222" : "111111";
@@ -640,15 +659,15 @@ class LifeApiIntegrationTest {
         assertThat(tooMany.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
 
         // 老用户绑定邮箱：别人的邮箱绑不了；绑好后能用邮箱登录
-        assertThat(call(token, HttpMethod.POST, "/api/v1/auth/email-code", Map.of("email", email, "purpose", "BIND"))
+        assertThat(call(token, HttpMethod.POST, "/api/v1/auth/email-code", codeReq(email, "BIND"))
                 .getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
-        assertThat(call(token, HttpMethod.POST, "/api/v1/auth/email-code", Map.of("email", "alice@example.com", "purpose", "BIND"))
+        assertThat(call(token, HttpMethod.POST, "/api/v1/auth/email-code", codeReq("alice@example.com", "BIND"))
                 .getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(body(call(token, HttpMethod.POST, "/api/v1/auth/email/bind", Map.of("email", "alice@example.com",
                 "code", lastCode("alice@example.com")))).path("data").path("email").asText()).isEqualTo("alice@example.com");
         assertThat(loginAs("alice@example.com", "alice-pass-123")).isNotBlank();
         // 没登录不能要绑定验证码
-        assertThat(anon(HttpMethod.POST, "/api/v1/auth/email-code", Map.of("email", "x@example.com", "purpose", "BIND"))
+        assertThat(anon(HttpMethod.POST, "/api/v1/auth/email-code", codeReq("x@example.com", "BIND"))
                 .getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
 
         // 后台关掉注册：要注册验证码报 403；用户列表能按邮箱搜到，来源是自己注册
@@ -656,12 +675,177 @@ class LifeApiIntegrationTest {
         assertThat(call(admin, HttpMethod.PUT, "/admin/api/v1/users/register", Map.of("open", false)).getStatusCode())
                 .isEqualTo(HttpStatus.OK);
         assertThat(body(anon(HttpMethod.GET, "/api/v1/auth/register-options", null)).path("data").path("open").asBoolean()).isFalse();
-        assertThat(anon(HttpMethod.POST, "/api/v1/auth/email-code", Map.of("email", "frank@example.com", "purpose", "REGISTER"))
+        assertThat(anon(HttpMethod.POST, "/api/v1/auth/email-code", codeReq("frank@example.com", "REGISTER"))
                 .getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
         call(admin, HttpMethod.PUT, "/admin/api/v1/users/register", Map.of("open", true));
         JsonNode found = body(call(admin, HttpMethod.GET, "/admin/api/v1/users?keyword=dave@example", null)).path("data").path("items");
         assertThat(found).hasSize(1);
         assertThat(found.get(0).path("source").asText()).isEqualTo("EMAIL");
+    }
+
+    @Test
+    void emailCodeNeedsSolvedChallengeAndAliasesCountAsRegistered() throws Exception {
+        when(emailSender.ready()).thenReturn(true);
+        // 没带题目、答案不对、同一道题用第二次都不行
+        ResponseEntity<String> noChallenge = anon(HttpMethod.POST, "/api/v1/auth/email-code",
+                Map.of("email", "hank@example.com", "purpose", "REGISTER"));
+        assertThat(noChallenge.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(noChallenge.getBody()).contains("请刷新页面后重试");
+        JsonNode challenge = body(anon(HttpMethod.GET, "/api/v1/auth/challenge", null)).path("data");
+        String challengeToken = challenge.path("token").asText();
+        String nonce = ProofOfWork.solve(challengeToken, challenge.path("difficulty").asInt());
+        assertThat(anon(HttpMethod.POST, "/api/v1/auth/email-code", Map.of("email", "hank@example.com", "purpose", "REGISTER",
+                "challenge", challengeToken, "nonce", nonce + "x")).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(anon(HttpMethod.POST, "/api/v1/auth/email-code", Map.of("email", "hank@example.com", "purpose", "REGISTER",
+                "challenge", challengeToken, "nonce", nonce)).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(anon(HttpMethod.POST, "/api/v1/auth/email-code", Map.of("email", "hank2@example.com", "purpose", "REGISTER",
+                "challenge", challengeToken, "nonce", nonce)).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+
+        // 同一个 IP 当天注册太多：照样注册成功，但不送注册积分
+        String day = java.time.LocalDate.now(java.time.ZoneId.of("Asia/Shanghai")).toString();
+        List<String> bonusKeys = List.of("limit:signup-bonus:127.0.0.1:d" + day, "limit:signup-bonus:0:0:0:0:0:0:0:1:d" + day);
+        bonusKeys.forEach(k -> redis.opsForValue().set(k, "3"));
+        try {
+            JsonNode hank = body(anon(HttpMethod.POST, "/api/v1/auth/register", Map.of("email", "hank@example.com",
+                    "code", lastCode("hank@example.com"), "password", "hank-pass-123"))).path("data");
+            long hankId = hank.path("user").path("id").asLong();
+            CreditService.View view = creditService.view(hankId);
+            assertThat(view.balance()).isZero();
+            assertThat(view.dailyLeft()).isEqualTo(10);
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM t_credit_ledger WHERE user_id = ? AND kind = 'SIGNUP'",
+                    Integer.class, hankId)).isZero();
+        } finally {
+            redis.delete(bonusKeys);
+        }
+
+        // 别名（+后缀、大小写）算同一个邮箱：要注册验证码、绑定都报已占用
+        assertThat(anon(HttpMethod.POST, "/api/v1/auth/email-code", codeReq("Hank+promo@Example.com", "REGISTER"))
+                .getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(call(token, HttpMethod.POST, "/api/v1/auth/email-code", codeReq("hank+x@example.com", "BIND"))
+                .getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        // 原邮箱照样能登录
+        assertThat(loginAs("hank@example.com", "hank-pass-123")).isNotBlank();
+    }
+
+    @Test
+    void accountQuestionsAreAnsweredFreeEvenWithNoCredits() throws Exception {
+        String admin = adminLogin("admin", "admin-pass-123");
+        long ginaId = body(call(admin, HttpMethod.POST, "/admin/api/v1/users",
+                Map.of("username", "gina", "password", "gina-pass-1234"))).path("data").path("id").asLong();
+        String gina = loginAs("gina", "gina-pass-1234");
+        // 把积分用光：余额扣到 0，今天送的 10 用两条对话用掉
+        creditService.view(ginaId);
+        creditService.adjustByAdmin(ginaId, -300, 1L, "测试");
+        creditService.spend(ginaId, CreditService.CHAT, "x1", false);
+        creditService.spend(ginaId, CreditService.CHAT, "x2", false);
+        Integer before = jdbc.queryForObject("SELECT count(*) FROM t_credit_ledger WHERE user_id = ?", Integer.class, ginaId);
+
+        // 别人的会话：先校验归属，403，不扣积分
+        String aliceConversation = post("/api/v1/conversations", Map.of()).path("data").path("id").asText();
+        assertThat(call(gina, HttpMethod.POST, "/api/v1/conversations/" + aliceConversation + "/messages",
+                Map.of("content", "你好")).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+
+        String conversationId = body(call(gina, HttpMethod.POST, "/api/v1/conversations", Map.of())).path("data").path("id").asText();
+        HttpHeaders sse = headers(gina);
+        sse.setAccept(List.of(MediaType.TEXT_EVENT_STREAM));
+        ResponseEntity<String> answer = rest.exchange("/api/v1/conversations/" + conversationId + "/messages",
+                HttpMethod.POST, new HttpEntity<>(Map.of("content", "我还有多少积分？"), sse), String.class);
+        assertThat(answer.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(answer.getBody()).contains("event:route").contains("event:delta").contains("可用 **0** 积分")
+                .contains("购买积分").contains("event:done").doesNotContain("event:error");
+
+        // 像正常一轮一样存进记录、起了标题；没扣积分
+        JsonNode messages = body(call(gina, HttpMethod.GET, "/api/v1/conversations/" + conversationId + "/messages", null)).path("data");
+        assertThat(messages.findValuesAsText("role")).containsExactly("USER", "ASSISTANT");
+        assertThat(messages.get(0).path("content").asText()).isEqualTo("我还有多少积分？");
+        assertThat(body(call(gina, HttpMethod.GET, "/api/v1/conversations", null)).path("data").findValuesAsText("title"))
+                .contains("我还有多少积分？");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM t_credit_ledger WHERE user_id = ?", Integer.class, ginaId))
+                .isEqualTo(before);
+
+        // 问积分还要办别的事、或者普通消息，照常要积分
+        assertThat(call(gina, HttpMethod.POST, "/api/v1/conversations/" + conversationId + "/messages",
+                Map.of("content", "我还有多少积分，帮我规划长沙三天")).getStatusCode()).isEqualTo(HttpStatus.PAYMENT_REQUIRED);
+        assertThat(call(gina, HttpMethod.POST, "/api/v1/conversations/" + conversationId + "/messages",
+                Map.of("content", "你好")).getStatusCode()).isEqualTo(HttpStatus.PAYMENT_REQUIRED);
+    }
+
+    @Test
+    void interjectionsAreBoundedAndSearchIsRateLimited() throws Exception {
+        String conversationId = post("/api/v1/conversations", Map.of()).path("data").path("id").asText();
+        // 没有正在进行的回答：不收；太长：400
+        assertThat(post("/api/v1/conversations/" + conversationId + "/interject", Map.of("id", "1", "content", "补充"))
+                .path("data").path("accepted").asBoolean()).isFalse();
+        assertThat(call(token, HttpMethod.POST, "/api/v1/conversations/" + conversationId + "/interject",
+                Map.of("id", "2", "content", "长".repeat(501))).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+
+        long aliceId = userService.findByUsername("alice").orElseThrow().getId();
+        String day = java.time.LocalDate.now(java.time.ZoneId.of("Asia/Shanghai")).toString();
+        // 途牛每人每天有次数，用完了 429（不会去查途牛）
+        String tuniuKey = "limit:tuniu:" + aliceId + ":d" + day;
+        redis.opsForValue().set(tuniuKey, "10");
+        try {
+            ResponseEntity<String> tuniu = call(token, HttpMethod.GET, "/api/v1/search/spots/tuniu-tickets?spot=大雁塔", null);
+            assertThat(tuniu.getStatusCode()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+            assertThat(tuniu.getBody()).contains("途牛");
+        } finally {
+            redis.delete(tuniuKey);
+        }
+        // 每分钟上限
+        long minute = System.currentTimeMillis() / 60_000;
+        List<String> minuteKeys = List.of("limit:search:" + aliceId + ":m" + minute, "limit:search:" + aliceId + ":m" + (minute + 1));
+        minuteKeys.forEach(k -> redis.opsForValue().set(k, "30"));
+        try {
+            assertThat(call(token, HttpMethod.GET, "/api/v1/weather/today?city=西安", null).getStatusCode())
+                    .isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+        } finally {
+            redis.delete(minuteKeys);
+        }
+    }
+
+    @Test
+    void mediaTicketDiesWithPasswordChangeAndDisable() {
+        User alice = userService.findByUsername("alice").orElseThrow();
+        if (userService.findByUsername("ivan").isEmpty()) {
+            userService.create("ivan", "ivan-pass-1234", "Ivan");
+        }
+        long ivanId = userService.findByUsername("ivan").orElseThrow().getId();
+        String ticket = mediaAuth.issue(ivanId).ticket();
+        assertThat(mediaAuth.verify(ticket)).contains(ivanId);
+        // 改密码后旧票据作废，新签的能用
+        userService.resetPassword(ivanId, "ivan-new-5678");
+        assertThat(mediaAuth.verify(ticket)).isEmpty();
+        String fresh = mediaAuth.issue(ivanId).ticket();
+        assertThat(mediaAuth.verify(fresh)).contains(ivanId);
+        // 停用后作废
+        userService.setEnabled(ivanId, false);
+        assertThat(mediaAuth.verify(fresh)).isEmpty();
+        assertThat(mediaAuth.verify(mediaAuth.issue(ivanId).ticket())).isEmpty();
+        // 别人的票据不受影响
+        assertThat(mediaAuth.verify(mediaAuth.issue(alice.getId()).ticket())).contains(alice.getId());
+    }
+
+    /** 要验证码的请求体：先领一道真人检查的题、算出答案。 */
+    private Map<String, String> codeReq(String email, String purpose) throws Exception {
+        JsonNode challenge = body(anon(HttpMethod.GET, "/api/v1/auth/challenge", null)).path("data");
+        String t = challenge.path("token").asText();
+        return Map.of("email", email, "purpose", purpose, "challenge", t,
+                "nonce", ProofOfWork.solve(t, challenge.path("difficulty").asInt()));
+    }
+
+    /** 同 anon，但只发一次（收到 429 不自动重试）。 */
+    private ResponseEntity<String> anonOnce(HttpMethod method, String path, Object body) {
+        org.springframework.web.client.RestTemplate once = new org.springframework.web.client.RestTemplate(
+                new org.springframework.http.client.SimpleClientHttpRequestFactory());
+        once.setErrorHandler(new org.springframework.web.client.ResponseErrorHandler() {
+            @Override
+            public boolean hasError(org.springframework.http.client.ClientHttpResponse response) {
+                return false;
+            }
+        });
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        return once.exchange(rest.getRootUri() + path, method, new HttpEntity<>(body, headers), String.class);
     }
 
     /** 不带登录态调接口（注册、要验证码这些公开接口）。 */

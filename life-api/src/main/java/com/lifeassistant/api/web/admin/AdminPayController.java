@@ -173,10 +173,10 @@ public class AdminPayController {
         return ApiResponse.ok(memberStatusOf(userId));
     }
 
-    /** POST /admin/api/v1/pay/members/{userId}/grant：给用户加（或扣）会员天数，比如送朋友、退款后扣回。 */
+    /** POST /admin/api/v1/pay/members/{userId}/grant：给用户加（或扣）会员天数，比如送朋友、退款后扣回；只有超级管理员能做。 */
     @PostMapping("/members/{userId}/grant")
     public ApiResponse<MemberStatus> grant(@PathVariable long userId, @RequestBody GrantRequest request) {
-        AdminUser me = adminContext.current();
+        AdminUser me = adminContext.requireSuper();
         if (request.days() == 0 || Math.abs(request.days()) > 3660) {
             throw new BizException(ErrorCode.BAD_REQUEST, "天数要在 -3660 到 3660 之间，不能是 0");
         }

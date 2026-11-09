@@ -20,7 +20,7 @@ import java.util.Map;
 
 /**
  * 管理后台的积分：价格表和赠送规则、积分包，本月卖出和各项用量，某个用户的积分和流水、加减积分。
- * 改价格只有超级管理员能做；加减积分要写原因。都记操作日志。
+ * 改价格、加减积分只有超级管理员能做；加减积分要写原因。都记操作日志。
  */
 @RestController
 @RequestMapping("/admin/api/v1/credits")
@@ -80,10 +80,10 @@ public class AdminCreditController {
         return ApiResponse.ok(new UserCredits(credits.view(userId), credits.ledger(userId, 100)));
     }
 
-    /** POST /admin/api/v1/credits/users/{userId}/adjust：给用户加减积分（送朋友、补偿、扣回），要写原因。 */
+    /** POST /admin/api/v1/credits/users/{userId}/adjust：给用户加减积分（送朋友、补偿、扣回），要写原因；只有超级管理员能做。 */
     @PostMapping("/users/{userId}/adjust")
     public ApiResponse<UserCredits> adjust(@PathVariable long userId, @RequestBody AdjustRequest request) {
-        AdminUser me = adminContext.current();
+        AdminUser me = adminContext.requireSuper();
         requireUser(userId);
         credits.adjustByAdmin(userId, request.delta(), me.getId(), request.note());
         adminContext.log(me.getId(), "ADJUST_CREDIT", "用户 " + userId + (request.delta() > 0 ? " +" : " ") + request.delta()

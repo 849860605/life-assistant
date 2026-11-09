@@ -57,10 +57,14 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(ApiResponse.fail(ErrorCode.BAD_REQUEST, message));
     }
 
-    /** 参数非法：返回 400，文案直接用异常 message。 */
+    /**
+     * 参数非法（包括数字解析失败这类库里抛的）：返回 400 和通用文案，细节只记日志，不把内部信息透给前端。
+     * 要给用户看具体原因的地方抛 BizException(BAD_REQUEST, 原因)。
+     */
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ApiResponse<Void>> handleIllegalArgument(IllegalArgumentException e) {
-        return ResponseEntity.badRequest().body(ApiResponse.fail(ErrorCode.BAD_REQUEST, e.getMessage()));
+        log.warn("请求参数不对：{}", e.getMessage());
+        return ResponseEntity.badRequest().body(ApiResponse.fail(ErrorCode.BAD_REQUEST, "请求参数不对"));
     }
 
     /** 缺参数、参数类型不对、请求体不是合法 JSON：返回 400，不当成服务器错误。 */

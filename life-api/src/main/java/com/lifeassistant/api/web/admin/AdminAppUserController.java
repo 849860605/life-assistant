@@ -24,7 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.time.OffsetDateTime;
 
 /**
- * App 用户管理（管理员都能用）：分页列表、新建、看概要、重置密码、启用停用。
+ * App 用户管理：分页列表、新建、看概要、启用停用（管理员都能用）；重置密码、开关注册只有超级管理员能做。
  * 只给计数和时间，不提供对话正文、行程内容（隐私）。重置密码和停用会让这个用户所有设备下线。
  */
 @RestController
@@ -73,10 +73,10 @@ public class AdminAppUserController {
         return ApiResponse.ok(new RegisterSetting(settings.registerOpen(), emailCodes.ready()));
     }
 
-    /** PUT /admin/api/v1/users/register：打开或关闭注册（任何管理员都能改），记操作日志。 */
+    /** PUT /admin/api/v1/users/register：打开或关闭注册（只有超级管理员能改），记操作日志。 */
     @PutMapping("/register")
     public ApiResponse<RegisterSetting> setRegister(@RequestBody RegisterRequest request) {
-        AdminUser me = adminContext.current();
+        AdminUser me = adminContext.requireSuper();
         settings.setRegisterOpen(request.open());
         adminContext.log(me.getId(), request.open() ? "OPEN_REGISTER" : "CLOSE_REGISTER", null);
         return ApiResponse.ok(new RegisterSetting(settings.registerOpen(), emailCodes.ready()));
@@ -108,10 +108,10 @@ public class AdminAppUserController {
         return ApiResponse.ok(detail(id));
     }
 
-    /** POST /admin/api/v1/users/{id}/password：重置用户密码，所有设备下线。 */
+    /** POST /admin/api/v1/users/{id}/password：重置用户密码（只有超级管理员能做），所有设备下线。 */
     @PostMapping("/{id}/password")
     public ApiResponse<Void> resetPassword(@PathVariable long id, @Valid @RequestBody PasswordRequest request) {
-        AdminUser me = adminContext.current();
+        AdminUser me = adminContext.requireSuper();
         User user = userService.get(id);
         userService.resetPassword(id, request.password());
         StpUtil.logout(id);

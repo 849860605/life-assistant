@@ -28,16 +28,26 @@ public class LoginGuard {
 
     /**
      * 包住一次登录：先检查是否被暂停，再执行 login；密码错（UNAUTHORIZED）时记一次失败，成功时清掉账号计数。
+     * 账号计数按输入的登录名算（用户名不区分大小写），用于只能用用户名登录的地方（管理端）。
      *
      * @param scope 区分用户端和管理端，如 "user"、"admin"
      */
     public <T> T guard(String scope, String username, String ip, Supplier<T> login) {
-        String account = key(scope, "acct", username.trim().toLowerCase(Locale.ROOT));
+        return guard(scope, username, null, ip, login);
+    }
+
+    /**
+     * 同上，但账号计数按查到的用户 id 算：用户名和邮箱都能登录同一个账号，按输入的字符串计数的话换着输就能绕过上限。
+     * userId 为 null（账号不存在）时按输入的登录名计数。
+     */
+    public <T> T guard(String scope, String login, Long userId, String ip, Supplier<T> action) {
+        String account = userId != null ? key(scope, "uid", String.valueOf(userId))
+                : key(scope, "acct", login.trim().toLowerCase(Locale.ROOT));
         String address = key(scope, "ip", ip);
         reject(account, MAX_PER_ACCOUNT, "这个账号密码错误次数太多");
         reject(address, MAX_PER_IP, "登录失败次数太多");
         try {
-            T result = login.get();
+            T result = action.get();
             safely(() -> redis.delete(account));
             return result;
         } catch (BizException e) {
